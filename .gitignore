@@ -1,0 +1,43 @@
+# ── 시크릿 (CLAUDE.md 3절 #1) ─────────────────────────
+# .env 계열은 전부 제외, 더미 값만 담은 .env.example만 커밋한다.
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.pfx
+
+# ── Python ──────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+htmlcov/
+dist/
+build/
+
+# ── Node / Next.js ─────────────────────────────────
+node_modules/
+.next/
+out/
+*.tsbuildinfo
+next-env.d.ts
+npm-debug.log*
+
+# ── 런타임 산출물 ───────────────────────────────────
+# 데이터 export(CSV 등)나 소명 첨부가 로컬에 떨어져도 커밋되지 않게
+*.csv
+uploads/
+*.log
+
+# ── 에디터 / OS ─────────────────────────────────────
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db

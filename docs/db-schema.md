@@ -1,0 +1,743 @@
+# DB 스키마 (Argus / 플랫폼)
+
+> 작성일: 2026-09-23 / **v0.2 (2026-09-23 개정 — 요구사항 전수 대조 후 6개 테이블·다수 컬럼 추가)**
+> 관련 문서: [[아키텍처_설계서.md]], [[API명세서_시스템간.md]], [[정책정의서.md]], [[액터별_플로우.md]], [[요구사항정의서.md]]
+> DBMS: PostgreSQL 16 (플랫폼 DB / Argus DB 별도 인스턴스)
+> 표기: **[S]** = Walking Skeleton에 필요한 테이블. 컬럼은 전체를 정의하되 Skeleton에서는 [S] 테이블만 생성한다.
+> **검증**: 이 문서의 전체 DDL은 PostgreSQL 16에 실제 적용해 생성 성공 및 제약조건 동작(8개 시나리오)을 확인했다. 결과는 7절.
+
+---
+
+## 0. v0.2 개정 내역
+
+요구사항정의서(PLT-01~17 / LOG-01~17)·정책정의서·액터별 플로우를 v0.1과 전수 대조해 아래를 보완했다.
+
+| # | 구분 | 내용 | 근거 |
+|---|---|---|---|
+| 1 | **신규 테이블** | `consent_item` / `member_consent` — 회원 동의 이력 | **PLT-01**. PIPA §22(동의를 받는 방법), §16①·§22③ **입증책임이 개인정보처리자에게 있음** → 동의 증적이 없으면 요구사항이 성립하지 않음 |
+| 2 | **신규 테이블** | `inspection_report` — 점검 보고서 이력 | **LOG-09**. §8② "사후조치절차 이행"의 증적 |
+| 3 | **신규 테이블** | `detection_rule_history` — 룰 변경 이력 | **LOG-13** |
+| 4 | **신규 테이블** | `notification` — 알림 발송·수신 이력 | **LOG-05·LOG-16**(이메일 발송 성공/실패 추적이 필요) |
+| 5 | **신규 테이블** | `retained_member_record` — 법정 보존 항목 분리보관 | **PIPA §21③**. v0.1에서 미결로 남겼던 항목 |
+| 6 | **신규 테이블** | 플랫폼 `destruction_history` — v0.1은 글로만 언급하고 DDL 누락 | 정책정의서 5-3 |
+| 7 | 컬럼 추가 | `detection_rule.access_path` (APP/DB/ALL) | 정책정의서 1-2가 **"적용 접근 경로"를 룰 스펙의 독립 필드**로 규정. v0.1은 조건식(JSON) 안에만 있었음 |
+| 8 | 컬럼 추가 | `detection.log_summary` (jsonb) | 파기와의 충돌 해소 — 아래 #11 |
+| 9 | 컬럼 추가 | `handler.terminated_at`, `operator.terminated_at` | "퇴직자 계정 접속" 룰은 **접속 시점의 재직상태**로 판정해야 함. v0.1은 현재 상태만 보유해 과거·지연 로그를 오판정 |
+| 10 | 컬럼 추가 | `operator.role` | **PLT-10**(관리자 메뉴 노출)·**PLT-14**(권한 차등) 구현 불가 상태였음 |
+| 11 | 설계 보완 | 파기 시 `access_log` 삭제 → `detection_log` CASCADE로 근거가 완전 소멸 → 탐지건이 공허해짐. **정책정의서 5-1 "탐지·소명 이력은 접속기록과 동일 이상 보관"과 모순** | 탐지건에 `log_summary` 스냅샷을 남겨 근거 요약이 파기 후에도 보존되게 함 (7절에서 동작 검증) |
+| 12 | 인덱스 추가 | `access_log.subject_ids` GIN, `(source_system_id, action, occurred_at)`, `detection_log(access_log_id)`, `detection_status_history(detection_id, created_at)`, `notification(recipient_id, …)` | **LOG-02**의 정보주체·수행업무 필터가 인덱스 없이 전체 스캔이었음 |
+| 13 | 제약 추가 | `LOGIN` 외 행위는 `subject_type` 필수 / 퇴직 시 `terminated_at` 필수 / 언마스킹 보고서는 사유 필수 | §2 3호(처리한 정보주체 필수 항목), §12① |
+| 14 | 정책 보완 제안 | 보고서 export 시 **기본 마스킹**, 언마스킹 export는 사유 필수 | 액터별_플로우 8절 마스킹 정책이 화면만 다루고 **보고서 파일은 다루지 않아 우회 경로가 됨** |
+
+---
+
+## 1. 개념 데이터 모델
+
+### 1-1. 엔티티
+
+| 시스템 | 엔티티 | 설명 | 근거 |
+|---|---|---|---|
+| Argus | `source_system` | 접속기록을 보내는 시스템. `PLATFORM`, `ARGUS`(자체 기록) | LOG-17, 2단계 확장 |
+| Argus | `handler` | 플랫폼에서 동기화된 개인정보취급자 | API ② |
+| Argus | `argus_user` | Argus 로그인 계정. 정보보호 담당자(A4) / 취급자(A5) | 액터별 플로우 1절 |
+| Argus | **`access_log`** | 원장. append-only + 해시체인 | §2 3호, §8①③ |
+| Argus | `detection_rule` / `detection_rule_history` | EVENT / AGGREGATE 룰과 변경 이력 | 정책정의서 1절, LOG-04·13 |
+| Argus | **`detection`** | 그룹핑 단위의 탐지 결과, 상태 7종 | 정책정의서 2·3절 |
+| Argus | `detection_log` | 탐지건의 하위 근거 로그 (N:M) | 정책정의서 2-2 |
+| Argus | `detection_status_history` | 모든 상태 전이의 감사 추적 | 점검 수행 증적 |
+| Argus | **`explanation`** / `explanation_attachment` | 차수별 소명과 근거자료 | LOG-06~08 |
+| Argus | `rule_exception` | 화이트리스트 (시스템 계정 포함) | LOG-12, 정책정의서 5-3 |
+| Argus | `notification` | 대시보드·이메일 알림 | LOG-05·16 |
+| Argus | `inspection_report` | 점검 보고서 생성 이력 | LOG-09, §8② |
+| Argus | `detection_batch_run` | 탐지 배치 실행 이력 + 커서 | F-04 |
+| Argus | `destruction_history` | 파기 증적 (개인정보 미포함) | 정책정의서 5-3 |
+| Argus | `setting` | 점검 주기 등 | §8② (설정값) |
+| 플랫폼 | `operator` / `operator_permission_history` | 관리자 UI 사용자, 동기화 원천, 권한 이력 | PLT-10·14 |
+| 플랫폼 | `member` | 고객 = 정보주체 | PLT-01~03 |
+| 플랫폼 | `consent_item` / `member_consent` | 동의 항목 정의와 동의·철회 이력 | **PLT-01** |
+| 플랫폼 | `payment_method` / `orders` / `product` / `inquiry` | 무대장치 업무 데이터 | PLT-04~06 |
+| 플랫폼 | **`outbox`** | Argus 전송 대기 버퍼 | 아키텍처 3-3 |
+| 플랫폼 | `retained_member_record` / `destruction_history` | 분리보관·파기 증적 | PIPA §21③, 정책정의서 5-3 |
+
+### 1-2. 관계
+
+```
+[Argus]
+ source_system  1 ──< handler,  1 ──< access_log
+ handler        1 ──o argus_user            (role=HANDLER일 때 1:1)
+ detection_rule 1 ──< detection,  1 ──< detection_rule_history
+ detection     >──< access_log              (detection_log로 N:M)
+ detection      1 ──< detection_status_history,  1 ──< explanation,  1 ──o< notification
+ explanation    1 ──< explanation_attachment
+ argus_user     1 ──< inspection_report
+
+[플랫폼]
+ member    1 ──< member_consent >── 1 consent_item
+ member    1 ──< payment_method,  1 ──< orders,  1 ──< inquiry
+ operator  1 ──< operator_permission_history
+ outbox / retained_member_record / destruction_history  (독립)
+
+[시스템 간]  플랫폼 operator.login_id ══(API ②)══> Argus handler.login_id
+            플랫폼 member.id        ══(API ①, 식별자만)══> Argus access_log.subject_ids
+```
+
+두 DB 사이에 **FK는 없다.** 연결은 문자열 키(`login_id`, 회원 내부 PK)뿐이며, Argus는 회원 원본 정보를 보유하지 않는다.
+
+---
+
+## 2. 설계 원칙
+
+| 원칙 | 내용 |
+|---|---|
+| 시각 | 모든 시각은 `timestamptz` |
+| 코드값 | PostgreSQL ENUM 대신 `varchar + CHECK` — 마이그레이션이 쉬움 |
+| 원문 보존 | 접속기록은 수신한 값을 그대로 저장. 표시용 가공(마스킹)은 조회 시점에 적용 |
+| 최소 보유 | Argus에는 회원의 **내부 PK만**. 이름·연락처 등은 저장하지 않음 |
+| 불변성 | `access_log`는 INSERT만 허용 (3-5절) |
+| 판단 근거 보존 | 탐지건에 **탐지 당시 룰 스냅샷**과 **하위 로그 요약**을 저장 — 룰이 바뀌거나 원본 로그가 파기돼도 "왜 탐지됐는지"가 남음 |
+| 감사 추적 | 탐지건 상태 변경은 전부 `detection_status_history`에 행으로 남김 |
+| 시점 판정 | 재직상태처럼 변하는 속성은 **행위 시점 기준**으로 판정할 수 있게 `terminated_at`을 둠 |
+
+### 2-1. 정보주체 식별값 표기 규칙 (문서 간 통일)
+
+v0.1까지 문서마다 표기가 달랐으므로 아래로 통일한다.
+
+| 계층 | 표기 | 예 |
+|---|---|---|
+| 플랫폼 DB | `member.id` (bigint) | `10293` |
+| 전송(API ①) · Argus 저장 | `subject_type` + `subject_ids` (문자열 배열) | `MEMBER` + `["10293"]` |
+| 화면·보고서 표시 | `{type 접두어}_{id}` | `member_10293` |
+| 마스킹 표시 (LOG-10) | 뒤 3자리 마스킹 | `member_10***` |
+
+---
+
+## 3. Argus DB
+
+### 3-1. 기준·계정
+
+```sql
+-- [S] 출처 시스템
+CREATE TABLE source_system (
+    id          smallserial PRIMARY KEY,
+    code        varchar(32)  NOT NULL UNIQUE,      -- 'PLATFORM', 'ARGUS'
+    name        varchar(100) NOT NULL,
+    created_at  timestamptz  NOT NULL DEFAULT now()
+);
+
+-- [S] 취급자 (API ②로 동기화)
+CREATE TABLE handler (
+    id                 bigserial PRIMARY KEY,
+    source_system_id   smallint     NOT NULL REFERENCES source_system(id),
+    login_id           varchar(64)  NOT NULL,
+    name               varchar(50)  NOT NULL,
+    team               varchar(50),
+    employment_status  varchar(16)  NOT NULL CHECK (employment_status IN ('ACTIVE','TERMINATED')),
+    terminated_at      timestamptz,                -- 퇴직 시점 (시점 기준 룰 판정용)
+    last_event_at      timestamptz  NOT NULL,      -- 순서 역전 방지 (API ② 3-1)
+    created_at         timestamptz  NOT NULL DEFAULT now(),
+    updated_at         timestamptz  NOT NULL DEFAULT now(),
+    UNIQUE (source_system_id, login_id),
+    CHECK (employment_status <> 'TERMINATED' OR terminated_at IS NOT NULL)
+);
+
+-- [S] Argus 사용자
+CREATE TABLE argus_user (
+    id                  bigserial PRIMARY KEY,
+    login_id            varchar(64)  NOT NULL UNIQUE,
+    password_hash       varchar(255) NOT NULL,     -- argon2id
+    role                varchar(16)  NOT NULL CHECK (role IN ('OFFICER','HANDLER')), -- A4 / A5
+    handler_id          bigint       REFERENCES handler(id),
+    status              varchar(16)  NOT NULL DEFAULT 'ACTIVE' CHECK (status IN ('ACTIVE','LOCKED','DISABLED')),
+    failed_login_count  int          NOT NULL DEFAULT 0,   -- 로그인 실패 제한 (Caddy rate limit 대체)
+    last_login_at       timestamptz,
+    created_at          timestamptz  NOT NULL DEFAULT now(),
+    CHECK (role <> 'HANDLER' OR handler_id IS NOT NULL)
+);
+```
+
+> **A5의 조회 범위**: 취급자(A5)는 **자신의 `handler_id`에 연결된 탐지건만** 볼 수 있다. DB 제약이 아니라 애플리케이션 계층에서 강제하며(모든 조회 쿼리에 actor 필터 주입), 이 규칙은 액터별_플로우 F-06 #2와 대응한다.
+
+### 3-2. 접속기록 원장
+
+```sql
+-- [S] 접속기록 (원장)
+CREATE TABLE access_log (
+    id                bigserial    PRIMARY KEY,
+    event_id          uuid         NOT NULL UNIQUE,              -- 멱등 키
+    source_system_id  smallint     NOT NULL REFERENCES source_system(id),
+    access_path       varchar(8)   NOT NULL CHECK (access_path IN ('APP','DB')),
+
+    -- §2 3호 필수 5항목
+    actor_login_id    varchar(64)  NOT NULL,                     -- 식별자
+    occurred_at       timestamptz  NOT NULL,                     -- 접속일시
+    client_ip         inet         NOT NULL,                     -- 접속지 정보
+    subject_type      varchar(16),                               -- 처리한 정보주체 정보
+    subject_ids       text[],                                    --   (내부 PK, 최대 1,000개)
+    subject_count     int          NOT NULL DEFAULT 0,           --   (건수)
+    subject_truncated boolean      NOT NULL DEFAULT false,
+    action            varchar(16)  NOT NULL,                     -- 수행업무
+
+    -- 확장 필드
+    data_category     varchar(32)  NOT NULL,
+    result            varchar(8)   NOT NULL CHECK (result IN ('SUCCESS','FAILURE')),
+    request_method    varchar(8),
+    request_path      varchar(255),
+    request_query_keys text[],
+    context           jsonb,                                     -- ticket_id, reason, target 등
+
+    -- 수신·무결성
+    received_at       timestamptz  NOT NULL DEFAULT now(),
+    prev_hash         char(64),
+    hash              char(64)     NOT NULL,
+
+    CHECK (action IN ('LOGIN','READ','CREATE','UPDATE','DELETE','DOWNLOAD','EXPORT','UNMASK')),
+    CHECK (data_category IN ('MEMBER_BASIC','PAYMENT','ORDER','INQUIRY','ACCESS_LOG','NONE')),
+    CHECK (action = 'LOGIN' OR subject_type IS NOT NULL)          -- §2 3호: 처리한 정보주체 정보 필수
+);
+
+CREATE INDEX ix_access_log_actor_time ON access_log (source_system_id, actor_login_id, occurred_at);
+CREATE INDEX ix_access_log_occurred   ON access_log (occurred_at);
+CREATE INDEX ix_access_log_filter     ON access_log (source_system_id, action, occurred_at);
+CREATE INDEX ix_access_log_subject    ON access_log USING gin (subject_ids);   -- LOG-02 정보주체 검색
+```
+
+- **Argus 자체 접속기록(LOG-17)**도 같은 테이블에 `source_system = ARGUS`로 저장한다. argus-api 미들웨어가 outbox 없이 동일한 append 함수로 직접 기록한다.
+- 취급자 매칭은 FK가 아니라 `(source_system_id, actor_login_id)` ↔ `handler(source_system_id, login_id)` 조인. 동기화 전에 도착한 로그도 원문 그대로 저장되고 나중에 자연히 매칭된다.
+- **Argus 자체 기록의 정보주체 처리 규칙** (신설): Argus에서 탐지건·로그를 조회하는 행위는 회원 PK를 눈으로 보는 행위이지만, 이때 `subject_ids`에 회원 PK를 **다시 적재하지 않고** `subject_count`만 기록한다. Argus 접속기록이 회원 식별자를 중복 축적하면 최소처리 원칙에 반하기 때문이다. 예외적으로 `UNMASK`는 어떤 대상을 열어봤는지가 감사 핵심이므로 `context.target`에 대상 탐지건 ID를 남긴다.
+- **정보주체 ID로 검색하는 행위**(LOG-02)도 식별값을 평문으로 다루는 행위이므로 `READ` + `request_query_keys`에 검색 조건 키를 기록한다. 검색어 값 자체는 기록하지 않는다.
+
+### 3-3. 탐지 룰
+
+```sql
+-- [S] 탐지 룰
+CREATE TABLE detection_rule (
+    id           bigserial    PRIMARY KEY,
+    name         varchar(100) NOT NULL,
+    description  text,                             -- 담당자가 남기는 룰 취지
+    rule_type    varchar(16)  NOT NULL CHECK (rule_type IN ('EVENT','AGGREGATE')),
+    access_path  varchar(8)   NOT NULL DEFAULT 'APP' CHECK (access_path IN ('APP','DB','ALL')),
+    severity     varchar(8)   NOT NULL CHECK (severity IN ('HIGH','MEDIUM','LOW')),
+    enabled      boolean      NOT NULL DEFAULT true,
+    condition    jsonb        NOT NULL,            -- 조건식 (3-6절)
+    aggregate    jsonb,                            -- AGGREGATE 전용 (3-6절)
+    group_by     varchar(32)  NOT NULL DEFAULT 'ACTOR_RULE_DATE',
+    version      int          NOT NULL DEFAULT 1,  -- 수정 시 +1
+    created_by   bigint       REFERENCES argus_user(id),
+    created_at   timestamptz  NOT NULL DEFAULT now(),
+    updated_at   timestamptz  NOT NULL DEFAULT now(),
+    CHECK ((rule_type = 'AGGREGATE') = (aggregate IS NOT NULL))
+);
+
+-- 룰 변경 이력 (LOG-13)
+CREATE TABLE detection_rule_history (
+    id           bigserial   PRIMARY KEY,
+    rule_id      bigint      NOT NULL REFERENCES detection_rule(id),
+    version      int         NOT NULL,
+    change_type  varchar(16) NOT NULL CHECK (change_type IN ('CREATE','UPDATE','ENABLE','DISABLE')),
+    snapshot     jsonb       NOT NULL,             -- 변경 후 룰 전체
+    changed_by   bigint      REFERENCES argus_user(id),
+    changed_at   timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX ix_rule_history ON detection_rule_history (rule_id, changed_at);
+```
+
+> `access_path`를 조건식이 아니라 **독립 컬럼**으로 둔 이유: 정책정의서 1-2가 이를 룰 스펙의 별도 필드로 규정하고, 두 경로는 정상 기준선이 반대여서 룰을 경로별로 분리 적용해야 한다. 컬럼으로 두면 배치가 로그를 경로별로 먼저 나눠 룰 평가 대상을 줄일 수 있다.
+
+### 3-4. 탐지건·소명·알림
+
+```sql
+-- [S] 탐지건
+CREATE TABLE detection (
+    id                 bigserial    PRIMARY KEY,
+    rule_id            bigint       NOT NULL REFERENCES detection_rule(id),
+    rule_version       int          NOT NULL,
+    rule_snapshot      jsonb        NOT NULL,     -- 탐지 당시 룰 전체 (판단 근거 보존)
+    source_system_id   smallint     NOT NULL REFERENCES source_system(id),
+    actor_login_id     varchar(64)  NOT NULL,
+    group_bucket       varchar(64)  NOT NULL,     -- EVENT: '2026-09-15' / AGGREGATE: 윈도우 시작 시각
+    severity           varchar(8)   NOT NULL,
+    status             varchar(16)  NOT NULL DEFAULT 'DETECTED'
+                       CHECK (status IN ('DETECTED','REQUESTED','SUBMITTED','APPROVED','REJECTED','DISMISSED','ESCALATED')),
+    round              int          NOT NULL DEFAULT 0,   -- 소명 요청 차수 (첫 요청 시 1)
+    log_count          int          NOT NULL DEFAULT 0,
+    aggregate_value    numeric,                   -- AGGREGATE 집계값 (예: 142건, 2.3배)
+    log_summary        jsonb,                     -- 하위 로그 요약 (파기 후에도 남는 근거)
+    first_occurred_at  timestamptz  NOT NULL,
+    last_occurred_at   timestamptz  NOT NULL,
+    detected_at        timestamptz  NOT NULL DEFAULT now(),
+    closed_at          timestamptz,               -- APPROVED / DISMISSED / ESCALATED 시각
+    close_reason       text                       -- DISMISS 사유 등
+);
+
+-- 같은 그룹의 "진행 중" 탐지건은 1개만 (정책 보완: 6절 #1)
+CREATE UNIQUE INDEX ux_detection_open_group
+    ON detection (rule_id, source_system_id, actor_login_id, group_bucket)
+    WHERE status IN ('DETECTED','REQUESTED','SUBMITTED','REJECTED');
+
+CREATE INDEX ix_detection_status ON detection (status, detected_at);
+CREATE INDEX ix_detection_actor  ON detection (source_system_id, actor_login_id);
+
+-- [S] 탐지건 하위 로그
+CREATE TABLE detection_log (
+    detection_id   bigint NOT NULL REFERENCES detection(id)  ON DELETE CASCADE,
+    access_log_id  bigint NOT NULL REFERENCES access_log(id) ON DELETE CASCADE,
+    PRIMARY KEY (detection_id, access_log_id)
+);
+CREATE INDEX ix_detection_log_log ON detection_log (access_log_id);   -- 역방향 조회
+
+-- [S] 상태 전이 이력 (감사 추적)
+CREATE TABLE detection_status_history (
+    id             bigserial   PRIMARY KEY,
+    detection_id   bigint      NOT NULL REFERENCES detection(id),
+    from_status    varchar(16),
+    to_status      varchar(16) NOT NULL,
+    round          int         NOT NULL,
+    actor_user_id  bigint      REFERENCES argus_user(id),   -- NULL = 시스템(탐지 배치)
+    comment        text,
+    created_at     timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX ix_detection_status_hist ON detection_status_history (detection_id, created_at);
+
+-- [S] 소명 (차수별 1행: 요청 시 생성 → 제출 시 채움 → 검토 시 채움)
+CREATE TABLE explanation (
+    id               bigserial   PRIMARY KEY,
+    detection_id     bigint      NOT NULL REFERENCES detection(id),
+    round            int         NOT NULL,
+    requested_by     bigint      NOT NULL REFERENCES argus_user(id),
+    requested_at     timestamptz NOT NULL DEFAULT now(),
+    request_message  text,
+    submitted_by     bigint      REFERENCES argus_user(id),
+    submitted_at     timestamptz,
+    content          text,
+    reviewed_by      bigint      REFERENCES argus_user(id),
+    reviewed_at      timestamptz,
+    review_result    varchar(16) CHECK (review_result IN ('APPROVED','REJECTED')),
+    review_comment   text,
+    UNIQUE (detection_id, round)
+);
+
+-- 소명 첨부 (Skeleton 제외)
+CREATE TABLE explanation_attachment (
+    id               bigserial    PRIMARY KEY,
+    explanation_id   bigint       NOT NULL REFERENCES explanation(id),
+    original_name    varchar(255) NOT NULL,
+    stored_path      varchar(500) NOT NULL,     -- 로컬 볼륨 경로 (1차)
+    content_type     varchar(100) NOT NULL,
+    size_bytes       bigint       NOT NULL,
+    sha256           char(64)     NOT NULL,     -- 제출 후 변조 여부 확인
+    uploaded_at      timestamptz  NOT NULL DEFAULT now()
+);
+
+-- 룰 예외 / 화이트리스트 (Skeleton 제외, 단 시스템 계정 예외는 시드로 투입)
+CREATE TABLE rule_exception (
+    id               bigserial   PRIMARY KEY,
+    rule_id          bigint      REFERENCES detection_rule(id),   -- NULL = 전체 룰
+    source_system_id smallint    REFERENCES source_system(id),
+    actor_login_id   varchar(64),
+    client_ip        cidr,
+    reason           text        NOT NULL,
+    valid_until      timestamptz,
+    created_by       bigint      REFERENCES argus_user(id),
+    created_at       timestamptz NOT NULL DEFAULT now(),
+    CHECK (actor_login_id IS NOT NULL OR client_ip IS NOT NULL)
+);
+
+-- 알림 (LOG-05 대시보드 / LOG-16 이메일)
+CREATE TABLE notification (
+    id            bigserial   PRIMARY KEY,
+    recipient_id  bigint      NOT NULL REFERENCES argus_user(id),
+    type          varchar(32) NOT NULL CHECK (type IN
+                  ('DETECTION_CREATED','EXPLANATION_REQUESTED','EXPLANATION_SUBMITTED','EXPLANATION_REJECTED')),
+    detection_id  bigint      REFERENCES detection(id),
+    channel       varchar(16) NOT NULL DEFAULT 'DASHBOARD' CHECK (channel IN ('DASHBOARD','EMAIL')),
+    status        varchar(16) NOT NULL DEFAULT 'PENDING' CHECK (status IN ('PENDING','SENT','FAILED','READ')),
+    sent_at       timestamptz,
+    read_at       timestamptz,
+    error         text,
+    created_at    timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX ix_notification_recipient ON notification (recipient_id, status, created_at DESC);
+
+-- 점검 보고서 이력 (LOG-09)
+CREATE TABLE inspection_report (
+    id              bigserial   PRIMARY KEY,
+    period_from     timestamptz NOT NULL,
+    period_to       timestamptz NOT NULL,
+    scope           jsonb,                     -- 출처 시스템·접근 경로·팀 등 필터
+    summary         jsonb       NOT NULL,      -- 상태별·룰별·팀별 집계 스냅샷
+    escalated_count int         NOT NULL DEFAULT 0,
+    unmasked        boolean     NOT NULL DEFAULT false,   -- 식별값 노출 여부
+    unmask_reason   text,
+    file_path       varchar(500),
+    generated_by    bigint      NOT NULL REFERENCES argus_user(id),
+    generated_at    timestamptz NOT NULL DEFAULT now(),
+    CHECK (period_from < period_to),
+    CHECK (NOT unmasked OR unmask_reason IS NOT NULL)     -- §12① 용도 특정
+);
+```
+
+- **`log_summary` 스냅샷 내용**: `{log_count, subject_count_sum, distinct_subject_count, actions[], data_categories[], first_occurred_at, last_occurred_at, ip_list[]}`. 접속기록이 보관기간 만료로 파기되면 `detection_log` 링크는 CASCADE로 사라지지만, 이 요약은 탐지건에 남아 점검 증적이 유지된다(7절에서 동작 검증).
+- **보고서 마스킹**(신규 정책 제안 — 6절 #3): 보고서는 기본적으로 마스킹된 식별값으로 생성한다. 식별값을 포함한 보고서를 만들려면 `unmasked=true` + 사유가 필요하고, 그 행위는 Argus 접속기록에 `EXPORT`(+`context.reason`)로 기록된다. 화면에서는 마스킹을 강제하면서 보고서 파일로는 그냥 빠져나가는 구멍을 막기 위함이다.
+- **LOG-15**(발생-제출 시간차) = `explanation.submitted_at - detection.first_occurred_at`, **LOG-14**(취급자별 소명 이력) = `detection` × `explanation`을 `actor_login_id`로 집계. 별도 테이블 불필요.
+
+### 3-5. 무결성 · 배치 · 파기
+
+```sql
+-- [S] 배치 실행 이력 + 커서
+CREATE TABLE detection_batch_run (
+    id                  bigserial   PRIMARY KEY,
+    started_at          timestamptz NOT NULL DEFAULT now(),
+    finished_at         timestamptz,
+    from_access_log_id  bigint      NOT NULL,   -- 이번 실행이 처리한 범위 (초과)
+    to_access_log_id    bigint      NOT NULL,   --                       (이하)
+    processed_count     int         NOT NULL DEFAULT 0,
+    detected_count      int         NOT NULL DEFAULT 0,
+    status              varchar(16) NOT NULL CHECK (status IN ('RUNNING','SUCCESS','FAILED')),
+    error               text
+);
+
+-- 파기 이력 (개인정보 미포함)
+CREATE TABLE destruction_history (
+    id                 bigserial    PRIMARY KEY,
+    executed_at        timestamptz  NOT NULL DEFAULT now(),
+    target_type        varchar(32)  NOT NULL,     -- 'ACCESS_LOG' 등
+    cutoff_at          timestamptz  NOT NULL,     -- 이 시각 이전 발생분 파기
+    deleted_count      int          NOT NULL,
+    legal_basis        varchar(100) NOT NULL,     -- '안전성 확보조치 기준 §8① (1년)'
+    chain_anchor_hash  char(64)                   -- 파기 후 남은 가장 오래된 레코드의 prev_hash
+);
+
+-- [S] 설정 (탐지 배치 주기 등)
+CREATE TABLE setting (
+    key         varchar(64) PRIMARY KEY,
+    value       jsonb       NOT NULL,
+    updated_by  bigint      REFERENCES argus_user(id),
+    updated_at  timestamptz NOT NULL DEFAULT now()
+);
+
+-- append-only 이중 장치
+CREATE FUNCTION forbid_access_log_update() RETURNS trigger LANGUAGE plpgsql AS $$
+BEGIN RAISE EXCEPTION 'access_log is append-only'; END $$;
+CREATE TRIGGER trg_access_log_no_update BEFORE UPDATE ON access_log
+    FOR EACH ROW EXECUTE FUNCTION forbid_access_log_update();
+
+CREATE ROLE argus_app;
+CREATE ROLE argus_purge;
+GRANT SELECT, INSERT ON access_log TO argus_app;    -- UPDATE·DELETE 미부여
+GRANT SELECT, DELETE ON access_log TO argus_purge;  -- 파기 배치 전용
+```
+
+**setting 시드값**
+
+| key | 기본값 | 근거 |
+|---|---|---|
+| `inspection_cycle` | `"1mo"` | 정책정의서 5-2 (§8② 자율, 기본 월 1회) |
+| `detection_interval_min` | `5` | LOG-03 준실시간 배치 |
+| `access_log_retention` | `"1y"` | §8① |
+| `subject_ids_limit` | `1000` | API ① 2-2 |
+
+**append-only 보장 (§8③)**
+
+| 장치 | 내용 |
+|---|---|
+| DB 권한 분리 | 앱 계정(`argus_app`)은 INSERT·SELECT만. DELETE는 파기 전용(`argus_purge`)만. UPDATE는 아무에게도 없음 |
+| 트리거 | `BEFORE UPDATE` 트리거로 예외 발생 (권한 설정 실수 대비 이중 장치) |
+| 해시체인 | `hash = SHA-256(prev_hash ‖ 정규화된 레코드 내용)`. 중간 레코드가 수정·삭제되면 이후 체인 검증이 깨짐 |
+| 순차 기록 | append를 **advisory lock으로 직렬화** → `id`가 커밋 순서대로 증가해, 탐지 배치의 `id` 커서가 누락 없이 안전해짐 |
+| 파기와의 공존 | 오래된 순서로 삭제하면 체인 시작점이 바뀜 → 파기 시 **남은 첫 레코드의 prev_hash를 `chain_anchor_hash`로 기록**하고, 검증은 그 앵커에서 시작 |
+| 시드 데이터 | baseline용 과거 접속기록(요구사항 4-3)도 **동일한 append 함수를 통해** 주입해 체인을 성립시킨다. DB에 직접 INSERT하지 않는다 |
+
+### 3-6. 룰 조건식 JSON 스펙
+
+**condition**
+
+```json
+{ "all": [ { "field": "...", "op": "...", "value": ... } ] }
+```
+
+`all`(AND) / `any`(OR), 1단계 중첩 허용. `access_path`는 조건식이 아니라 룰의 독립 컬럼이다.
+
+| field | 설명 | op |
+|---|---|---|
+| `action` | 수행업무 | `eq`, `in` |
+| `data_category` | 데이터 유형 | `eq`, `in` |
+| `result` | SUCCESS / FAILURE | `eq` |
+| `subject_count` | 처리 건수 | `gte`, `lte`, `eq` |
+| `occurred_time` | 발생 시각(HH:MM) | `between` (자정 넘김 허용: `["22:00","06:00"]`) |
+| `occurred_weekday` | 요일 | `in` (`["SAT","SUN"]`) |
+| `actor_team` | 소속 (handler 조인) | `eq`, `in` |
+| `actor_terminated_at_or_before` | **행위 시점에 이미 퇴직 상태였는지** (`handler.terminated_at <= occurred_at`) | `eq: true` |
+
+> **취급자 속성 조건의 미동기화 처리**: `actor_team` 등 handler 조인이 필요한 조건인데 해당 취급자가 아직 동기화되지 않았다면, 룰을 **조용히 통과시키지 않고 평가를 보류**한다(다음 배치에서 재평가). 판정 불가를 "이상 없음"으로 처리하면 탐지 누락이 된다.
+
+**aggregate** (AGGREGATE 전용)
+
+```json
+{ "window": "1h",  "measure": "LOG_COUNT", "compare": "ABSOLUTE", "threshold": 100 }
+{ "window": "1mo", "measure": "LOG_COUNT", "compare": "RATIO_TO_BASELINE",
+  "baseline": "PREV_MONTH_SAME_PERIOD", "threshold": 2.0 }
+```
+
+| 키 | 값 |
+|---|---|
+| `window` | `1h` / `1d` / `1mo` |
+| `measure` | `LOG_COUNT` / `SUBJECT_COUNT`(처리 건수 합) / `DISTINCT_SUBJECT`(고유 정보주체 수) |
+| `compare` | `ABSOLUTE` / `RATIO_TO_BASELINE` |
+| `baseline` | `PREV_MONTH_SAME_PERIOD` (추후 `PREV_3M_AVG` 등) |
+| `threshold` | 숫자 |
+
+**기본 룰 시드** (정책정의서 1-3절 → JSON, 모두 `access_path='APP'`)
+
+| 룰 | type | condition | aggregate | severity | Skeleton |
+|---|---|---|---|---|---|
+| 대량 다운로드 | EVENT | `action=DOWNLOAD ∧ subject_count≥50` | — | HIGH | **[S]** |
+| 야간 접속 | EVENT | `action∈{READ,DOWNLOAD} ∧ occurred_time between 22:00~06:00` | — | MEDIUM | |
+| 주말 접속 | EVENT | `occurred_weekday∈{SAT,SUN}` | — | LOW | |
+| 결제수단 조회 | EVENT | `data_category=PAYMENT ∧ action=READ` | — | HIGH | |
+| 대량 조회 | AGGREGATE | `action=READ` | 1h / LOG_COUNT / ABSOLUTE / 100 | HIGH | |
+| 전월 대비 급증 | AGGREGATE | `action=READ` | 1mo / LOG_COUNT / RATIO / 2.0 | MEDIUM | |
+| **퇴직자 계정 접속** | EVENT | `actor_terminated_at_or_before=true` | — | HIGH | (6절 #2 제안) |
+
+### 3-7. 탐지 배치의 데이터 흐름 (F-04)
+
+1. 직전 성공 실행의 `to_access_log_id` **초과** ~ 현재 최대 `id` **이하**를 이번 범위로 잡고 `detection_batch_run` 생성(RUNNING)
+2. 활성 룰 로드 → 룰의 `access_path`로 대상 로그를 먼저 필터 → `rule_exception` 해당 건 제외
+3. **EVENT**: 조건식 판정 → 그룹 키 `(rule, source, actor, occurred_at의 날짜)`로 **진행 중** 탐지건 조회 → 없으면 생성(`DETECTED`) + 상태 이력 + 알림, 있으면 하위 로그만 추가하고 `log_count`·`last_occurred_at`·`log_summary` 갱신
+4. **AGGREGATE**: 범위 내 로그가 속한 윈도우들을 다시 집계(늦게 도착한 로그 포함) → 임계치 초과 시 같은 방식으로 upsert
+5. SUCCESS 기록. 실패 시 FAILED로 남기고 다음 실행이 같은 범위부터 재처리(멱등: 하위 로그 PK 중복은 무시)
+
+> **커서는 `id` 기준이다.** `received_at`은 시계 오차·동시 삽입 때문에 누락 위험이 있어 커서로 쓰지 않고, 전송 지연 모니터링(`received_at - occurred_at`) 용도로만 쓴다. (API 명세 2-6과 일치)
+
+---
+
+## 4. 플랫폼 DB (무대장치 — 최소 구성)
+
+```sql
+-- [S] 취급자 계정 (관리자 UI 사용자, API ② 동기화 원천)
+CREATE TABLE operator (
+    id                 bigserial    PRIMARY KEY,
+    login_id           varchar(64)  NOT NULL UNIQUE,
+    password_hash      varchar(255) NOT NULL,
+    name               varchar(50)  NOT NULL,
+    team               varchar(50)  NOT NULL CHECK (team IN ('CS','MARKETING','OPS')),
+    role               varchar(16)  NOT NULL CHECK (role IN ('ADMIN','CS','MARKETING','OPS')),  -- PLT-10/14
+    employment_status  varchar(16)  NOT NULL DEFAULT 'ACTIVE' CHECK (employment_status IN ('ACTIVE','TERMINATED')),
+    terminated_at      timestamptz,
+    failed_login_count int          NOT NULL DEFAULT 0,
+    created_at         timestamptz  NOT NULL DEFAULT now(),
+    updated_at         timestamptz  NOT NULL DEFAULT now()
+);
+
+-- [S] 회원 (정보주체)
+CREATE TABLE member (
+    id             bigserial    PRIMARY KEY,           -- 접속기록에는 이 값만 전송
+    email          varchar(255) NOT NULL UNIQUE,
+    password_hash  varchar(255) NOT NULL,
+    name           varchar(50)  NOT NULL,
+    phone          varchar(20),
+    address        varchar(255),
+    status         varchar(16)  NOT NULL DEFAULT 'ACTIVE' CHECK (status IN ('ACTIVE','WITHDRAWN')),
+    created_at     timestamptz  NOT NULL DEFAULT now(),
+    withdrawn_at   timestamptz,
+    CHECK (status <> 'WITHDRAWN' OR withdrawn_at IS NOT NULL)
+);
+
+-- 동의 항목 정의 (PLT-01)
+CREATE TABLE consent_item (
+    code            varchar(32)  PRIMARY KEY,   -- 'TOS','PRIVACY_REQUIRED','MARKETING'
+    name            varchar(100) NOT NULL,
+    required        boolean      NOT NULL,      -- 필수/선택 (PIPA §22①·⑤)
+    version         varchar(16)  NOT NULL,
+    purpose         text         NOT NULL,      -- 수집·이용 목적 (§15②1호)
+    items           text         NOT NULL,      -- 수집 항목 (§15②2호)
+    retention       text         NOT NULL,      -- 보유·이용 기간 (§15②3호)
+    effective_from  timestamptz  NOT NULL
+);
+
+-- 동의·철회 이력 (append) — PLT-01
+CREATE TABLE member_consent (
+    id            bigserial   PRIMARY KEY,
+    member_id     bigint      NOT NULL REFERENCES member(id),
+    item_code     varchar(32) NOT NULL REFERENCES consent_item(code),
+    item_version  varchar(16) NOT NULL,          -- 동의 당시 약관 버전
+    agreed        boolean     NOT NULL,          -- true=동의, false=미동의/철회
+    acted_at      timestamptz NOT NULL DEFAULT now(),
+    client_ip     inet,                          -- 동의 증적의 신뢰성 확보용
+    method        varchar(16) NOT NULL DEFAULT 'WEB_FORM' CHECK (method IN ('WEB_FORM'))
+);
+CREATE INDEX ix_member_consent ON member_consent (member_id, item_code, acted_at DESC);
+
+-- [S] outbox (Argus 전송 대기)
+CREATE TABLE outbox (
+    id              bigserial    PRIMARY KEY,
+    event_id        uuid         NOT NULL UNIQUE,
+    topic           varchar(16)  NOT NULL CHECK (topic IN ('ACCESS_LOG','HANDLER')),
+    payload         jsonb        NOT NULL,             -- API 명세 2-1 / 3-1의 이벤트 1건
+    status          varchar(16)  NOT NULL DEFAULT 'PENDING' CHECK (status IN ('PENDING','DEAD')),
+    attempts        int          NOT NULL DEFAULT 0,
+    next_retry_at   timestamptz  NOT NULL DEFAULT now(),
+    last_error      text,
+    created_at      timestamptz  NOT NULL DEFAULT now()
+);
+CREATE INDEX ix_outbox_pending ON outbox (status, next_retry_at) WHERE status = 'PENDING';
+
+-- 결제수단 (§7②5·6호 암호화 대상)
+CREATE TABLE payment_method (
+    id                bigserial   PRIMARY KEY,
+    member_id         bigint      NOT NULL REFERENCES member(id),
+    method_type       varchar(16) NOT NULL CHECK (method_type IN ('CARD','ACCOUNT')),
+    card_number_enc   bytea,                   -- 앱 레벨 양방향 암호화 (키는 VM .env, DB와 분리)
+    card_last4        char(4),                 -- 화면 표시용
+    bank_account_enc  bytea,
+    bank_name         varchar(50),
+    created_at        timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE TABLE product (
+    id     bigserial    PRIMARY KEY,
+    name   varchar(100) NOT NULL,
+    price  int          NOT NULL
+);
+
+CREATE TABLE orders (
+    id          bigserial   PRIMARY KEY,
+    member_id   bigint      REFERENCES member(id) ON DELETE SET NULL,
+    product_id  bigint      NOT NULL REFERENCES product(id),
+    amount      int         NOT NULL,
+    status      varchar(16) NOT NULL,
+    ordered_at  timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE TABLE inquiry (
+    id           bigserial    PRIMARY KEY,
+    member_id    bigint       REFERENCES member(id) ON DELETE SET NULL,
+    title        varchar(200) NOT NULL,
+    body         text         NOT NULL,
+    status       varchar(16)  NOT NULL DEFAULT 'OPEN' CHECK (status IN ('OPEN','ANSWERED')),
+    answer       text,
+    answered_by  bigint       REFERENCES operator(id),
+    created_at   timestamptz  NOT NULL DEFAULT now(),
+    answered_at  timestamptz
+);
+
+-- 권한 부여·변경·말소 이력 (§5③, 3년) — Should
+CREATE TABLE operator_permission_history (
+    id           bigserial   PRIMARY KEY,
+    operator_id  bigint      NOT NULL REFERENCES operator(id),
+    change_type  varchar(16) NOT NULL CHECK (change_type IN ('GRANT','CHANGE','REVOKE')),
+    detail       jsonb       NOT NULL,
+    changed_by   bigint      REFERENCES operator(id),
+    changed_at   timestamptz NOT NULL DEFAULT now()
+);
+
+-- 법정 보존 항목 분리보관 (PIPA §21③)
+CREATE TABLE retained_member_record (
+    id                  bigserial    PRIMARY KEY,
+    original_member_id  bigint       NOT NULL,          -- FK 아님 (원본 member 행은 파기됨)
+    retain_reason       varchar(64)  NOT NULL,          -- 'PAYMENT_5Y','DISPUTE_3Y'
+    legal_basis         varchar(100) NOT NULL,          -- '전자상거래법 시행령 §6'
+    data                jsonb        NOT NULL,          -- 보존 목적에 필요한 최소 항목만
+    retain_until        timestamptz  NOT NULL,
+    created_at          timestamptz  NOT NULL DEFAULT now()
+);
+CREATE INDEX ix_retained_until ON retained_member_record (retain_until);
+
+-- 파기 이력
+CREATE TABLE destruction_history (
+    id             bigserial    PRIMARY KEY,
+    executed_at    timestamptz  NOT NULL DEFAULT now(),
+    target_type    varchar(32)  NOT NULL,     -- 'MEMBER','ACCESS_LOG_OUTBOX' 등
+    cutoff_at      timestamptz  NOT NULL,
+    deleted_count  int          NOT NULL,
+    legal_basis    varchar(100) NOT NULL
+);
+```
+
+### 4-1. 회원 탈퇴 시 파기·분리보관 절차 (v0.1 미결 해소)
+
+1. 탈퇴 요청 → `member.status='WITHDRAWN'`, `withdrawn_at` 기록
+2. 파기 배치가 탈퇴 회원을 집어 **법정 보존 대상 항목만** `retained_member_record`로 옮긴다
+   - 대금결제·재화공급 기록 5년, 소비자 불만·분쟁처리 기록 3년 (전자상거래법 시행령 §6)
+   - `data`에는 보존 목적에 **필요한 최소 항목만** 담는다 (주문번호·금액·일시·연락처 등). 비밀번호·주소 전체는 담지 않는다
+3. `member` 행과 `payment_method`를 **실제 삭제**(논리삭제 아님). `orders`·`inquiry`의 `member_id`는 `SET NULL`로 끊어져 개인과 연결되지 않는 통계 데이터가 된다
+4. `destruction_history`에 파기 이력 기록 (개인정보 자체는 미기록)
+5. `retain_until` 경과 시 `retained_member_record`도 파기
+
+> **분리보관의 의미**: 같은 DB의 별도 테이블로 옮기고 접근 권한을 달리 부여하는 것으로 §21③의 "다른 개인정보와 분리하여 저장·관리"를 이행한다. 물리적 DB 분리까지는 규모상 과도하다고 판단했다.
+> **동의 이력**: `member_consent`는 회원 파기 시 같이 삭제한다. 동의 증적의 보관 필요성과 §21① 파기 의무가 충돌하는데, 정보주체가 탈퇴하면 동의 자체가 실효되므로 파기를 우선한다. (동의 기록의 법정 보관기간을 정한 규정은 확인하지 못했다 — 실무에서는 분쟁 대응 목적으로 일정 기간 남기는 경우가 있어, 운영 정책 판단 사항으로 남긴다.)
+
+---
+
+## 5. 요구사항 ↔ 스키마 대조표
+
+| 요구사항 | 대응 |
+|---|---|
+| PLT-01 회원가입·동의 | `member`, **`consent_item`·`member_consent`** |
+| PLT-02 로그인 | `member`, `operator.failed_login_count` |
+| PLT-03 마이페이지·탈퇴 | `member.status/withdrawn_at`, 4-1절 절차 |
+| PLT-04·05 주문·결제 | `orders`, `product`, `payment_method`(암호화 컬럼) |
+| PLT-06·17 1:1 문의 | `inquiry` |
+| PLT-10 관리자 진입 | **`operator.role`** |
+| PLT-11~13·16 조회·수정·다운로드 | 로깅 대상 (스키마 아님) |
+| PLT-14 권한 관리 | `operator.role`, `operator_permission_history` |
+| PLT-15 접속기록 생성·전송 | `outbox` |
+| LOG-01 수집·저장 | `access_log` |
+| LOG-02 조회·검색 | `access_log` + **GIN·복합 인덱스** |
+| LOG-03 탐지 | `detection_rule`, `detection`, `detection_batch_run` |
+| LOG-04 룰 빌더 | `detection_rule.condition/aggregate` |
+| LOG-05 알림센터 | `detection`, **`notification`** |
+| LOG-06~08 소명 | `explanation`, `explanation_attachment`, `detection_status_history` |
+| LOG-09 보고서 | **`inspection_report`** |
+| LOG-10 마스킹/해제 | `access_log.action='UNMASK'` + `context.reason/target`, 2-1절 표기 규칙 |
+| LOG-11 심각도 | `detection_rule.severity`, `detection.severity` |
+| LOG-12 화이트리스트 | `rule_exception` |
+| LOG-13 룰 변경 이력 | **`detection_rule_history`** |
+| LOG-14 소명 이력 누적 | 쿼리 집계 |
+| LOG-15 시간차 | 계산 |
+| LOG-16 이메일 알림 | **`notification.channel='EMAIL'`** |
+| LOG-17 Argus 자체 기록 | `access_log` (`source_system='ARGUS'`) |
+| 2단계 DB 직접 접근 | `access_path='DB'` + `context`에 쿼리문·결과 건수 |
+
+---
+
+## 6. 정책정의서 반영 사항
+
+| # | 발견 | 제안 | 상태 |
+|---|---|---|---|
+| 1 | 정책정의서 2-2는 같은 `(취급자, 룰, 날짜)` 탐지건이 "있으면 하위 로그만 추가"라고 정의. 그런데 그 건이 **이미 승인·종결**된 뒤 같은 날 같은 행위가 또 발생하면 새 행위가 종결된 건에 붙어 **아무도 보지 않게 됨** | **진행 중(DETECTED·REQUESTED·SUBMITTED·REJECTED) 건에만 추가**하고, 종결됐으면 새 탐지건 생성 | 정책정의서 2-3절 반영, DB 부분 유니크 인덱스, 7절 검증 완료 |
+| 2 | 정책정의서 4-2는 재직상태를 "퇴직자 계정 접속 탐지용"으로 유지한다고 하면서 기본 룰 목록(1-3)에는 없음 | 기본 룰에 **"퇴직자 계정 접속"(EVENT, HIGH)** 추가. 판정은 `handler.terminated_at <= occurred_at`(행위 시점 기준) | 정책정의서 1-3절 반영, 스키마·룰 시드 반영 |
+| 3 | 액터별_플로우 8절 마스킹 정책이 **화면만** 다루고 보고서 파일은 다루지 않아, export가 마스킹 우회 경로가 됨 | 보고서 기본 마스킹, 언마스킹 export는 **사유 필수 + `EXPORT` 기록** | 정책정의서 6-1절 반영, `inspection_report` CHECK |
+| 4 | 탐지 후 룰이 수정되면 과거 탐지건의 판단 근거가 흐려짐 | 탐지건에 룰 스냅샷 저장 | 반영 완료 |
+| 5 | "탐지·소명 이력은 접속기록과 동일 이상 보관"(5-1)인데 근거 로그는 1년 후 파기되어 탐지건이 공허해짐 | 탐지건에 `log_summary` 스냅샷 | 정책정의서 5-1 반영 + 7절 검증 완료 |
+
+---
+
+## 7. 검증 결과 (PostgreSQL 16, 2026-09-23)
+
+이 문서의 전체 DDL을 실제 PostgreSQL 16 인스턴스에 적용했다. Argus 17개 / 플랫폼 12개 테이블이 모두 생성되고, 아래 시나리오가 의도대로 동작했다.
+
+| # | 시나리오 | 결과 |
+|---|---|---|
+| 1 | 같은 그룹에 진행 중 탐지건 중복 생성 | 차단 ✅ |
+| 2 | 같은 탐지건·같은 차수 소명 중복 생성 | 차단 ✅ |
+| 3 | 종결(APPROVED) 후 같은 그룹 새 탐지건 생성 | 허용 ✅ |
+| 4 | `access_log` UPDATE 시도 | 트리거 차단 ✅ |
+| 5 | AGGREGATE 룰을 집계 설정 없이 생성 | 차단 ✅ |
+| 6 | `LOGIN` 외 행위를 `subject_type` 없이 기록 | 차단 ✅ |
+| 7 | 퇴직 상태로 변경하며 `terminated_at` 누락 | 차단 ✅ |
+| 8 | 언마스킹 보고서를 사유 없이 생성 | 차단 ✅ |
+| 9 | 정보주체 ID 배열 검색 (`subject_ids @> ARRAY['10293']`) | 정상 조회 ✅ |
+| 10 | 파기 시뮬레이션 — `access_log` 삭제 후 탐지건 | `detection_log` 링크는 0으로 사라지고 `log_summary`(subject_count_sum=120)는 보존 ✅ |
+
+또한 소명 전체 사이클(요청 → 제출 → 반려 → 재요청 round+1 → 승인)을 실제 INSERT/UPDATE로 수행해 상태 전이와 제약이 충돌하지 않음을 확인했다.
+
+---
+
+## 8. 미결 / 구현 시 확정
+
+- [x] 회원 탈퇴 시 법정 보존 항목 분리보관 구조 → 4-1절 (v0.2)
+- [ ] 해시체인 정규화(canonical) 규칙 세부 — 필드 순서·시각 표기·NULL 처리. 구현 시 확정하고 검증 스크립트와 함께 문서화
+- [x] Argus 비밀번호 해시 → argon2id
+- [x] 알림 테이블 필요 여부 → `notification` 추가 (이메일 발송 성공/실패 추적 때문에 필요)
+- [ ] 동의 기록의 탈퇴 후 보관 여부 — 4-1절 각주 (운영 정책 판단)
+- [ ] 첨부파일 파기: 소명 이력 파기 시 볼륨의 실제 파일도 함께 삭제하는 절차 (구현 시)
