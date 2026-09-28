@@ -1,0 +1,60 @@
+# Argus 로컬 개발 구성 (Walking Skeleton)
+# 레포 루트에서 실행: docker compose up -d   (.env의 COMPOSE_FILE이 이 파일을 가리킨다)
+#
+# M0: DB 2개만. 앱 컨테이너(platform-api, platform-relay, argus-api, argus-worker, *-web)는
+# 각 마일스톤에서 추가한다. Caddy·backup은 첫 배포 때 추가 (architecture 7-2).
+
+name: argus
+
+services:
+  # ── 플랫폼 DB: 회원·취급자·outbox ────────────────────────
+  platform-db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${PLATFORM_DB_NAME:?set PLATFORM_DB_NAME in .env}
+      POSTGRES_USER: ${PLATFORM_DB_USER:?set PLATFORM_DB_USER in .env}
+      POSTGRES_PASSWORD: ${PLATFORM_DB_PASSWORD:?set PLATFORM_DB_PASSWORD in .env}
+    volumes:
+      - platform-db-data:/var/lib/postgresql/data
+    ports:
+      # 호스트 루프백에만 노출 — 외부 네트워크에서 DB 접근 불가
+      - "127.0.0.1:${PLATFORM_DB_PORT:-15432}:5432"
+    networks:
+      - platform-net
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  # ── Argus DB: 접속기록 원장 (§8③ append-only + 해시체인은 M1) ──
+  argus-db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${ARGUS_DB_NAME:?set ARGUS_DB_NAME in .env}
+      POSTGRES_USER: ${ARGUS_DB_USER:?set ARGUS_DB_USER in .env}
+      POSTGRES_PASSWORD: ${ARGUS_DB_PASSWORD:?set ARGUS_DB_PASSWORD in .env}
+    volumes:
+      - argus-db-data:/var/lib/postgresql/data
+    ports:
+      - "127.0.0.1:${ARGUS_DB_PORT:-15433}:5432"
+    networks:
+      - argus-net
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+# 두 시스템은 네트워크도 분리한다. 플랫폼 쪽 컨테이너는 argus-db에 닿을 수 없고,
+# 연결은 수집 API·취급자 동기화 API뿐이다 (architecture 2절).
+# platform-relay만 두 네트워크에 붙어 argus-api를 호출하게 된다 (M2).
+networks:
+  platform-net:
+  argus-net:
+
+volumes:
+  platform-db-data:
+  argus-db-data:

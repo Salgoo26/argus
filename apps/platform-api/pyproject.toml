@@ -1,0 +1,37 @@
+[project]
+name = "platform-api"
+version = "0.0.0"
+description = "플랫폼(감시 대상 커머스) — 업무 API + 접속기록 Agent + outbox relay"
+requires-python = ">=3.12,<3.13"
+# 런타임 의존성(FastAPI, SQLAlchemy, Alembic 등)은 M2에서 추가한다.
+dependencies = []
+
+[project.optional-dependencies]
+dev = [
+    "pytest==9.1.1",
+    "ruff==0.16.9",
+    "psycopg[binary]==3.3.6",
+]
+
+[build-system]
+requires = ["setuptools>=75"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["app*"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+# E/W/F: 기본, I: import 정렬, B: 흔한 버그 패턴, UP: 최신 문법, S: 보안(bandit 규칙)
+select = ["E", "W", "F", "I", "B", "UP", "S"]
+
+[tool.ruff.lint.per-file-ignores]
+# 테스트에서는 assert 사용 허용
+"tests/**" = ["S101"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra"
