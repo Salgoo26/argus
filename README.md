@@ -20,4 +20,38 @@
 
 ## 로컬 실행 (Windows)
 
-> 작성 중 — Walking Skeleton 진행에 따라 채운다.
+Python·Node는 호스트에 설치하지 않고 모두 컨테이너 안에서 실행한다.
+
+### 준비물
+
+- Git for Windows
+- Docker Desktop (WSL 2 엔진) — Windows 기능의 **가상 머신 플랫폼**, **Linux용 Windows 하위 시스템**이 켜져 있어야 한다
+
+### 실행
+
+Git Bash 기준, 레포 루트에서:
+
+```bash
+# 1) 환경변수 파일 만들기 — change-me를 무작위 값으로 바꾼다 (.env는 커밋되지 않음)
+cp .env.example .env
+#    예: openssl rand -hex 24 로 생성한 값을 각 비밀번호 칸에 넣는다
+
+# 2) 기동 (.env의 COMPOSE_FILE이 infra/docker-compose.yml을 가리킨다)
+docker compose up -d --wait
+
+# 3) 상태 확인
+docker compose ps
+```
+
+| 서비스 | 호스트 접속 | 비고 |
+|---|---|---|
+| platform-db | `127.0.0.1:15432` | 플랫폼 DB (PostgreSQL 16) |
+| argus-db | `127.0.0.1:15433` | Argus 접속기록 원장 (PostgreSQL 16) |
+
+DB 포트는 호스트 루프백(`127.0.0.1`)에만 열린다. 두 DB는 도커 네트워크도 분리되어 있어 플랫폼 쪽 컨테이너에서 argus-db에 접근할 수 없다.
+
+```bash
+# 중지 / 데이터까지 삭제
+docker compose down
+docker compose down -v
+```

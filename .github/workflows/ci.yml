@@ -1,0 +1,87 @@
+# PR 검사 (architecture 8-1 ①)
+# - lint(ruff) + 테스트(pytest, Postgres 16 서비스 컨테이너) — 앱별 matrix
+# - 시크릿 스캔(gitleaks) — 전체 커밋 이력 대상
+# CodeQL은 GitHub 기본 설정(default setup)으로 별도 실행된다.
+# Trivy(config·이미지)는 앱 이미지가 생기는 "Skeleton 로컬 동작 후" 단계에서 추가 (architecture 8-5).
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+# 최소 권한 — 코드 읽기만
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  python:
+    name: python (${{ matrix.app }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        app: [argus-api, platform-api]
+    defaults:
+      run:
+        working-directory: apps/${{ matrix.app }}
+
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          # CI 러너 안에서만 쓰고 버리는 임시 DB 계정
+          POSTGRES_DB: ci
+          POSTGRES_USER: ci
+          POSTGRES_PASSWORD: ci
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U ci -d ci"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+
+    env:
+      DATABASE_URL: postgresql://ci:ci@localhost:5432/ci
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: apps/${{ matrix.app }}/pyproject.toml
+
+      - name: Install
+        run: pip install -e ".[dev]"
+
+      - name: Lint (ruff)
+        run: |
+          ruff check --output-format=github .
+          ruff format --check .
+
+      - name: Test (pytest)
+        run: pytest
+
+  gitleaks:
+    name: secret scan (gitleaks)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # 현재 파일뿐 아니라 전체 커밋 이력을 검사
+          persist-credentials: false
+
+      # 서드파티 Action 대신 공식 이미지를 버전 고정으로 직접 실행 (토큰 권한 부여 불필요)
+      - name: Scan git history
+        run: |
+          docker run --rm -v "$PWD:/repo" zricethezav/gitleaks:v8.30.1 \
+            git /repo --no-banner --redact --verbose

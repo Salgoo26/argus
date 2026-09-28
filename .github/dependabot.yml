@@ -1,0 +1,27 @@
+# 의존성 취약점 알림 + 업데이트 PR 자동 생성 (architecture 8-1 [상시])
+# 앱이 추가되면 해당 생태계를 여기에 추가한다:
+#   - npm: apps/platform-web, apps/argus-web (M5)
+#   - docker: 앱 Dockerfile (M1~)
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      actions:
+        patterns: ["*"]
+    commit-message:
+      prefix: chore
+
+  - package-ecosystem: pip
+    directories:
+      - /apps/argus-api
+      - /apps/platform-api
+    schedule:
+      interval: weekly
+    groups:
+      python:
+        patterns: ["*"]
+    commit-message:
+      prefix: chore
