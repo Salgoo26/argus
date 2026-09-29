@@ -50,11 +50,11 @@ jobs:
       DATABASE_URL: postgresql://ci:ci@localhost:5432/ci
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           persist-credentials: false
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
           cache: pip
@@ -75,7 +75,7 @@ jobs:
     name: secret scan (gitleaks)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0 # 현재 파일뿐 아니라 전체 커밋 이력을 검사
           persist-credentials: false
