@@ -3,14 +3,21 @@ name = "argus-api"
 version = "0.0.0"
 description = "Argus — 접속기록 수집·탐지·소명·보고 API + worker"
 requires-python = ">=3.12,<3.13"
-# 런타임 의존성(FastAPI, SQLAlchemy, Alembic 등)은 M1에서 추가한다.
-dependencies = []
+dependencies = [
+    "fastapi==0.141.1",
+    "uvicorn==0.54.0",
+    "sqlalchemy==2.1.1",
+    "alembic==1.20.0",
+    "pydantic==2.13.5",
+    "pydantic-settings==2.15.0",
+    "psycopg[binary]==3.3.6",
+]
 
 [project.optional-dependencies]
 dev = [
     "pytest==9.1.1",
     "ruff==0.16.9",
-    "psycopg[binary]==3.3.6",
+    "httpx2==2.13.1",  # FastAPI TestClient (starlette 권장 클라이언트)
 ]
 
 [build-system]
@@ -29,9 +36,16 @@ target-version = "py312"
 select = ["E", "W", "F", "I", "B", "UP", "S"]
 
 [tool.ruff.lint.per-file-ignores]
-# 테스트에서는 assert 사용 허용
-"tests/**" = ["S101"]
+# 테스트: assert 허용(S101), 서명 실패 검증용 더미 비밀키 허용(S105·S106)
+"tests/**" = ["S101", "S105", "S106"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["app"]
+# tests/conftest.py의 헬퍼를 테스트 모듈이 import한다 — 서드파티가 아닌 로컬 모듈로 정렬
+known-local-folder = ["conftest"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+# 설치된 패키지보다 작업 디렉터리의 소스를 우선 (컨테이너에 소스를 마운트해 테스트할 때)
+pythonpath = ["."]
 addopts = "-ra"
