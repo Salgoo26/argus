@@ -32,5 +32,10 @@ updates:
       - /apps/argus-api
     schedule:
       interval: weekly
+    # Python은 3.12 고정(CLAUDE.md 5절, requires-python >=3.12,<3.13) — 3.12.x 패치만 받는다.
+    # 3.13·3.14 같은 버전 업은 의존성 호환 확인이 필요한 별도 작업 (2026-09-29 PR #6 종료 사유)
+    ignore:
+      - dependency-name: python
+        update-types: ["version-update:semver-major", "version-update:semver-minor"]
     commit-message:
       prefix: chore
