@@ -1,6 +1,6 @@
 # API 명세서 — 시스템 간 (플랫폼 → Argus)
 
-> 작성일: 2026-09-23 / **v0.2 (2026-09-23 개정 — DB 스키마와 상호 대조하여 불일치 8건 수정)**
+> 작성일: 2026-09-23 / v0.2 (2026-09-23 개정 — DB 스키마와 상호 대조하여 불일치 8건 수정) / **v0.3 (2026-09-29 개정 — 구현 M1 반영: 오류 코드 세분, 원본 개인정보 유입 차단 검증, Argus 전용 코드값 거부)**
 > 관련 문서: [[아키텍처_설계서.md]], [[DB스키마.md]], [[요구사항정의서.md]], [[정책정의서.md]], [[액터별_플로우.md]]
 > 범위: 두 시스템의 **경계 계약**만 다룬다. 화면용 내부 API(argus-web ↔ argus-api 등)는 구현하며 코드로 정의하고 FastAPI OpenAPI(Swagger)로 자동 문서화한다.
 
@@ -25,6 +25,17 @@
 | 7 | 미동기화 취급자의 로그 처리 규칙 (2-6절) | 수락 후 나중에 매칭 — 명시가 없어 구현이 갈릴 수 있었음 |
 | 8 | 시드 데이터 주입 경로 (4절) | baseline용 과거 접속기록을 DB에 직접 INSERT하면 해시체인이 깨짐 |
 
+### v0.3 개정 내역 (2026-09-29, 구현 M1에서 확정)
+
+| # | 수정 | 사유 |
+|---|---|---|
+| 1 | **이벤트 100건 초과 → `413 TOO_MANY_EVENTS`** (1-1·1-5절) | v0.2는 코드 미정. 400이면 relay가 배치 전체를 `DEAD` 처리하지만, 413이면 배치를 절반으로 쪼개 재전송 → 접속기록을 버리지 않는 쪽 |
+| 2 | **요청 단위 오류 코드 세분** (1-5·1-6절) | v0.2는 예시 1개뿐. 401을 원인별(`UNKNOWN_SOURCE`·`INVALID_TIMESTAMP`·`INVALID_SIGNATURE`)로 나눠야 relay 알림에서 키 문제와 시각 오차를 구분해 사람이 고칠 수 있음(출처 목록은 비밀이 아님) |
+| 3 | **rejected 코드 `INVALID_FIELD` 추가** (2-5절) | 형식·길이·타입 오류 등 코드표에 없던 필드 오류의 수용처 |
+| 4 | **원본 개인정보 유입 차단 검증** (2-2절) | CLAUDE.md 절대 규칙 #3(원본 개인정보 전송 금지)을 발신 측 약속에만 맡기지 않고 **수신 측에서도 방어**. `subject.ids` 형식 제한, `request.path`의 쿼리스트링 거부 등 |
+| 5 | **Argus 전용 코드값은 외부 출처에서 거부** (2-3·2-5절) | `EXPORT`·`UNMASK`·`ACCESS_LOG`의 "(Argus 전용)" 표기를 수신 검증으로 구체화 — 외부 출처가 Argus 내부 행위를 사칭하지 못하게 |
+| 6 | **② 취급자 동기화의 멱등·중복 판정 규칙** (3-1절) | `handler`에 event_id 저장 칸이 없어 판정 기준이 미정이었음. 상태 스냅샷 + `last_event_at` 기준으로 확정, event_id 저장 테이블은 기각 |
+
 ---
 
 ## 1. 공통 규약
@@ -36,8 +47,8 @@
 | 프로토콜 | HTTPS (§7④ 전송구간 암호화). 단일 VM 배포에서는 도커 내부 네트워크로 호출되나, 계약은 별도 서버 배치를 전제로 HTTPS 기준으로 정의 |
 | 형식 | `Content-Type: application/json; charset=utf-8` |
 | 시각 | ISO 8601 + 오프셋 (`2026-09-15T23:41:07+09:00`). 플랫폼·Argus 서버는 NTP로 시각 동기화 |
-| 배치 | 요청 1건당 이벤트 최대 **100건** |
-| 요청 크기 | 최대 1MB (초과 시 413) |
+| 배치 | 요청 1건당 이벤트 최대 **100건** (초과 시 `413 TOO_MANY_EVENTS`) |
+| 요청 크기 | 최대 1MB (초과 시 `413 PAYLOAD_TOO_LARGE`. 수신 측은 본문을 스트리밍으로 읽으며 한도 초과 즉시 중단) |
 
 ### 1-2. 인증·무결성 — HMAC 서명
 
@@ -54,7 +65,7 @@
 1. `X-Argus-Source`로 비밀키 조회 → 없으면 `401`
 2. 현재 시각과 timestamp 차이가 **±300초 초과** → `401` (재전송 방지)
 3. 서명을 상수 시간 비교(constant-time compare)로 검증 → 불일치 시 `401`
-4. 비밀키는 VM `.env`에만 보관(레포 미포함). 키 교체 시 신·구 키를 일정 기간 병행 허용(`v1` 접두어로 버전 구분)
+4. 비밀키는 VM `.env`에만 보관(레포 미포함). 키 교체 시 신·구 키를 일정 기간 병행 허용(`v1` 접두어로 버전 구분) — **Walking Skeleton은 미구현(출처당 키 1개).** 7절 미결 참조
 
 ### 1-3. 멱등성과 전달 보장
 
@@ -77,18 +88,35 @@
 | 코드 | 의미 | relay 동작 | outbox 상태 |
 |---|---|---|---|
 | `200` | 처리 완료 (건별 결과는 본문) | 1-4절대로 처리 | 건별 |
-| `400` | 요청 전체가 파싱 불가 (JSON 오류, `events` 누락 등) | 재시도 안 함 + 알림 | `DEAD` |
-| `401` | 인증 실패 (출처·시각·서명) | **재시도는 멈추고 알림**. 사람이 키·시각 설정을 고치면 자동 재개 | **`PENDING` 유지** |
-| `413` | 요청 크기 초과 | 배치를 절반으로 쪼개 재전송 | `PENDING` |
+| `400` | 요청 전체가 파싱 불가 (`MALFORMED_JSON`, `MISSING_EVENTS`, `BAD_REQUEST`) | 재시도 안 함 + 알림 | `DEAD` |
+| `401` | 인증 실패 (`UNKNOWN_SOURCE`, `INVALID_TIMESTAMP`, `INVALID_SIGNATURE`) | **재시도는 멈추고 알림**(알림에 코드를 포함해 원인 구분). 사람이 키·시각 설정을 고치면 자동 재개 | **`PENDING` 유지** |
+| `413` | 요청 크기 초과(`PAYLOAD_TOO_LARGE`) 또는 이벤트 수 초과(`TOO_MANY_EVENTS`) | 배치를 절반으로 쪼개 재전송 | `PENDING` |
 | `429` / `5xx` / 네트워크 오류 | 일시 장애 | **지수 백오프로 무기한 재시도** (1분 → 2 → 4 … 최대 1시간 간격) | `PENDING` |
 
 > `401`을 `DEAD`로 처리하지 않는 이유: 서명 키 교체·서버 시각 오차 같은 **설정 문제**로 발생하는데, 이때 로그를 버리면 §8③(분실 방지)을 위반한다. 접속기록은 어떤 경우에도 스스로 폐기하지 않고, 사람의 판단(`DEAD` 전환)이 개입해야 한다.
+>
+> 이벤트 수 초과를 `400`이 아닌 `413`으로 두는 이유(v0.3): `400`은 relay가 배치 전체를 `DEAD`로 보내는 코드다. 이벤트 수 초과는 데이터 자체의 결함이 아니라 **나눠 보내면 해결되는 문제**이므로, 쪼개서 재전송하는 `413`으로 분류한다.
 
 ### 1-6. 오류 응답 형식
 
 ```json
 { "error": { "code": "INVALID_SIGNATURE", "message": "signature mismatch" } }
 ```
+
+**요청 단위 오류 코드** (v0.3 — 건별 판정 `rejected` 코드는 2-5절)
+
+| HTTP | code | 조건 |
+|---|---|---|
+| 401 | `UNKNOWN_SOURCE` | `X-Argus-Source`에 해당하는 비밀키 없음 |
+| 401 | `INVALID_TIMESTAMP` | `X-Argus-Timestamp` 누락 또는 ±300초 초과 |
+| 401 | `INVALID_SIGNATURE` | 서명 누락·형식 오류·불일치 |
+| 400 | `MALFORMED_JSON` | 본문이 JSON이 아님 |
+| 400 | `MISSING_EVENTS` | `events` 배열 없음 |
+| 400 | `BAD_REQUEST` | 그 밖의 요청 형식 오류 (프레임워크 기본 검증 오류를 고정 형식으로 대체) |
+| 413 | `PAYLOAD_TOO_LARGE` | 본문 1MB 초과 |
+| 413 | `TOO_MANY_EVENTS` | 이벤트 100건 초과 |
+
+- **오류 메시지에 입력값을 되풀이하지 않는다**(코드값 제외). 잘못 들어온 개인정보가 응답·로그로 다시 새지 않게 하기 위함이다. 같은 이유로 프레임워크 기본 422 응답(입력값 포함)도 쓰지 않는다.
 
 ### 1-7. 정보주체 식별값 표기 (DB스키마 2-1절과 동일)
 
@@ -151,6 +179,23 @@ POST /ingest/v1/access-logs
 | `result` | enum | ✅ | `SUCCESS` / `FAILURE` (실패한 시도도 기록) | 아키텍처 설계서 3-3절 |
 | `context` | object | - | 부가 정보 (2-3절 하단) | |
 
+**수신 측 형식 검증** (v0.3 — 위반 시 해당 이벤트 `rejected`, 코드는 괄호)
+
+| 필드 | 규칙 | 목적 |
+|---|---|---|
+| `event_id` | UUID 형식 (`INVALID_FIELD`) | |
+| `actor.login_id` | 공백·제어문자 없는 출력 가능 ASCII 1~64자 (`INVALID_FIELD`) | |
+| `occurred_at` | ISO 8601 + **오프셋 필수**, 미래 5분 초과 불가 (`INVALID_TIMESTAMP`) | 시각 모호성 제거 |
+| `subject` | `LOGIN` 외에는 필수 (`SUBJECT_REQUIRED`), `type`은 `MEMBER`만, `ids`·`count` 중 하나 이상 필수 | §2 3호 |
+| **`subject.ids`** | 각 원소 **`[A-Za-z0-9_-]{1,64}`만 허용**, 최대 1,000개 (`INVALID_FIELD`) | **원본 개인정보 유입 차단** — 이메일(`@`·`.`), 이름(공백·한글), 전화번호 형식 등이 식별값 자리에 들어오면 거부 |
+| `subject.count` | 0 이상 정수, **`ids` 개수 이상** (`INVALID_FIELD`). 생략 시 `ids` 개수 | 건수 축소 기록 방지 |
+| **`request.path`** | `/`로 시작, 255자 이하, **`?`·`#` 포함 불가** (`INVALID_FIELD`) | 쿼리스트링에 실린 검색값(개인정보)이 경로에 섞여 들어오는 것 차단 |
+| `request.method` | 표준 HTTP 메서드 | |
+| **`request.query_keys`** | 최대 50개, 각 원소 **키 이름 형식** `[A-Za-z0-9_.\[\]-]{1,64}`만 (`INVALID_FIELD`) | 키 대신 값이 실려 오는 것 차단 |
+| `context` 값 | `reason` 1~500자, `ticket_id` 1~64자, `report_id`·`row_count` 정수, `target`은 `{"detection_id": int}` 또는 `{"access_log_id": int}` (`INVALID_FIELD`) | |
+
+> 절대 규칙 #3(원본 개인정보 전송 금지)은 발신 측 약속이다. 수신 측 검증은 그 약속이 깨졌을 때를 대비한 **두 번째 방어선**이며, 형식만으로 모든 개인정보를 걸러낼 수는 없다(예: 숫자로만 된 값). 1차 책임은 여전히 발신 측에 있다.
+
 ### 2-3. 코드값
 
 **action (수행업무)** — 안내서의 예시(검색·열람·조회·입력·수정·삭제·출력·다운로드)를 묶어 정의
@@ -165,6 +210,8 @@ POST /ingest/v1/access-logs
 | `DOWNLOAD` | 파일 다운로드·출력 |
 | `EXPORT` | (Argus 전용) 점검 보고서 export |
 | `UNMASK` | (Argus 전용) 정보주체 식별값 마스킹 해제 — `context.reason` 필수 |
+
+> **(Argus 전용)** 코드값(`EXPORT`·`UNMASK`, 아래 `ACCESS_LOG`)은 Argus 자체 기록(2-7절)에서만 쓴다. **외부 출처가 보내면 거부**한다(`INVALID_ACTION` / `INVALID_CATEGORY`) — 외부 시스템이 Argus 내부 행위를 사칭한 기록을 원장에 남기지 못하게 하기 위함 (v0.3).
 
 **data_category (데이터 유형)**
 
@@ -215,12 +262,16 @@ POST /ingest/v1/access-logs
 | rejected 코드 | 조건 |
 |---|---|
 | `MISSING_FIELD` | 필수 필드 누락 |
-| `INVALID_ACTION` / `INVALID_CATEGORY` / `INVALID_ACCESS_PATH` | 코드값 오류 |
+| `INVALID_FIELD` | (v0.3) 형식·길이·타입 오류 — 2-2절 "수신 측 형식 검증" |
+| `INVALID_ACTION` / `INVALID_CATEGORY` / `INVALID_ACCESS_PATH` | 코드값 오류. 외부 출처의 **Argus 전용 코드값**(`EXPORT`·`UNMASK` / `ACCESS_LOG`)도 여기에 해당 (v0.3) |
 | `INVALID_TIMESTAMP` | 형식 오류, 또는 수신 시각 기준 **미래 5분 초과** |
 | `INVALID_IP` | IP 형식 오류 |
 | `SUBJECT_REQUIRED` | `LOGIN` 외 행위인데 subject 누락 |
 | `REASON_REQUIRED` | `UNMASK`인데 `context.reason` 누락 |
 | `UNKNOWN_CONTEXT_KEY` | `context`에 정의되지 않은 키 |
+
+- `duplicates`에는 이미 저장된 `event_id`뿐 아니라 **같은 배치 안에서 반복된 `event_id`**도 포함된다(첫 건만 저장).
+- `rejected[].message`는 고정 문구이며 입력값을 되풀이하지 않는다(1-6절).
 
 ### 2-6. Argus 수신 처리
 
@@ -293,12 +344,18 @@ POST /ingest/v1/handler-events
 
 - **최소수집**: 취급자(직원)의 정보도 개인정보다. Argus가 받는 건 계정·이름·소속·재직상태·퇴직시각뿐이고, 연락처·사번·권한 상세는 받지 않는다.
 - **순서 역전 대응**: Argus는 취급자별 `last_event_at`보다 오래된 이벤트는 무시한다(늦게 도착한 옛 변경이 최신 상태를 덮어쓰지 않도록).
+- **멱등·중복 판정 (v0.3 — 2026-09-29 확정)**: 이 API는 `event_id`를 저장하지 않고 **`last_event_at` 기준**으로 판정한다. ①과 달리 이벤트가 매번 취급자 **상태 전체**(스냅샷)를 싣기 때문에, 같은 이벤트를 다시 적용해도 결과가 같아 event_id 없이 멱등성이 성립한다.
+  1. **상태 스냅샷 upsert**: `(source_system, login_id)` 기준으로 없으면 생성, 있으면 덮어쓴다. `type`은 부수 효과(아래 2) 판단과 기록 구분에 쓰고, 최종 상태는 `handler` 필드 값으로 정한다.
+  2. **판정**: `occurred_at > last_event_at`이면 적용 후 `accepted`, `occurred_at ≤ last_event_at`이면 **변경 없이 `duplicates`로 집계**한다. 이 `duplicates`에는 재전송된 같은 이벤트와 **늦게 도착한 옛 이벤트가 함께 포함**된다(둘을 구분하지 않음). relay 입장에서는 둘 다 "더 보낼 필요 없음"이라 후속 조치가 같다.
+  3. **부수 효과도 상태 기준**: A5 계정은 "없으면 생성", 퇴직 반영은 "이미 `DISABLED`가 아니면 전환" — 여러 번 적용돼도 결과가 같게 한다.
+  4. **발신 측 시각 정밀도**: 플랫폼은 `occurred_at`을 **마이크로초 정밀도**로 보낸다. 서로 다른 두 변경의 시각이 같으면 뒤의 것이 `duplicates`로 판정돼 유실되기 때문이다.
+  - **기각한 대안**: `handler_event(event_id, login_id, type, occurred_at, received_at)` 테이블로 event_id를 저장 — 정확한 중복 판별과 Argus 쪽 수신 이력을 얻지만, ①취급자 정보의 원천은 플랫폼이고 권한 변경 이력은 플랫폼 `operator_permission_history`(§5③)가 담당하므로 Argus에 이력을 이중 보관할 실익이 작고 ②직원 개인정보 보관을 늘리지 않는 편이 최소처리 원칙에 맞다고 판단. 수신 이력이 필요해지면(예: 동기화 누락 추적) 이 테이블을 추가한다.
 - **A5 계정 발급**: `HANDLER_CREATED` 수신 시 Argus에 취급자용 로그인 계정(`role=HANDLER`)을 생성한다. 초기 비밀번호 전달 방식은 구현 시 결정(MVP는 시드 계정 사용).
 - `HANDLER_TERMINATED` 수신 시 해당 A5 계정을 `DISABLED`로 전환한다. 진행 중인 소명 건은 담당자가 판단한다(DISMISS 또는 ESCALATE).
 
 ### 3-2. 응답
 
-①과 동일한 형식 (`accepted` / `duplicates` / `rejected`). 추가 rejected 코드: `TERMINATED_AT_REQUIRED`.
+①과 동일한 형식 (`accepted` / `duplicates` / `rejected`). 추가 rejected 코드: `TERMINATED_AT_REQUIRED`. `duplicates`의 의미는 3-1절 "멱등·중복 판정" 2번(재전송 + 늦게 도착한 옛 이벤트)이다.
 
 ---
 
@@ -340,3 +397,5 @@ GET /healthz
 - [x] 2단계(`access_path=DB`) 확장 필드 → `context.query`·`context.row_count` 예약 (v0.2)
 - [ ] DEAD 상태 이벤트 운영 알림 채널 (로그 / 이메일)
 - [ ] HMAC 비밀키 교체 절차의 운영 문서화
+- [ ] HMAC 신·구 키 병행 허용(1-2절 #4) — Walking Skeleton 미구현(출처당 키 1개). 보안성 검토 단계 과제(아키텍처 설계서 8-6)
+- [x] 요청 단위 오류 코드, 이벤트 수 초과 처리, 수신 측 형식 검증 → v0.3 (2026-09-29, 구현 M1)

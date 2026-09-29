@@ -1,6 +1,6 @@
 # DB 스키마 (Argus / 플랫폼)
 
-> 작성일: 2026-09-23 / **v0.2 (2026-09-23 개정 — 요구사항 전수 대조 후 6개 테이블·다수 컬럼 추가)**
+> 작성일: 2026-09-23 / v0.2 (2026-09-23 개정 — 요구사항 전수 대조 후 6개 테이블·다수 컬럼 추가) / **v0.3 (2026-09-29 개정 — 구현 M1 반영: 해시체인 정규화 규칙 v1 확정, DB 계정 구조·권한 확정, 알려진 한계 명시)**
 > 관련 문서: [[아키텍처_설계서.md]], [[API명세서_시스템간.md]], [[정책정의서.md]], [[액터별_플로우.md]], [[요구사항정의서.md]]
 > DBMS: PostgreSQL 16 (플랫폼 DB / Argus DB 별도 인스턴스)
 > 표기: **[S]** = Walking Skeleton에 필요한 테이블. 컬럼은 전체를 정의하되 Skeleton에서는 [S] 테이블만 생성한다.
@@ -133,7 +133,7 @@ CREATE TABLE handler (
     team               varchar(50),
     employment_status  varchar(16)  NOT NULL CHECK (employment_status IN ('ACTIVE','TERMINATED')),
     terminated_at      timestamptz,                -- 퇴직 시점 (시점 기준 룰 판정용)
-    last_event_at      timestamptz  NOT NULL,      -- 순서 역전 방지 (API ② 3-1)
+    last_event_at      timestamptz  NOT NULL,      -- 순서 역전 방지 + 중복 판정 기준 (API ② 3-1, v0.3)
     created_at         timestamptz  NOT NULL DEFAULT now(),
     updated_at         timestamptz  NOT NULL DEFAULT now(),
     UNIQUE (source_system_id, login_id),
@@ -155,6 +155,8 @@ CREATE TABLE argus_user (
 );
 ```
 
+> **취급자 동기화의 중복 판정 (v0.3)**: `handler`는 API ②의 `event_id`를 저장하지 않는다. 이벤트가 상태 전체(스냅샷)를 싣고 오므로 `occurred_at > last_event_at`일 때만 upsert하고, 그 외는 변경 없이 중복으로 처리한다. event_id 저장 테이블(`handler_event`)은 기각 — 사유는 API명세서 3-1.
+>
 > **A5의 조회 범위**: 취급자(A5)는 **자신의 `handler_id`에 연결된 탐지건만** 볼 수 있다. DB 제약이 아니라 애플리케이션 계층에서 강제하며(모든 조회 쿼리에 actor 필터 주입), 이 규칙은 액터별_플로우 F-06 #2와 대응한다.
 
 ### 3-2. 접속기록 원장
@@ -186,7 +188,7 @@ CREATE TABLE access_log (
     context           jsonb,                                     -- ticket_id, reason, target 등
 
     -- 수신·무결성
-    received_at       timestamptz  NOT NULL DEFAULT now(),
+    received_at       timestamptz  NOT NULL DEFAULT now(),        -- append 함수가 항상 명시 지정 (3-5절 v0.3)
     prev_hash         char(64),
     hash              char(64)     NOT NULL,
 
@@ -442,10 +444,51 @@ GRANT SELECT, DELETE ON access_log TO argus_purge;  -- 파기 배치 전용
 |---|---|
 | DB 권한 분리 | 앱 계정(`argus_app`)은 INSERT·SELECT만. DELETE는 파기 전용(`argus_purge`)만. UPDATE는 아무에게도 없음 |
 | 트리거 | `BEFORE UPDATE` 트리거로 예외 발생 (권한 설정 실수 대비 이중 장치) |
-| 해시체인 | `hash = SHA-256(prev_hash ‖ 정규화된 레코드 내용)`. 중간 레코드가 수정·삭제되면 이후 체인 검증이 깨짐 |
+| 해시체인 | `hash = SHA-256(정규화된 레코드 내용)`, 정규화 대상에 **`prev_hash`와 `id`를 포함**해 앞 레코드와 연결(규칙은 아래 "정규화 규칙 v1"). 중간 레코드가 수정·삭제되면 이후 체인 검증이 깨짐 |
 | 순차 기록 | append를 **advisory lock으로 직렬화** → `id`가 커밋 순서대로 증가해, 탐지 배치의 `id` 커서가 누락 없이 안전해짐 |
 | 파기와의 공존 | 오래된 순서로 삭제하면 체인 시작점이 바뀜 → 파기 시 **남은 첫 레코드의 prev_hash를 `chain_anchor_hash`로 기록**하고, 검증은 그 앵커에서 시작 |
 | 시드 데이터 | baseline용 과거 접속기록(요구사항 4-3)도 **동일한 append 함수를 통해** 주입해 체인을 성립시킨다. DB에 직접 INSERT하지 않는다 |
+
+**해시체인 정규화 규칙 v1** (v0.3 — 2026-09-29 구현 M1에서 확정, 8절 미결 해소)
+
+| 항목 | 규칙 |
+|---|---|
+| 대상 | `hash`를 제외한 `access_log` **전 컬럼**. `id`·`prev_hash`·`received_at` 포함 |
+| `id`를 넣는 이유 | 탐지 배치 커서가 `id`라서, 레코드 순서를 바꿔치기해도 드러나게 |
+| 시각 | UTC `YYYY-MM-DDTHH:MM:SS.ffffffZ` (마이크로초 6자리) |
+| IP | 정규형 (예: `2001:db8::1`) |
+| UUID | 소문자 하이픈 형식 |
+| NULL / 배열 | NULL은 JSON `null`, 배열은 순서 유지 |
+| 직렬화 | JSON, **키 정렬, 공백 없음**(`,` `:`), UTF-8 (비ASCII 문자 이스케이프 안 함) |
+| 해시 | SHA-256, 소문자 hex 64자 |
+| 체인 시작 | 첫 레코드(파기 전)의 `prev_hash` = NULL. 파기 후에는 `destruction_history.chain_anchor_hash`에서 검증 시작 |
+
+- 정규화 코드는 **append와 검증이 같은 함수를 공유**한다(argus-api `app/ledger/hashchain.py`) → 규칙이 한 곳에만 존재.
+- `received_at`은 DB default에 맡기지 않고 **append 함수가 값을 정해 넣는다.** INSERT 전에 해시를 계산해야 하므로, DB가 채우는 값에 기대면 저장값과 해시값이 어긋날 수 있다. 같은 이유로 append 호출자는 모든 컬럼을 명시한다.
+- 빈 `context`(`{}`)는 NULL로 저장한다.
+- 규칙을 바꾸면 기존 체인 검증이 깨지므로 버전(v1)으로 관리한다. 변경이 필요하면 v2를 정의하고 전환 시점을 기록한다.
+
+**DB 계정 구조** (v0.3 — 구현 M1에서 확정)
+
+| 계정 | 로그인 | 용도 | `access_log` 권한 |
+|---|---|---|---|
+| 소유자 (`ARGUS_DB_USER`) | O | **마이그레이션 전용** | 전권 (소유자는 GRANT와 무관) — 트리거가 UPDATE만 차단 |
+| 앱 로그인 (`ARGUS_APP_DB_USER`, `argus_app` 멤버) | O | argus-api·worker 접속 | SELECT·INSERT |
+| `argus_app` | X (롤) | 앱 권한 묶음 | SELECT·INSERT |
+| `argus_purge` | X (롤) | 파기 배치 (Skeleton 이후 로그인 계정 발급) | SELECT·DELETE |
+
+- **API가 소유자 계정으로 접속하면 권한 분리가 무의미**해지므로 앱은 반드시 `argus_app` 멤버 계정으로 접속한다.
+- 로그인 계정의 비밀번호는 마이그레이션이 아닌 별도 발급 스크립트에서 설정한다(비밀번호가 마이그레이션 코드·이력에 남지 않게).
+- 앱 롤의 테이블별 권한: `access_log`·`detection_status_history`·`detection_log` = SELECT·INSERT(감사 추적은 append-only) / `source_system` = SELECT / 그 밖의 업무 테이블 = SELECT·INSERT·UPDATE(DELETE 없음). 이후 테이블을 추가할 때는 마이그레이션에서 **테이블마다 명시적으로 부여**한다(`ALTER DEFAULT PRIVILEGES` 미사용 — 테이블마다 최소 권한을 판단하기 위해).
+
+**알려진 한계** (v0.3 — 보안성 검토 단계 과제, 아키텍처 설계서 8-6)
+
+| 한계 | 설명 | 대응 후보 |
+|---|---|---|
+| 끝부분 삭제 | 맨 끝 레코드들을 지우면 남은 체인은 그대로 이어져 검증 통과 | 체인 머리(최신 `id`·`hash`)를 DB 밖(WORM 저장소 등)에 주기 기록하는 **외부 앵커링**. 부분적 교차 확인: `detection_batch_run.to_access_log_id` > 원장 최대 `id`면 삭제 흔적(단 같은 DB라 권한자는 함께 고칠 수 있음) |
+| 전체 재계산 | DB 권한자가 체인을 처음부터 다시 계산해 덮어쓰면 탐지 불가 | 외부 앵커링 (위와 동일) |
+| 소유자의 TRUNCATE·DELETE | 트리거는 UPDATE만 막음 | `BEFORE TRUNCATE`·`BEFORE DELETE` 트리거 (파기 롤 예외 처리 필요) |
+| 앱 계정의 직접 INSERT | append 함수를 거치지 않은 INSERT를 DB가 막지 못함(검증 시 체인 불일치로 **사후 탐지**는 됨) | append를 `SECURITY DEFINER` 함수로 옮기고 앱에는 EXECUTE만 부여. 단 정규화를 SQL·Python 양쪽에 구현해야 하는 불일치 위험이 있어 M1에서는 기각 |
 
 ### 3-6. 룰 조건식 JSON 스펙
 
@@ -736,7 +779,8 @@ CREATE TABLE destruction_history (
 ## 8. 미결 / 구현 시 확정
 
 - [x] 회원 탈퇴 시 법정 보존 항목 분리보관 구조 → 4-1절 (v0.2)
-- [ ] 해시체인 정규화(canonical) 규칙 세부 — 필드 순서·시각 표기·NULL 처리. 구현 시 확정하고 검증 스크립트와 함께 문서화
+- [x] 해시체인 정규화(canonical) 규칙 세부 → 3-5절 "정규화 규칙 v1" (v0.3, 2026-09-29 구현 M1). 검증 함수 `verify_chain` 구현
+- [x] DB 계정·권한 구조 → 3-5절 "DB 계정 구조" (v0.3, 2026-09-29 구현 M1)
 - [x] Argus 비밀번호 해시 → argon2id
 - [x] 알림 테이블 필요 여부 → `notification` 추가 (이메일 발송 성공/실패 추적 때문에 필요)
 - [ ] 동의 기록의 탈퇴 후 보관 여부 — 4-1절 각주 (운영 정책 판단)

@@ -1,6 +1,6 @@
 # 아키텍처 설계서 (Argus)
 
-> 작성일: 2026-09-23 (개정: 2026-09-23 — 배포·파이프라인 반영 / 설계 종료 시점 정리: 시스템 간 인증 확정, platform-relay 컨테이너 명시, 구현 도구 분담 / **2026-09-28 — 8-1·8-5 Trivy 도입 시점 불일치 정리(구현 M0에서 발견)**)
+> 작성일: 2026-09-23 (개정: 2026-09-23 — 배포·파이프라인 반영 / 설계 종료 시점 정리: 시스템 간 인증 확정, platform-relay 컨테이너 명시, 구현 도구 분담 / 2026-09-28 — 8-1·8-5 Trivy 도입 시점 불일치 정리(구현 M0에서 발견) / **2026-09-29 — 구현 M1 반영: Trivy config 대상에서 compose 제외, 8-6 개선 과제 4건 추가, 11절 미결 2건 해소**)
 > 상태: **설계 완료** — 상세 스펙은 [[API명세서_시스템간.md]], [[DB스키마.md]]
 > 관련 문서: [[요구사항정의서.md]], [[정책정의서.md]], [[액터별_플로우.md]], [[진행기록.md]]
 > 단계: 5단계(설계)
@@ -194,7 +194,7 @@
                           ├ 보안 스캔 [report-only]
                           │   ├ gitleaks (시크릿)
                           │   ├ CodeQL (SAST, Python·JS) — GitHub 기본 설정
-                          │   └ Trivy config (Dockerfile 등 설정 파일 — compose 파일 지원 여부는 M1에서 확인)
+                          │   └ Trivy config (Dockerfile — compose 파일은 Trivy가 인식하지 않아 대상 외)
                           └ 도커 빌드 가능 여부 확인 (push 안 함)
         │ merge
         ▼
@@ -261,6 +261,10 @@
 - **보안 스캔 gate 전환**: report-only → Critical/High 차단.
 - **DAST**: OWASP ZAP 기본 스캔을 배포 후 점검 단계에서 수행.
 - **GitHub Actions 커밋 SHA 고정**: 태그(`@v4`) 대신 SHA로 고정해 공급망 공격 대비 (구현 M0에서 제기, 2026-09-28).
+- **해시체인 외부 앵커링** (구현 M1에서 제기, 2026-09-29): 해시체인만으로는 ①끝부분 레코드 삭제 ②권한자의 전체 재계산을 탐지하지 못함 → 체인 머리(최신 `id`·`hash`)를 DB 밖(WORM 저장소, 외부 로그 등)에 주기 기록. 상용 솔루션의 WORM 백업(5절 INFOSAFER)과 같은 취지. 상세는 [[DB스키마.md]] 3-5 "알려진 한계"
+- **`access_log` TRUNCATE·DELETE 방어** (M1, 2026-09-29): 트리거는 UPDATE만 차단하며, 테이블 소유자는 TRUNCATE·DELETE가 가능 → `BEFORE TRUNCATE`(및 파기 롤 외 `BEFORE DELETE`) 트리거 검토. 단 소유자는 트리거 자체도 제거할 수 있으므로, 근본 대응은 외부 앵커링과 함께 봐야 함
+- **append 경로 강제** (M1, 2026-09-29): 앱 계정이 append 함수를 거치지 않고 직접 INSERT하는 것을 DB가 막지 못함(검증 시 체인 불일치로 사후 탐지는 됨) → `SECURITY DEFINER` append 함수 + 앱에는 EXECUTE만. M1에서는 정규화 로직 이중 구현(SQL·Python) 위험 때문에 기각
+- **HMAC 신·구 키 병행** (M1, 2026-09-29): [[API명세서_시스템간.md]] 1-2 #4가 규정하지만 Skeleton은 출처당 키 1개 → 키 교체 시 무중단 전환을 위해 구현
 
 ---
 
@@ -310,6 +314,6 @@ CLAUDE.md          Claude Code 작업 지침
 - [x] DB 스키마 — [[DB스키마.md]] v0.2 (2026-09-23)
 - [x] API 명세 — [[API명세서_시스템간.md]] v0.2 (2026-09-23)
 - [x] CI 보안 스캔 도입 시점 — Trivy config(M1, PR 단계) / Trivy image(Skeleton 로컬 동작 후) 분리 (2026-09-28)
-- [ ] 해시체인 정규화(canonical) 규칙 세부 — 구현 M1에서 확정
+- [x] 해시체인 정규화(canonical) 규칙 세부 → [[DB스키마.md]] 3-5 "정규화 규칙 v1" (2026-09-29, 구현 M1)
 - [ ] A5(취급자) Argus 초기 계정 발급 방식 — Skeleton은 시드 계정
-- [ ] Trivy config의 docker-compose 파일 지원 여부 — 구현 M1에서 확인, 미지원 시 8-1 문구에서 compose 제외
+- [x] Trivy config의 docker-compose 파일 지원 여부 → **미지원**(Trivy 0.74.0 확인, 검출된 설정 파일은 Dockerfile뿐). 8-1 문구에서 compose 제외 (2026-09-29, 구현 M1)
