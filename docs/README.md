@@ -8,9 +8,9 @@
 | `requirements.md` | 요구사항정의서.md | 기획 | 2026-09-23 |
 | `policy.md` | 정책정의서.md | 기획 | 2026-09-23 |
 | `actor-flows.md` | 액터별_플로우.md | 기획 | 2026-09-23 |
-| `architecture.md` | 아키텍처_설계서.md | 설계 | 2026-09-28 (8-1·8-5 CI 도입 시점 정리) |
-| `api-spec.md` | API명세서_시스템간.md | 설계 | 2026-09-23 (v0.2) |
-| `db-schema.md` | DB스키마.md | 설계 | 2026-09-23 (v0.2) |
+| `architecture.md` | 아키텍처_설계서.md | 설계 | 2026-09-29 (M1 반영) |
+| `api-spec.md` | API명세서_시스템간.md | 설계 | 2026-09-29 (v0.3) |
+| `db-schema.md` | DB스키마.md | 설계 | 2026-09-29 (v0.3) |
 | `implementation-log.md` | (레포에서 작성 → 진행기록.md로 동기화) | 구현 | — |
 
 ## 동기화 흐름

@@ -29,6 +29,29 @@
 
 ---
 
+## 2026-09-29 — M1 마무리 (PR #5 머지, 설계 사본 v0.3 반영)
+
+**한 일**
+- PR #5(M1) 머지 확인: CI 9개 통과(ruff·pytest 59개, gitleaks, Trivy config 발견 0건, docker build 2종, CodeQL 3종). 로컬 main 최신화, 병합된 브랜치 삭제
+- 머지 커밋 작성자가 noreply 주소로 기록된 것 확인 — 사용자가 GitHub "Keep my email addresses private" 설정 완료 (M1 로그의 미결 해소)
+- Cowork "구현" 방에서 M1 설계 변경을 원본에 반영 → 사본 갱신분(api-spec v0.3, db-schema v0.3, architecture, CLAUDE.md, docs/README.md)을 구현과 대조, 불일치 없음 확인 후 별도 `docs:` PR로 올림
+- 사용자에게 M1 단계별 설명, 테스트 59개·CI 검사 9개 내용 설명, DBeaver로 스키마 확인 안내
+
+**결정사항**
+- 없음 (설계 판단은 Cowork에서 확정 — 아래)
+
+**설계 변경** (Cowork 확정, 사본 반영)
+- **② 취급자 동기화의 중복 판정**: event_id를 저장하지 않고 상태 스냅샷 + `last_event_at` 기준(`occurred_at > last_event_at`일 때만 upsert, 그 외는 `duplicates`). `handler_event` 테이블은 기각. 플랫폼은 `occurred_at`을 마이크로초 정밀도로 보냄 / 영향: api-spec 3-1·3-2, db-schema 3-1 (M1 로그의 미결 해소)
+- CLAUDE.md 7절에 "시크릿 파일은 값을 전부 가린 형태로만 확인" 규칙 추가 (M1 HMAC 키 노출 재발 방지)
+
+**미결·이슈**
+- platform-api setuptools `>=75` — Dependabot PR 미도착, M2에서 맞춤
+
+**다음 할 일**
+- `docs:` PR 머지 → 새 세션에서 M2 착수 (첫 작업: ② 취급자 동기화 수신 `POST /ingest/v1/handler-events`)
+
+---
+
 ## 2026-09-29 — 마일스톤 M1 (Argus 수집: [S] 스키마, append-only·해시체인, 수집 API, 컨테이너·CI)
 
 **한 일**

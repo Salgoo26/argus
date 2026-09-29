@@ -2,7 +2,7 @@
 
 > 이 파일은 Claude Code가 이 레포에서 작업을 시작할 때 자동으로 읽는 지침이다.
 > 기획·설계 원본은 claude.ai 프로젝트("정보보호 프로젝트")에 있고, `docs/`는 그 사본이다.
-> 작성: 2026-09-23 (설계 단계 종료 시점)
+> 작성: 2026-09-23 (설계 단계 종료 시점) / 개정: 2026-09-29 — 6절 M1 완료 기준에 Trivy config·도커 빌드 확인 반영(architecture 8-5 개정 이월분), M2 범위에 ② 취급자 동기화 수신(Argus) 추가(구현 M1 설계 변경 #7), 7절에 시크릿 파일 확인 규칙 추가
 
 ---
 
@@ -124,8 +124,8 @@
 | # | 마일스톤 | 완료 기준 |
 |---|---|---|
 | **M0** | 레포·기반 | `gh`로 **공개** 레포 생성, `.gitignore`/`.gitattributes`/`.env.example`, `infra/docker-compose.yml`로 DB 2개 기동, CI(ruff + pytest + gitleaks), `dependabot.yml`. CodeQL·push protection·secret scanning은 GitHub 설정에서 켜야 하므로 **사용자에게 켜는 방법을 안내** |
-| **M1** | Argus 수집 | [S] 테이블 Alembic 마이그레이션, `POST /ingest/v1/access-logs`(HMAC 검증·건별 판정·멱등), 해시체인 append 함수, append-only 트리거·DB 권한, `GET /healthz`. 테스트: 서명 불일치 401, 중복 event_id → duplicate, 필드 오류 → rejected, 해시체인 연속성 |
-| **M2** | 플랫폼 Agent | `operator`·`member` + 시드(회원 500명, 취급자 3~5명), 관리자 로그인, `GET /admin/members/export`(CSV), **접속기록 미들웨어 + 데코레이터**(contextvars), outbox 적재(별도 트랜잭션), relay(배치 100건·지수 백오프·401은 PENDING 유지), 취급자 동기화 API(②) 호출. 테스트: 고객 라우트는 로깅 안 됨, 업무 실패 시에도 FAILURE로 기록 |
+| **M1** | Argus 수집 | [S] 테이블 Alembic 마이그레이션, `POST /ingest/v1/access-logs`(HMAC 검증·건별 판정·멱등), 해시체인 append 함수, append-only 트리거·DB 권한, `GET /healthz`, argus-api Dockerfile, **CI에 Trivy config(report-only) + 도커 빌드 확인 job**(architecture 8-5). 테스트: 서명 불일치 401, 중복 event_id → duplicate, 필드 오류 → rejected, 해시체인 연속성 |
+| **M2** | 플랫폼 Agent | **② 취급자 동기화 수신(Argus: `POST /ingest/v1/handler-events`, HMAC·응답 형식은 M1 재사용)** → `operator`·`member` + 시드(회원 500명, 취급자 3~5명), 관리자 로그인, `GET /admin/members/export`(CSV), **접속기록 미들웨어 + 데코레이터**(contextvars), outbox 적재(별도 트랜잭션), relay(배치 100건·지수 백오프·401은 PENDING 유지), 취급자 동기화 API(②) 호출. 테스트: 고객 라우트는 로깅 안 됨, 업무 실패 시에도 FAILURE로 기록 |
 | **M3** | 탐지 배치 | argus-worker가 `setting.detection_interval_min` 주기로 실행, `id` 커서, EVENT 룰 평가, 진행 중 탐지건에만 하위 로그 추가(부분 유니크 인덱스), `log_summary`·`rule_snapshot`, 상태 이력 기록 |
 | **M4** | 소명 API | Argus 로그인(OFFICER/HANDLER), 탐지건 목록·상세(마스킹), 소명 요청·제출·승인·반려·재요청(round+1)·DISMISS, **허용되지 않은 상태 전이는 거부**, HANDLER는 본인 건만, Argus 자체 접속기록(LOGIN·READ, READ는 건수만) |
 | **M5** | 최소 화면 | platform-web: 관리자 로그인·회원 목록·다운로드 버튼 / argus-web: 로그인·탐지 목록·상세·요청/제출/승인 버튼 |
@@ -141,6 +141,7 @@
 - 한 번에 너무 많이 만들지 않는다. 작게 만들고 → 실행해보고 → 다음으로.
 - 사용자가 코드를 이해할 수 있게, **왜 이렇게 짰는지**를 짧게 설명한다. 특히 보안·개인정보 관련 코드는 어떤 조항·정책에 대응하는지 함께.
 - 사용자가 직접 해야 하는 일(GitHub 로그인, 설정 토글, Docker 실행 등)은 명확히 단계별로 안내한다. 사용자의 계정 인증 정보를 대신 입력하거나 요구하지 않는다.
+- **`.env` 등 시크릿 파일은 값을 전부 가린 형태로만 확인한다**(예: `sed -E 's/=.+/=<set>/' .env`). 키 이름을 골라 가리는 필터는 누락이 생긴다 — 2026-09-29 M1에서 HMAC 키가 작업 대화에 노출되어 교체한 사고의 재발 방지.
 
 ---
 
