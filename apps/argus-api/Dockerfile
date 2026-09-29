@@ -1,7 +1,7 @@
 # argus-api / argus-worker 공용 이미지 (같은 이미지, 다른 실행 명령 — architecture 2절)
 #   runtime (기본): API 서버. docker build -t argus-api apps/argus-api
 #   dev: 테스트·린트용 (dev 의존성 포함). docker build --target dev ...
-FROM python:3.12-slim AS base
+FROM python:3.14-slim AS base
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
