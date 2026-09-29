@@ -86,6 +86,11 @@
 - **로컬 HMAC 키가 작업 대화에 노출되어 교체함** — `.env` 확인 시 마스킹 필터가 `ARGUS_INGEST_SECRET_PLATFORM`을 놓침. 레포에는 들어가지 않았고, 사용처(argus-api)만 있던 시점이라 새 값으로 교체. 교훈: `.env` 확인은 값을 전부 가리는 방식(`sed -E 's/=.+/=<set>/'`)으로만 한다
 - (보안성 검토 후보) 소유자는 `access_log`를 TRUNCATE·DELETE할 수 있음 — 트리거는 UPDATE만 막음(설계대로). `BEFORE TRUNCATE` 트리거 추가 검토
 - (보안성 검토 후보) 앱 계정의 직접 INSERT 차단(SECURITY DEFINER append) — 위 기각 대안 참고
+- **(보안성 검토 후보) 해시체인만으로는 못 잡는 경우 두 가지**
+  - ① 맨 끝 레코드들을 지우면 남은 체인은 그대로 이어져 있어 검증을 통과함
+  - ② DB 권한자가 전체 체인을 처음부터 다시 계산해 덮어쓰면 탐지 불가
+  - 대응 후보: 체인 머리(최신 hash·id)를 DB 밖(WORM 저장소, 외부 로그 등)에 주기적으로 기록하는 **외부 앵커링**. 상용 솔루션의 WORM 백업(architecture 5절 INFOSAFER)과 같은 취지
+  - 부분적 교차 확인: `detection_batch_run.to_access_log_id`보다 원장 최대 id가 작으면 끝부분 삭제 흔적(단 같은 DB라 권한자는 함께 고칠 수 있음)
 - HMAC 신·구 키 병행(api-spec 1-2 #4)은 미구현 — Skeleton은 출처당 키 1개
 - ② 수신 시 중복 판정: `handler` 테이블에 event_id 저장 칸이 없어 `last_event_at` 기준으로만 가능 — M2에서 정리
 - CLAUDE.md 6절 M1 완료 기준에 Trivy config 미반영(지난 세션부터 이월, Cowork 판단)
