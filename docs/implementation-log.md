@@ -44,11 +44,14 @@
 - **② 취급자 동기화의 중복 판정**: event_id를 저장하지 않고 상태 스냅샷 + `last_event_at` 기준(`occurred_at > last_event_at`일 때만 upsert, 그 외는 `duplicates`). `handler_event` 테이블은 기각. 플랫폼은 `occurred_at`을 마이크로초 정밀도로 보냄 / 영향: api-spec 3-1·3-2, db-schema 3-1 (M1 로그의 미결 해소)
 - CLAUDE.md 7절에 "시크릿 파일은 값을 전부 가린 형태로만 확인" 규칙 추가 (M1 HMAC 키 노출 재발 방지)
 
+- Dependabot docker PR #6(`python:3.12-slim` → `3.14-slim`)을 사유 코멘트와 함께 닫음 — Python 3.12 고정 정책(CLAUDE.md 5절, `requires-python >=3.12,<3.13`)과 충돌, 3.14 이미지에서는 패키지 설치 실패
+
 **미결·이슈**
 - platform-api setuptools `>=75` — Dependabot PR 미도착, M2에서 맞춤
+- **Dependabot docker 설정에 Python 버전 업 제외 규칙 누락**(M1 설정 누락) → M2 PR 첫 커밋에서 `dependabot.yml`에 `ignore`(python 이미지 minor·major 업데이트 제외) 추가. Python 버전 업그레이드는 별도 작업으로 판단
 
 **다음 할 일**
-- `docs:` PR 머지 → 새 세션에서 M2 착수 (첫 작업: ② 취급자 동기화 수신 `POST /ingest/v1/handler-events`)
+- `docs:` PR 머지 → 새 세션에서 M2 착수 (첫 커밋: Dependabot 제외 규칙 / 첫 기능: ② 취급자 동기화 수신 `POST /ingest/v1/handler-events`)
 
 ---
 
