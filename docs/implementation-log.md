@@ -29,6 +29,53 @@
 
 ---
 
+## 2026-09-29 — 마일스톤 M2 착수 (계획 확정, PR ①: Dependabot 제외 규칙 + ② 취급자 동기화 수신)
+
+**한 일**
+- M2 계획 수립·설명(outbox 패턴, 이미지·컨테이너 개념 포함), 사용자와 결정 6건 확정(아래)
+- M2를 PR 3개로 분할: ① Argus 수신 마무리 / ② 플랫폼 기반(스키마·시드·로그인·회원 목록·CSV) / ③ Agent 미들웨어·outbox·relay
+- PR ① 구현
+  - `dependabot.yml` docker 생태계에 `ignore`(python 이미지 minor·major 제외) — M1 미결 해소
+  - platform-api `setuptools>=84.0.0` — M1 미결 해소
+  - `POST /ingest/v1/handler-events`: HMAC·배치 한도·응답 형식은 ① 재사용, 건별 검증(`app/ingest/handler_validation.py`), 적용(`app/handlers/sync.py`)
+  - 판정: `INSERT ... ON CONFLICT (source_system_id, login_id) DO UPDATE ... WHERE last_event_at < EXCLUDED.last_event_at RETURNING id` — 행이 돌아오면 accepted, 안 돌아오면 duplicates. 비교·쓰기가 한 문장이라 동시 요청에도 안전
+  - A5 계정 부수 효과(상태 기준): ACTIVE → 연결된 계정이 없을 때만 생성 / TERMINATED → DISABLED가 아니면 전환
+  - 의존성 추가: `argon2-cffi==25.1.0` (A5 초기 해시, M4 로그인에서도 사용)
+- 검증
+  - pytest 93개 통과(M1 59 + 신규 34): 생성·A5 계정, 재전송 duplicates(updated_at까지 불변), 최신 변경 덮어쓰기, 늦게 도착한 옛 이벤트 duplicates, 한 배치 안 순서 역전, 1마이크로초 차이 두 변경 모두 적용, 퇴직 → DISABLED, 퇴직 재적용 불변, 재입사 시 계정 미복구, 퇴직 상태로 처음 들어온 취급자는 계정 미생성, 담당자 계정과 login_id 충돌 시 탈취 안 함, rejected 17가지 경우, 최소수집(연락처 미저장), 거부 메시지에 이름 미포함, 서명 불일치 401, 101건 413
+  - 실행 중인 argus-api에 서명한 요청: 생성 accepted → 재전송 duplicates → 퇴직 accepted → 옛 이벤트 duplicates → 퇴직 시각 누락 rejected. DB에서 TERMINATED·DISABLED·`$argon2id$` 확인 후 점검 행 삭제
+
+**결정사항**
+- **로그인 실패 제한은 지금(M2) 기본 정책으로 구현**, 한계는 보안성 검토 과제로 기록(사용자 질문: 검토 후 보완이 포트폴리오에 나은가?) — 설계(CLAUDE.md 5절, architecture 1절 "rate limit 대체")에 이미 있는 법정 기본 통제이고, "빠뜨린 걸 채웠다"보다 "기본 통제의 한계를 스스로 찾아 개선했다"가 설득력이 큼
+- ② 수신 검증은 ①의 코드 체계를 재사용: `MISSING_FIELD`·`INVALID_FIELD`·`INVALID_TIMESTAMP` + `TERMINATED_AT_REQUIRED`(api-spec 3-2는 추가 코드만 명시)
+  - `occurred_at`에 ①과 같은 "미래 5분 초과 거부" 적용 — 미래 시각이 들어오면 `last_event_at`이 미래로 밀려 그 시각까지의 정상 변경이 전부 duplicates로 무시됨
+  - `terminated_at`은 미래 허용(퇴직 예정 시각, api-spec 3-1 예시가 occurred_at보다 늦음), 오프셋 필수
+  - 재직(ACTIVE)인데 `terminated_at`이 오면 `INVALID_FIELD`, `HANDLER_TERMINATED`인데 재직 상태면 `INVALID_FIELD`(발신 측 버그를 조용히 적용하지 않음)
+- A5 계정은 `argus_user.login_id = handler.login_id`. 같은 login_id를 다른 Argus 계정(예: 담당자)이 쓰고 있으면 **생성하지 않고 경고 로그** — 남의 계정을 취급자 계정으로 바꿔치기하지 않음
+- 테스트 정리는 `TRUNCATE ... CASCADE` 대신 `DELETE` — argus_user를 참조하는 탐지 룰(M3 시드)까지 비워지는 것 방지
+
+**기각한 대안**
+- 로그인 실패 제한을 보안성 검토 이후로 미루기: 설계·법정 기본 통제를 일부러 비워 두는 셈 → 위 결정
+- A5 계정 조회 후 저장(SELECT → INSERT/UPDATE): 사이에 동시 요청이 끼어들 수 있음 → upsert 한 문장
+- A5 초기 비밀번호로 해시가 아닌 표식값(`!` 등): 로그인 코드가 특수 처리해야 함 → 정상 형식의 무작위 argon2id 해시
+
+**설계 변경** (Cowork에서 원본 반영 필요)
+1. **접속기록 outbox 적재 시점: "응답 직후" → "응답 헤더를 보내기 직전", 적재 실패 시 500(fail-closed)** — 응답 후 적재하면 적재 실패 시 기록 없이 개인정보(CSV 등)가 이미 나간 상태가 됨. "기록할 수 없으면 내보내지 않는다". 대가: 응답이 적재 시간만큼 늦고, 플랫폼 DB 장애 시 관리자 기능 정지. 한계: UPDATE는 업무 커밋이 먼저라 적재 실패 시 "수정은 됐는데 500" 가능 — 보호 효과는 주로 조회·다운로드 / 영향: architecture 3-2 #4 (PR ③에서 구현)
+2. **플랫폼 관리자 인증 = JWT(HS256) 쿠키** — `HttpOnly` + `SameSite=Strict`, **30분 미사용 시 만료**(요청마다 재발급, 안전성 확보조치 기준의 "일정 시간 미사용 시 접속 차단"), 매 요청마다 operator 상태(퇴직·잠금) 재확인. 서버 세션은 [S] 스키마에 세션 테이블이 없어 기각. 한계: 로그아웃해도 토큰은 만료 전까지 유효 / 영향: CLAUDE.md 5절 "세션 또는 JWT" 확정, M4 Argus 인증도 같은 방식 예정 (PR ②)
+3. **로그인 실패 정책: 5회 연속 실패 → 잠금, 성공 시 0으로, 해제는 스크립트**(관리 UI 범위 밖). **존재하지 않는 ID의 실패는 접속기록에 남기지 않음** — ID 칸에 비밀번호를 잘못 입력하면 append-only 원장에 영구 저장되고, 그 값은 §2 3호의 "취급자 식별자"도 아님. 존재하는 계정의 실패(비밀번호 오류·잠김·퇴직자)는 `LOGIN`/`FAILURE`로 기록 / 영향: policy(로그인 실패 기준값 신설), api-spec 2-4 (PR ②·③)
+4. **A5 초기 비밀번호: 동기화 시 무작위 argon2id 해시로 계정 생성(사실상 로그인 불가), M4에서 관리 스크립트로 설정.** 재입사(TERMINATED → ACTIVE) 이벤트가 와도 DISABLED 계정을 자동 복구하지 않음 — 권한 복구는 사람이 판단 / 영향: api-spec 3-1 "A5 계정 발급"·7절 미결, architecture 11절 미결
+5. **relay의 401 처리 해석: 백오프 간격(최대 1시간)으로만 재확인 + 매번 ERROR 로그** — api-spec 1-5의 "재시도는 멈추고 알림, 사람이 고치면 자동 재개"는 완전히 멈추면 자동 재개가 불가능해 문구가 상충 / 영향: api-spec 1-5 (PR ③)
+
+**미결·이슈**
+- **(보안성 검토 후보) 로그인 실패 제한의 한계** — ①잠금 해제가 스크립트뿐이고 시간 경과로 풀리지 않음 → 일부러 틀려서 정상 사용자를 잠그는 서비스 거부 가능 ②계정 단위로만 계산 → 여러 계정에 흔한 비밀번호를 하나씩 대입하는 password spraying 미탐지 ③IP 단위 제한 없음 ④존재하지 않는 ID 대입은 Argus에 보이지 않음(설계 변경 3의 대가)
+- (보안성 검토 후보) JWT 로그아웃 후에도 만료 전까지 토큰 유효 — 서버 측 폐기 목록 또는 세션 저장소 검토
+- 플랫폼 DB는 계정 1개(소유자)로 운영 — 무대장치라 Argus 같은 권한 분리는 하지 않음. ISMS-P 점검 실습의 발견사항 후보
+
+**다음 할 일**
+- PR ① 머지 → PR ②(platform-api 뼈대·Alembic `operator`·`member`·`outbox`, 시드, 관리자 로그인, 회원 목록·CSV export)
+
+---
+
 ## 2026-09-29 — M1 마무리 (PR #5 머지, 설계 사본 v0.3 반영)
 
 **한 일**
