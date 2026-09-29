@@ -34,21 +34,39 @@ Git Bash 기준, 레포 루트에서:
 ```bash
 # 1) 환경변수 파일 만들기 — change-me를 무작위 값으로 바꾼다 (.env는 커밋되지 않음)
 cp .env.example .env
-#    예: openssl rand -hex 24 로 생성한 값을 각 비밀번호 칸에 넣는다
+#    예: openssl rand -hex 24 로 생성한 값을 각 비밀번호·키 칸에 넣는다
 
-# 2) 기동 (.env의 COMPOSE_FILE이 infra/docker-compose.yml을 가리킨다)
-docker compose up -d --wait
+# 2) 기동 — 이미지 빌드 → DB → 마이그레이션(argus-migrate) → API 순으로 뜬다
+#    (.env의 COMPOSE_FILE이 infra/docker-compose.yml을 가리킨다)
+docker compose up -d --build --wait
 
 # 3) 상태 확인
 docker compose ps
+curl http://127.0.0.1:18000/healthz     # {"status":"ok","db":"ok"}
 ```
+
+> 이미 `.env`가 있다면 `.env.example`과 비교해 새로 생긴 항목(`ARGUS_APP_DB_USER`, `ARGUS_APP_DB_PASSWORD`, `ARGUS_API_PORT`)을 추가한다.
 
 | 서비스 | 호스트 접속 | 비고 |
 |---|---|---|
 | platform-db | `127.0.0.1:15432` | 플랫폼 DB (PostgreSQL 16) |
 | argus-db | `127.0.0.1:15433` | Argus 접속기록 원장 (PostgreSQL 16) |
+| argus-migrate | — | 기동 시 1회 실행: Alembic 마이그레이션 + API용 DB 계정 발급 후 종료 |
+| argus-api | `127.0.0.1:18000` | 수집 API `POST /ingest/v1/access-logs`, `GET /healthz`, API 문서 `/docs` |
 
-DB 포트는 호스트 루프백(`127.0.0.1`)에만 열린다. 두 DB는 도커 네트워크도 분리되어 있어 플랫폼 쪽 컨테이너에서 argus-db에 접근할 수 없다.
+- 포트는 호스트 루프백(`127.0.0.1`)에만 열린다. 두 DB는 도커 네트워크도 분리되어 있어 플랫폼 쪽 컨테이너에서 argus-db에 접근할 수 없다.
+- argus-api는 DB 소유자가 아닌 **앱 계정**(`ARGUS_APP_DB_USER`)으로 접속한다. 이 계정은 접속기록(`access_log`)에 조회·추가만 할 수 있고 수정·삭제는 할 수 없다(§8③).
+
+### 테스트
+
+Python을 호스트에 설치하지 않고 컨테이너 안에서 실행한다. 테스트는 argus-db에 임시 DB를 만들어 마이그레이션을 적용하고, 끝나면 지운다.
+
+```bash
+docker compose run --rm argus-api-test                       # pytest
+docker compose run --rm argus-api-test ruff check --no-cache .   # lint
+```
+
+### 중지
 
 ```bash
 # 중지 / 데이터까지 삭제

@@ -1,8 +1,9 @@
 # PR 검사 (architecture 8-1 ①)
 # - lint(ruff) + 테스트(pytest, Postgres 16 서비스 컨테이너) — 앱별 matrix
 # - 시크릿 스캔(gitleaks) — 전체 커밋 이력 대상
+# - 설정 파일 스캔(Trivy config, report-only) + 도커 빌드 가능 여부(push 안 함) — M1부터 (architecture 8-5)
 # CodeQL은 GitHub 기본 설정(default setup)으로 별도 실행된다.
-# Trivy(config·이미지)는 앱 이미지가 생기는 "Skeleton 로컬 동작 후" 단계에서 추가 (architecture 8-5).
+# Trivy 이미지 스캔은 main 빌드 단계(②)에서 "Skeleton 로컬 동작 후" 추가.
 name: CI
 
 on:
@@ -85,3 +86,37 @@ jobs:
         run: |
           docker run --rm -v "$PWD:/repo" zricethezav/gitleaks:v8.30.1 \
             git /repo --no-banner --redact --verbose
+
+  # Dockerfile 등 설정 파일 오설정 검사. report-only로 시작 — 결과를 보고 보안성 검토 단계에서 조치,
+  # 이후 Critical/High에서 차단으로 전환 (architecture 8-2).
+  # docker-compose 파일은 Trivy config가 인식하지 않는다(0.74.0 확인) — Dockerfile만 대상.
+  trivy-config:
+    name: config scan (trivy)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      # gitleaks와 같은 방식: 서드파티 Action 대신 공식 이미지를 버전 고정으로 직접 실행
+      - name: Scan config files
+        run: |
+          docker run --rm -v "$PWD:/repo:ro" aquasec/trivy:0.74.0 \
+            config --exit-code 0 --severity LOW,MEDIUM,HIGH,CRITICAL /repo
+
+  # 이미지가 실제로 빌드되는지만 확인 (push 안 함 — GHCR 게시는 main 빌드 단계)
+  docker-build:
+    name: docker build (${{ matrix.app }}:${{ matrix.target }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        app: [argus-api]
+        target: [runtime, dev]
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Build
+        run: docker build --target ${{ matrix.target }} -t ${{ matrix.app }}:ci apps/${{ matrix.app }}
