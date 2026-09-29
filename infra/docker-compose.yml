@@ -1,8 +1,11 @@
 # Argus 로컬 개발 구성 (Walking Skeleton)
 # 레포 루트에서 실행: docker compose up -d   (.env의 COMPOSE_FILE이 이 파일을 가리킨다)
 #
-# M0: DB 2개만. 앱 컨테이너(platform-api, platform-relay, argus-api, argus-worker, *-web)는
-# 각 마일스톤에서 추가한다. Caddy·backup은 첫 배포 때 추가 (architecture 7-2).
+# M0: DB 2개 / M1: argus-migrate, argus-api
+# 나머지 앱 컨테이너(platform-api, platform-relay, argus-worker, *-web)는 각 마일스톤에서 추가한다.
+# Caddy·backup은 첫 배포 때 추가 (architecture 7-2).
+#
+# 테스트: docker compose run --rm argus-api-test   (profile "test" — up 할 때는 뜨지 않음)
 
 name: argus
 
@@ -47,6 +50,69 @@ services:
       interval: 5s
       timeout: 3s
       retries: 10
+
+  # ── Argus 마이그레이션 (일회성) ─────────────────────────────
+  # 소유자 계정으로 스키마를 올리고, API용 앱 계정을 만들어 argus_app 롤에 가입시킨다.
+  # 매 기동마다 실행되지만 멱등이다 (이미 최신이면 통과, 앱 계정은 비밀번호만 갱신).
+  argus-migrate:
+    build: &argus-api-build
+      context: ../apps/argus-api
+      target: runtime
+    image: argus-api:local
+    command: ["sh", "-c", "alembic upgrade head && python -m app.scripts.provision_db_roles"]
+    environment:
+      ARGUS_DB_HOST: argus-db
+      ARGUS_DB_NAME: ${ARGUS_DB_NAME}
+      ARGUS_DB_USER: ${ARGUS_DB_USER}
+      ARGUS_DB_PASSWORD: ${ARGUS_DB_PASSWORD}
+      ARGUS_APP_DB_USER: ${ARGUS_APP_DB_USER:?set ARGUS_APP_DB_USER in .env}
+      ARGUS_APP_DB_PASSWORD: ${ARGUS_APP_DB_PASSWORD:?set ARGUS_APP_DB_PASSWORD in .env}
+    depends_on:
+      argus-db:
+        condition: service_healthy
+    networks:
+      - argus-net
+    restart: "no"
+
+  # ── Argus API: 수집(①)·헬스체크(③), 이후 탐지·소명·보고 ──────
+  argus-api:
+    build: *argus-api-build
+    image: argus-api:local
+    restart: unless-stopped
+    environment:
+      ARGUS_DB_HOST: argus-db
+      ARGUS_DB_NAME: ${ARGUS_DB_NAME}
+      # 소유자가 아닌 앱 계정으로 접속 — access_log UPDATE·DELETE 권한 없음 (§8③)
+      ARGUS_DB_USER: ${ARGUS_APP_DB_USER}
+      ARGUS_DB_PASSWORD: ${ARGUS_APP_DB_PASSWORD}
+      ARGUS_INGEST_SECRET_PLATFORM: ${ARGUS_INGEST_SECRET_PLATFORM:?set ARGUS_INGEST_SECRET_PLATFORM in .env}
+    depends_on:
+      argus-migrate:
+        condition: service_completed_successfully
+    ports:
+      # 로컬 확인용. 운영에서는 외부 비노출, Caddy만 접근 (architecture 7-2)
+      - "127.0.0.1:${ARGUS_API_PORT:-18000}:8000"
+    networks:
+      - argus-net
+
+  # ── 테스트 (profile: test) ──────────────────────────────────
+  # 소스를 마운트해 컨테이너 안에서 pytest 실행. 세션마다 임시 DB를 만들고 끝나면 지운다.
+  argus-api-test:
+    profiles: ["test"]
+    build:
+      context: ../apps/argus-api
+      target: dev
+    image: argus-api:dev
+    environment:
+      # 임시 DB 생성·마이그레이션용 관리자 접속 (소유자 계정)
+      DATABASE_URL: postgresql://${ARGUS_DB_USER}:${ARGUS_DB_PASSWORD}@argus-db:5432/${ARGUS_DB_NAME}
+    volumes:
+      - ../apps/argus-api:/app
+    depends_on:
+      argus-db:
+        condition: service_healthy
+    networks:
+      - argus-net
 
 # 두 시스템은 네트워크도 분리한다. 플랫폼 쪽 컨테이너는 argus-db에 닿을 수 없고,
 # 연결은 수집 API·취급자 동기화 API뿐이다 (architecture 2절).
