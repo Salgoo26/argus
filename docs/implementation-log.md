@@ -29,6 +29,74 @@
 
 ---
 
+## 2026-09-29 — 마일스톤 M1 (Argus 수집: [S] 스키마, append-only·해시체인, 수집 API, 컨테이너·CI)
+
+**한 일**
+- 의존성 버전 고정: FastAPI 0.141.1, uvicorn 0.54.0, SQLAlchemy 2.1.1, Alembic 1.20.0, Pydantic 2.13.5, pydantic-settings 2.15.0, psycopg 3.3.6 / dev: httpx2 2.13.1(TestClient)
+- Alembic 마이그레이션 3개
+  - `0001` [S] 테이블 11개 — db-schema 3절 DDL을 그대로 옮김(부분 유니크 인덱스·CHECK·GIN 포함)
+  - `0002` append-only 이중 장치 — `BEFORE UPDATE` 트리거 + `argus_app`/`argus_purge` 롤·테이블별 권한
+  - `0003` 기준 데이터 — `source_system`(PLATFORM·ARGUS), `setting` 4개
+- 해시체인: 정규화·계산·검증(`app/ledger/hashchain.py`), 유일한 INSERT 경로 `append_access_logs()`(`app/ledger/append.py`, advisory lock 직렬화 + 락 안에서 중복 판정·id 발급)
+- 수집 API `POST /ingest/v1/access-logs`: HMAC 검증(상수 시간 비교, ±300초, 1MB 스트리밍 제한) → 건별 판정 → 멱등 append. `GET /healthz`(DB 실패 시 503)
+- API용 DB 로그인 계정 발급 스크립트(`app.scripts.provision_db_roles`) — 소유자가 아닌 `argus_app` 멤버로 접속
+- argus-api `Dockerfile`(dev/runtime 멀티스테이지, non-root, HEALTHCHECK), compose에 `argus-migrate`(일회성)·`argus-api`·`argus-api-test`(profile) 추가
+- CI: `trivy-config`(report-only), `docker-build`(runtime·dev, push 안 함) job 추가. Dependabot에 docker 생태계(argus-api) 추가
+- README: 실행·테스트 방법 갱신
+- 검증
+  - pytest 59개 통과(로컬 컨테이너) — 서명 불일치·본문 변조·알 수 없는 출처·시각 초과 401, 중복(재전송·같은 배치 안) duplicate, rejected 코드 19종, 100건 초과·1MB 초과 413, 해시체인 연속성, 슈퍼유저 변조·삭제 탐지, 6스레드 동시 append 후 단일 체인 유지, 앱 계정 UPDATE/DELETE/TRUNCATE 권한 거부, 소유자 UPDATE 트리거 거부, 마이그레이션 왕복
+  - `docker compose up` 후 실제 서버에 서명한 요청 전송: 정상 2건 accepted → 재전송 duplicates 2 → 잘못된 키 401 → 필드 오류 건별 rejected → 원장 체인 검증 통과
+  - Trivy config 0.74.0 로컬 실행: Dockerfile 27개 검사 통과, 실패 0
+
+**결정사항**
+- **append 함수는 Python**(`append_access_logs`)에 둔다. 정규화 코드를 append와 검증이 공유 → 규칙이 한 곳에만 존재. 앱 계정이 이 함수를 거치지 않고 INSERT해도 `verify_chain`이 잡아낸다
+- **DB 계정 3층 구조**: 소유자(`ARGUS_DB_USER`, 마이그레이션 전용) / 앱 로그인(`ARGUS_APP_DB_USER`, `argus_app` 멤버, API 접속용) / `argus_purge`(NOLOGIN, 파기 배치 때 로그인 계정 발급). 소유자는 GRANT와 무관하게 전권을 가지므로 API가 소유자로 접속하면 권한 분리가 무의미해짐
+- 앱 롤 권한: `access_log`·`detection_status_history`·`detection_log`는 SELECT·INSERT만(감사 추적 = append-only), `source_system`은 SELECT만, 나머지 업무 테이블은 SELECT·INSERT·UPDATE(DELETE 없음). 이후 테이블 추가 시 마이그레이션에서 **테이블마다 명시적으로 부여**(ALTER DEFAULT PRIVILEGES 미사용)
+- 로그인 계정의 비밀번호는 마이그레이션이 아닌 별도 스크립트에서 설정 — 비밀번호가 마이그레이션 코드·이력에 남지 않게
+- `received_at`은 DB default가 아니라 앱이 정해서 넣는다 — INSERT 전에 해시를 계산해야 하므로. 같은 이유로 append 호출자는 모든 컬럼을 명시해야 함(DB default에 기대면 저장값과 해시값이 어긋날 수 있음)
+- 마이그레이션은 autogenerate 대신 **DDL 원문을 SQL로** — 부분 인덱스·CHECK·트리거·권한을 설계 문서 그대로 재현. SQLAlchemy 테이블 정의는 쿼리용으로 쓰는 테이블만 둠
+- SQLAlchemy는 동기(psycopg3) — HMAC 검증만 async 의존성(원본 바이트 스트리밍), 본 처리는 스레드풀의 동기 함수
+- 빈 `context {}`는 NULL로 저장
+- 테스트는 세션마다 **임시 DB 생성 → 실제 마이그레이션 → 앱 계정 발급** 후 앱 계정으로 실행. 권한 분리를 모의 객체가 아닌 실제 DB로 검증
+- 수집 거부 메시지에 입력값을 되풀이하지 않음(코드값 제외), FastAPI 기본 422 본문(입력값 포함)도 고정 형식 400으로 대체 — 응답·로그로 개인정보가 새지 않게
+- Trivy는 gitleaks와 같은 방식(공식 이미지 `aquasec/trivy:0.74.0` 직접 실행, `--exit-code 0` report-only)
+
+**기각한 대안**
+- append를 PL/pgSQL `SECURITY DEFINER` 함수로(앱엔 EXECUTE만): 우회 INSERT 자체를 막는 강제력은 더 강하지만, 정규화를 SQL·Python 양쪽에 똑같이 구현해야 해 불일치 위험 → 보안성 검토 단계 개선 과제로 이관
+- 해시 대상에서 `id` 제외: 체인만으로도 수정·삭제는 탐지되지만, 탐지 배치 커서가 `id`라 순서 바꿔치기까지 드러나게 포함
+- 테스트에서 소유자 계정으로 API 실행: 간단하지만 권한 분리를 검증할 수 없음
+- `uvicorn app.main:app`(모듈 전역 앱): import만으로 설정·DB 엔진이 만들어져 테스트가 불편 → `--factory` 방식
+- 테스트 클라이언트 `httpx`: Starlette가 deprecated 경고 → 권장 클라이언트 `httpx2`
+
+**설계 변경** (Cowork에서 원본 반영 필요)
+1. **해시체인 정규화 규칙 v1 확정** — db-schema 8절·architecture 11절 미결 해소 / 영향: db-schema 3-5
+   - 대상: `hash`를 뺀 access_log 전 컬럼(`id`·`prev_hash`·`received_at` 포함)
+   - 표기: 시각 UTC `YYYY-MM-DDTHH:MM:SS.ffffffZ`, IP는 정규형(`2001:db8::1`), UUID 소문자 하이픈, NULL은 JSON null, 배열 순서 유지
+   - 직렬화: JSON 키 정렬·공백 없음·UTF-8 / `hash = SHA-256` 소문자 hex / 첫 레코드 `prev_hash` = NULL
+2. **이벤트 100건 초과 → `413 TOO_MANY_EVENTS`** (spec에 코드 미정) — 400이면 relay가 배치 전체를 DEAD 처리, 413이면 절반으로 쪼개 재전송(api-spec 1-5) → 접속기록을 버리지 않는 쪽 / 영향: api-spec 1-1·1-5·2-5
+3. **rejected 코드 `INVALID_FIELD` 추가** — 코드표에 없던 필드 오류: `login_id` 형식·길이, `subject.ids` 1,000개 초과, `count < len(ids)`, `subject.type`·`result` 값 오류, 타입 오류, `request.path`에 쿼리스트링 / 영향: api-spec 2-5
+4. **원본 개인정보 유입 차단 검증 추가**(CLAUDE.md 3절 #3의 수신 측 방어) — `subject.ids`는 `[A-Za-z0-9_-]{1,64}`만(이메일 등 거부), `request.path`에 `?`·`#` 금지, `request.query_keys`는 키 이름 형식만 / 영향: api-spec 2-2
+5. **Argus 전용 코드값은 외부 출처에서 거부** — `EXPORT`·`UNMASK` → `INVALID_ACTION`, `ACCESS_LOG` → `INVALID_CATEGORY`. api-spec 2-3의 "(Argus 전용)" 표기를 수신 검증으로 구체화 / 영향: api-spec 2-3·2-5
+6. **요청 단위 오류 코드 세분** (spec 1-6은 예시 1개뿐): 401 `UNKNOWN_SOURCE`·`INVALID_TIMESTAMP`·`INVALID_SIGNATURE` / 400 `MALFORMED_JSON`·`MISSING_EVENTS` / 413 `PAYLOAD_TOO_LARGE`·`TOO_MANY_EVENTS`. 401을 원인별로 나눈 이유: relay 알림에서 키 문제와 시각 오차를 구분해야 사람이 고칠 수 있음(출처 목록은 비밀이 아님) / 영향: api-spec 1-5·1-6
+7. **취급자 동기화 API(②)의 Argus 수신 쪽 → M2 초반으로** — M1 크기 조절. HMAC·응답 형식은 M1 것을 재사용 / 영향: CLAUDE.md 6절 M1·M2 범위
+8. **Trivy config는 docker-compose 파일을 인식하지 않음**(0.74.0으로 확인, "Detected config files num=1" = Dockerfile만) — architecture 11절 미결 해소 / 영향: architecture 8-1 문구에서 compose 제외
+
+**미결·이슈**
+- **(사용자 조치) GitHub 웹에서 PR을 머지해 생긴 머지 커밋에 개인 이메일이 작성자로 기록됨**(#1~#4). M0의 "공개 레포 커밋에 개인 이메일 노출 방지" 결정이 웹 머지에는 적용되지 않았음. GitHub 설정 → Emails → "Keep my email addresses private"로 이후 머지를 막는다. 이미 push된 이력은 main 이력을 다시 써야 해서 되돌리지 않음(공개된 사실로 간주)
+- **로컬 HMAC 키가 작업 대화에 노출되어 교체함** — `.env` 확인 시 마스킹 필터가 `ARGUS_INGEST_SECRET_PLATFORM`을 놓침. 레포에는 들어가지 않았고, 사용처(argus-api)만 있던 시점이라 새 값으로 교체. 교훈: `.env` 확인은 값을 전부 가리는 방식(`sed -E 's/=.+/=<set>/'`)으로만 한다
+- (보안성 검토 후보) 소유자는 `access_log`를 TRUNCATE·DELETE할 수 있음 — 트리거는 UPDATE만 막음(설계대로). `BEFORE TRUNCATE` 트리거 추가 검토
+- (보안성 검토 후보) 앱 계정의 직접 INSERT 차단(SECURITY DEFINER append) — 위 기각 대안 참고
+- HMAC 신·구 키 병행(api-spec 1-2 #4)은 미구현 — Skeleton은 출처당 키 1개
+- ② 수신 시 중복 판정: `handler` 테이블에 event_id 저장 칸이 없어 `last_event_at` 기준으로만 가능 — M2에서 정리
+- CLAUDE.md 6절 M1 완료 기준에 Trivy config 미반영(지난 세션부터 이월, Cowork 판단)
+- platform-api setuptools `>=75` — Dependabot PR 대기, 안 오면 M2에서 맞춤
+
+**다음 할 일**
+- M1 PR 머지 → Cowork "구현" 방에서 진행기록·설계 변경(위 1~8) 동기화
+- M2: ② 취급자 동기화 수신(Argus) → 플랫폼 `operator`·`member`·`outbox` + 시드, 관리자 로그인, CSV export, Agent 미들웨어, relay
+
+---
+
 ## 2026-09-29 — 마일스톤 M0 마무리 (PR #1 머지, 아키텍처 설계서 사본 갱신)
 
 **한 일**
