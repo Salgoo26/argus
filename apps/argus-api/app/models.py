@@ -28,6 +28,35 @@ source_system = Table(
     Column("name", String(100), nullable=False),
 )
 
+handler = Table(
+    "handler",
+    metadata,
+    Column("id", BigInteger, primary_key=True),
+    Column("source_system_id", SmallInteger, nullable=False),
+    Column("login_id", String(64), nullable=False),
+    Column("name", String(50), nullable=False),
+    Column("team", String(50)),
+    Column("employment_status", String(16), nullable=False),
+    Column("terminated_at", DateTime(timezone=True)),
+    Column("last_event_at", DateTime(timezone=True), nullable=False),
+    Column("created_at", DateTime(timezone=True), nullable=False),
+    Column("updated_at", DateTime(timezone=True), nullable=False),
+)
+
+argus_user = Table(
+    "argus_user",
+    metadata,
+    Column("id", BigInteger, primary_key=True),
+    Column("login_id", String(64), nullable=False),
+    Column("password_hash", String(255), nullable=False),
+    Column("role", String(16), nullable=False),
+    Column("handler_id", BigInteger),
+    Column("status", String(16), nullable=False),
+    Column("failed_login_count", Integer, nullable=False),
+    Column("last_login_at", DateTime(timezone=True)),
+    Column("created_at", DateTime(timezone=True), nullable=False),
+)
+
 access_log = Table(
     "access_log",
     metadata,
