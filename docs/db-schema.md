@@ -1,6 +1,6 @@
 # DB 스키마 (Argus / 플랫폼)
 
-> 작성일: 2026-09-23 / v0.2 (2026-09-23 개정 — 요구사항 전수 대조 후 6개 테이블·다수 컬럼 추가) / **v0.3 (2026-09-29 개정 — 구현 M1 반영: 해시체인 정규화 규칙 v1 확정, DB 계정 구조·권한 확정, 알려진 한계 명시)** (2026-09-30 보완 — A5 초기 해시 주석)
+> 작성일: 2026-09-23 / v0.2 (2026-09-23 개정 — 요구사항 전수 대조 후 6개 테이블·다수 컬럼 추가) / **v0.3 (2026-09-29 개정 — 구현 M1 반영: 해시체인 정규화 규칙 v1 확정, DB 계정 구조·권한 확정, 알려진 한계 명시)** (2026-09-30 보완 — A5 초기 해시 주석) / **v0.4 (2026-10-01 개정 — 구현 M3 반영: 탐지 날짜 KST 기준, 해석 불가 룰 시 순찰 실패, 빈 순찰 기록, 순찰 상한, `log_summary` 잘림 표시)**
 > 관련 문서: [[아키텍처_설계서.md]], [[API명세서_시스템간.md]], [[정책정의서.md]], [[액터별_플로우.md]], [[요구사항정의서.md]]
 > DBMS: PostgreSQL 16 (플랫폼 DB / Argus DB 별도 인스턴스)
 > 표기: **[S]** = Walking Skeleton에 필요한 테이블. 컬럼은 전체를 정의하되 Skeleton에서는 [S] 테이블만 생성한다.
@@ -256,7 +256,7 @@ CREATE TABLE detection (
     rule_snapshot      jsonb        NOT NULL,     -- 탐지 당시 룰 전체 (판단 근거 보존)
     source_system_id   smallint     NOT NULL REFERENCES source_system(id),
     actor_login_id     varchar(64)  NOT NULL,
-    group_bucket       varchar(64)  NOT NULL,     -- EVENT: '2026-09-15' / AGGREGATE: 윈도우 시작 시각
+    group_bucket       varchar(64)  NOT NULL,     -- EVENT: '2026-09-15'(occurred_at의 KST 날짜, v0.4) / AGGREGATE: 윈도우 시작 시각
     severity           varchar(8)   NOT NULL,
     status             varchar(16)  NOT NULL DEFAULT 'DETECTED'
                        CHECK (status IN ('DETECTED','REQUESTED','SUBMITTED','APPROVED','REJECTED','DISMISSED','ESCALATED')),
@@ -378,7 +378,7 @@ CREATE TABLE inspection_report (
 );
 ```
 
-- **`log_summary` 스냅샷 내용**: `{log_count, subject_count_sum, distinct_subject_count, actions[], data_categories[], first_occurred_at, last_occurred_at, ip_list[]}`. 접속기록이 보관기간 만료로 파기되면 `detection_log` 링크는 CASCADE로 사라지지만, 이 요약은 탐지건에 남아 점검 증적이 유지된다(7절에서 동작 검증).
+- **`log_summary` 스냅샷 내용**: `{log_count, subject_count_sum, distinct_subject_count, subject_ids_truncated, actions[], data_categories[], first_occurred_at, last_occurred_at, ip_list[]}`. **회원 PK는 담지 않고 숫자만** 담는다. `subject_ids_truncated`(v0.4)는 연결된 기록 중 회원 PK가 1,000개에서 잘린 것이 있으면 true — 이때 `distinct_subject_count`는 **하한값**이다. `subject_count_sum`(행위의 양, 탐지 판정)과 `distinct_subject_count`(피해 범위, 유출 통지·신고 판단)는 서로 다른 질문의 답이라 둘 다 유지한다. 요약은 증분 갱신이 아니라 **연결된 기록 전체에서 다시 계산**한다(재처리해도 같은 값). 접속기록이 보관기간 만료로 파기되면 `detection_log` 링크는 CASCADE로 사라지지만, 이 요약은 탐지건에 남아 점검 증적이 유지된다(7절에서 동작 검증).
 - **보고서 마스킹**(신규 정책 제안 — 6절 #3): 보고서는 기본적으로 마스킹된 식별값으로 생성한다. 식별값을 포함한 보고서를 만들려면 `unmasked=true` + 사유가 필요하고, 그 행위는 Argus 접속기록에 `EXPORT`(+`context.reason`)로 기록된다. 화면에서는 마스킹을 강제하면서 보고서 파일로는 그냥 빠져나가는 구멍을 막기 위함이다.
 - **LOG-15**(발생-제출 시간차) = `explanation.submitted_at - detection.first_occurred_at`, **LOG-14**(취급자별 소명 이력) = `detection` × `explanation`을 `actor_login_id`로 집계. 별도 테이블 불필요.
 
@@ -543,11 +543,14 @@ GRANT SELECT, DELETE ON access_log TO argus_purge;  -- 파기 배치 전용
 
 ### 3-7. 탐지 배치의 데이터 흐름 (F-04)
 
-1. 직전 성공 실행의 `to_access_log_id` **초과** ~ 현재 최대 `id` **이하**를 이번 범위로 잡고 `detection_batch_run` 생성(RUNNING)
-2. 활성 룰 로드 → 룰의 `access_path`로 대상 로그를 먼저 필터 → `rule_exception` 해당 건 제외
-3. **EVENT**: 조건식 판정 → 그룹 키 `(rule, source, actor, occurred_at의 날짜)`로 **진행 중** 탐지건 조회 → 없으면 생성(`DETECTED`) + 상태 이력 + 알림, 있으면 하위 로그만 추가하고 `log_count`·`last_occurred_at`·`log_summary` 갱신
+1. 직전 성공 실행의 `to_access_log_id` **초과** ~ 현재 최대 `id` **이하**를 이번 범위로 잡고 `detection_batch_run` 생성(RUNNING — 별도 트랜잭션으로 먼저 기록해 진행 중인 순찰이 밖에서 보이게). **순찰 1회 최대 10,000건**, 밀려 있으면 쉬지 않고 다음 순찰. **새 기록이 없어도 순찰 이력을 남긴다**(v0.4 — "탐지가 주기적으로 수행됐다"는 점검 증적이자, worker 중단 기간과 기록 없는 기간을 구분하는 근거). 동시 실행은 advisory lock으로 막고, 비정상 종료로 남은 RUNNING은 다음 순찰이 정리한다.
+2. 활성 룰 로드 → **켜진 룰 중 해석할 수 없는 룰(모르는 필드·연산자, 값 타입, 구조, 미지원 유형)이 하나라도 있으면 순찰 전체를 FAILED로 끝내고 책갈피를 유지**(v0.4 — 그 룰만 건너뛰면 책갈피가 넘어가 그 사이 기록이 그 룰로 영영 평가되지 않음. 기준값의 적절성은 해석 가능성과 별개로 담당자 판단) → 룰의 `access_path`로 대상 로그를 먼저 필터 → `rule_exception` 해당 건 제외
+3. **EVENT**: 조건식 판정 → 그룹 키 `(rule, source, actor, occurred_at의 날짜)`로 **진행 중** 탐지건 조회(`FOR UPDATE`) → 없으면 생성(`DETECTED`) + 룰 사본 + 상태 이력(시스템) + 알림, 있으면 하위 로그만 추가하고 `log_count`·`last_occurred_at`·`log_summary` 갱신. 같은 룰로 이미 어떤 탐지건에 붙은 기록은 다시 붙이지 않는다(재처리 시 증거 복제 방지)
+   - **날짜는 한국 시각(KST, +09:00 고정) 기준**(v0.4) — UTC 날짜를 쓰면 KST 새벽 0~9시 행위가 전날 탐지건으로 묶인다. 야간·주말 룰의 시각·요일 판정도 KST. DB 시간대 데이터에 의존하지 않도록 앱에서 고정 오프셋으로 계산
 4. **AGGREGATE**: 범위 내 로그가 속한 윈도우들을 다시 집계(늦게 도착한 로그 포함) → 임계치 초과 시 같은 방식으로 upsert
-5. SUCCESS 기록. 실패 시 FAILED로 남기고 다음 실행이 같은 범위부터 재처리(멱등: 하위 로그 PK 중복은 무시)
+5. 판정·탐지건·하위 로그·SUCCESS를 **한 트랜잭션**으로 기록. 실패 시 FAILED로 남기고 다음 실행이 같은 범위부터 재처리(멱등: 하위 로그 PK 중복은 무시). 실패 사유에는 예외 메시지 **첫 줄만** 남긴다(DB 오류의 상세 줄에 값이 실릴 수 있음)
+
+> **왜 배치이고 5분인가** (2026-10-01 정리): Argus는 접근을 막는 통제가 아니라 **이미 일어난 행위를 보고 소명을 받는 탐지 통제**다. 소명은 사람의 속도로 진행되고, 배치는 집계형 룰·늦게 도착한 기록·실패 재처리·수집과의 분리·단일 VM 인프라에 모두 유리하다. 실시간 스트리밍은 인프라 부담으로 스트레치(요구사항정의서 5-3). 5분은 당일 대응이 가능하면서 부담 없는 간격이며 `setting`으로 조정한다.
 
 > **커서는 `id` 기준이다.** `received_at`은 시계 오차·동시 삽입 때문에 누락 위험이 있어 커서로 쓰지 않고, 전송 지연 모니터링(`received_at - occurred_at`) 용도로만 쓴다. (API 명세 2-6과 일치)
 
