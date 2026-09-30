@@ -31,12 +31,14 @@ def clean_detection(admin_engine):
     with admin_engine.begin() as conn:
         conn.execute(text("DELETE FROM detection_log"))
         conn.execute(text("DELETE FROM detection_status_history"))
+        conn.execute(text("DELETE FROM explanation"))
         conn.execute(text("DELETE FROM detection"))
         conn.execute(text("DELETE FROM detection_batch_run"))
         conn.execute(text("DELETE FROM detection_rule WHERE name <> '대량 다운로드'"))
         conn.execute(
             text(
-                """UPDATE detection_rule SET enabled = true, condition = '{"all": [
+                """UPDATE detection_rule SET enabled = true, auto_request = true,
+                   condition = '{"all": [
                     {"field": "action", "op": "eq", "value": "DOWNLOAD"},
                     {"field": "subject_count", "op": "gte", "value": 50}]}'
                    WHERE name = '대량 다운로드'"""
@@ -335,3 +337,104 @@ def test_summary_has_counts_but_no_member_ids(app_engine):
     assert summary["subject_ids_truncated"] is True  # 고유 인원은 하한값
     assert summary["actions"] == ["DOWNLOAD"] and summary["ip_list"] == ["203.0.113.10"]
     assert "10001" not in json.dumps(summary)  # 최소처리 — 숫자만, 회원 PK는 없다
+
+
+# ── 자동 소명 요청 (2026-10-01 사용자 확정) ────────────────
+
+
+def add_handler_account(admin_engine, login_id="ops_park", status="ACTIVE", employed=True):
+    with admin_engine.begin() as conn:
+        handler_id = conn.execute(
+            text(
+                """INSERT INTO handler (source_system_id, login_id, name, team,
+                                        employment_status, terminated_at, last_event_at)
+                   VALUES (1, :login, '박지훈', 'OPS', :emp, :term, now()) RETURNING id"""
+            ),
+            {
+                "login": login_id,
+                "emp": "ACTIVE" if employed else "TERMINATED",
+                "term": None if employed else NOW,
+            },
+        ).scalar_one()
+        conn.execute(
+            text(
+                """INSERT INTO argus_user (login_id, password_hash, role, handler_id, status)
+                   VALUES (:login, 'unusable', 'HANDLER', :hid, :status)"""
+            ),
+            {"login": login_id, "hid": handler_id, "status": status},
+        )
+
+
+@pytest.fixture
+def cleanup_accounts(admin_engine):
+    yield
+    with admin_engine.begin() as conn:
+        conn.execute(text("DELETE FROM argus_user"))
+        conn.execute(text("DELETE FROM handler"))
+
+
+@pytest.mark.parametrize("status", ["ACTIVE", "LOCKED"])
+def test_new_case_is_auto_requested(app_engine, admin_engine, cleanup_accounts, status):
+    add_handler_account(admin_engine, status=status)  # 잠김은 풀면 되는 일시 상태 — 요청은 간다
+    download(app_engine)
+
+    result = run_batch(app_engine)
+
+    [case] = detections(app_engine)
+    assert case["status"] == "REQUESTED" and case["round"] == 1
+    with app_engine.connect() as conn:
+        [request] = conn.execute(text("SELECT * FROM explanation")).mappings().all()
+        history = conn.execute(
+            select(
+                detection_status_history.c.from_status,
+                detection_status_history.c.to_status,
+                detection_status_history.c.actor_user_id,
+            ).order_by(detection_status_history.c.id)
+        ).all()
+    assert request["round"] == 1 and request["requested_by"] is None  # 시스템 요청
+    assert request["request_message"] == "자동 소명 요청 — 대량 다운로드"
+    assert history == [(None, "DETECTED", None), ("DETECTED", "REQUESTED", None)]
+    assert case["rule_snapshot"]["auto_request"] is True
+    assert result.detected == 1
+
+
+def test_same_day_repeats_do_not_send_another_request(app_engine, admin_engine, cleanup_accounts):
+    # "하루 1건" — 그룹핑(취급자·룰·KST 날짜)으로 요청도 한 번뿐
+    add_handler_account(admin_engine)
+    download(app_engine)
+    run_batch(app_engine)
+    download(app_engine)
+    run_batch(app_engine)
+    with app_engine.connect() as conn:
+        assert conn.execute(text("SELECT count(*) FROM explanation")).scalar_one() == 1
+    [case] = detections(app_engine)
+    assert case["log_count"] == 2 and case["round"] == 1
+
+
+@pytest.mark.parametrize(
+    ("account", "reason"),
+    [
+        (None, "no-account"),  # 미동기화
+        ({"status": "DISABLED"}, "disabled"),
+        ({"employed": False}, "terminated"),
+    ],
+    ids=["no-account", "disabled", "terminated"],
+)
+def test_case_stays_detected_when_nobody_can_answer(
+    app_engine, admin_engine, cleanup_accounts, account, reason
+):
+    if account is not None:
+        add_handler_account(admin_engine, **account)
+    download(app_engine)
+    run_batch(app_engine)
+    [case] = detections(app_engine)
+    assert case["status"] == "DETECTED" and case["round"] == 0  # 담당자가 수동 처리
+
+
+def test_rule_with_auto_request_off_stays_detected(app_engine, admin_engine, cleanup_accounts):
+    add_handler_account(admin_engine)
+    with admin_engine.begin() as conn:
+        conn.execute(update(detection_rule).values(auto_request=False))
+    download(app_engine)
+    run_batch(app_engine)
+    assert detections(app_engine)[0]["status"] == "DETECTED"
