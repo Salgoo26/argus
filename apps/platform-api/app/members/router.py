@@ -1,6 +1,6 @@
 """회원 목록·다운로드 (PLT-11, PLT-13) — 감시 대상 관리자 기능
 
-접속기록(Agent)은 M2 PR ③에서 붙인다. 이 파일은 업무 기능만 담는다.
+접속기록: 각 라우트의 @access_log 문패 + record_subjects(조회·다운로드한 회원 PK).
 """
 
 import csv
@@ -11,6 +11,7 @@ from typing import Annotated
 from fastapi import APIRouter, Query, Request, Response
 from sqlalchemy import func, select
 
+from app.agent import access_log, record_subjects
 from app.auth.deps import CurrentOperator
 from app.models import member
 
@@ -30,6 +31,7 @@ def _csv_safe(value: object) -> str:
 
 
 @router.get("")
+@access_log(action="READ", data_category="MEMBER_BASIC")
 def list_members(
     request: Request,
     _operator: CurrentOperator,
@@ -52,10 +54,13 @@ def list_members(
             .offset((page - 1) * size)
         ).mappings()
         items = [dict(r) for r in rows]
+    # 화면에 표시된 회원 = 처리한 정보주체 (api-spec 2-4 "회원 목록 조회, 20건 표시")
+    record_subjects(item["id"] for item in items)
     return {"items": items, "page": page, "size": size, "total": total}
 
 
 @router.get("/export")
+@access_log(action="DOWNLOAD", data_category="MEMBER_BASIC")
 def export_members(
     request: Request,
     _operator: CurrentOperator,
@@ -83,6 +88,8 @@ def export_members(
 
     with request.app.state.engine.connect() as conn:
         rows = conn.execute(query.order_by(member.c.id).limit(limit)).all()
+    # 파일에 담긴 회원 전원 = 처리한 정보주체. 1,000명이 넘으면 Agent가 잘라 보내고 건수는 전체
+    record_subjects(row[0] for row in rows)
 
     buffer = io.StringIO()
     writer = csv.writer(buffer)

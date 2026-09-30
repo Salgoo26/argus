@@ -13,6 +13,7 @@ from fastapi import APIRouter, Request, Response
 from pydantic import BaseModel, Field
 from sqlalchemy import select, update
 
+from app.agent import access_log, access_log_exempt, record_actor
 from app.auth.deps import MAX_FAILED_LOGINS
 from app.auth.passwords import dummy_password_hash, verify_password
 from app.auth.tokens import clear_session_cookie, issue_token, set_session_cookie
@@ -34,6 +35,7 @@ def _invalid_credentials() -> ApiError:
 
 
 @router.post("/login")
+@access_log(action="LOGIN", data_category="NONE")
 def login(body: LoginRequest, request: Request, response: Response) -> dict:
     settings: Settings = request.app.state.settings
 
@@ -45,6 +47,12 @@ def login(body: LoginRequest, request: Request, response: Response) -> dict:
             .mappings()
             .first()
         )
+        if row is not None:
+            # 존재하는 계정의 시도만 접속기록(LOGIN)에 남는다 — 성공·실패 모두.
+            # 없는 ID는 식별자가 아니고, ID 칸에 잘못 입력된 비밀번호가 append-only 원장에
+            # 영구히 남을 수 있어 기록하지 않는다 (implementation-log 2026-09-29 설계 변경 3)
+            record_actor(row["login_id"])
+
         if row is None:
             verify_password(dummy_password_hash(), body.password)  # 응답 시간 균일화
             error = _invalid_credentials()
@@ -80,5 +88,6 @@ def login(body: LoginRequest, request: Request, response: Response) -> dict:
 
 
 @router.post("/logout", status_code=204)
+@access_log_exempt("개인정보 처리 없음 — api-spec 수행업무 코드에 로그아웃 없음")
 def logout(request: Request, response: Response) -> None:
     clear_session_cookie(response, request.app.state.settings)

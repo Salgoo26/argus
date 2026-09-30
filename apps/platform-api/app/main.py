@@ -8,6 +8,9 @@ from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 from sqlalchemy import create_engine, text
 
+from app.agent.client_ip import parse_trusted_proxies
+from app.agent.decorators import check_admin_routes
+from app.agent.middleware import AccessLogMiddleware
 from app.auth.router import router as auth_router
 from app.auth.tokens import set_session_cookie
 from app.config import Settings
@@ -39,6 +42,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             set_session_cookie(response, token, settings)
         return response
 
+    # 가장 바깥에 둔다 — 안쪽 미들웨어(쿠키 연장)까지 끝난 최종 응답 상태로 결과를 판정하고,
+    # 기록에 실패하면 그 응답 전체를 막을 수 있게 (add_middleware는 나중에 추가한 것이 바깥)
+    app.add_middleware(
+        AccessLogMiddleware, trusted_proxies=parse_trusted_proxies(settings.trusted_proxies)
+    )
+
     @app.get("/healthz")
     def healthz(request: Request):
         # 인증 없음, 접속기록 대상 아님(개인정보 처리 없음)
@@ -48,5 +57,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         except Exception:
             return JSONResponse({"status": "error", "db": "error"}, status_code=503)
         return {"status": "ok", "db": "ok"}
+
+    # 문패 없는 관리자 라우트가 있으면 기동 거부 (agent/decorators.py)
+    check_admin_routes(app)
 
     return app

@@ -14,18 +14,21 @@ from alembic import command
 from alembic.config import Config
 from fastapi.testclient import TestClient
 from psycopg import sql
-from sqlalchemy import create_engine, insert, text
+from sqlalchemy import create_engine, insert, select, text
 from sqlalchemy.engine import URL, make_url
 
 from app.auth.passwords import hash_password
 from app.config import Settings
 from app.main import create_app
-from app.models import operator
+from app.models import operator, outbox
 
 APP_ROOT = Path(__file__).resolve().parent.parent
 ADMIN_URL = os.environ.get("DATABASE_URL")
 TEST_AUTH_SECRET = "test-auth-secret-not-for-production-0123456789"  # 테스트 전용 더미 값
 TEST_PASSWORD = "test-password-1234"  # 테스트 전용 더미 값
+# 테스트 클라이언트의 접속 주소 — 기본값 "testclient"는 IP가 아니라 접속지로 기록할 수 없다.
+# 203.0.113.0/24는 문서·예시용으로 예약된 대역 (RFC 5737)
+TEST_CLIENT_ADDR = ("203.0.113.10", 50000)
 
 requires_db = pytest.mark.skipif(not ADMIN_URL, reason="DATABASE_URL 미설정 — DB 테스트 생략")
 
@@ -93,7 +96,7 @@ def engine(db_url: URL):
 
 @pytest.fixture
 def client(app):
-    with TestClient(app) as c:
+    with TestClient(app, client=TEST_CLIENT_ADDR) as c:
         yield c
 
 
@@ -130,3 +133,11 @@ def add_operator(engine, password_hash: str, **overrides) -> int:
 
 def login(client, login_id: str = "ops_park", password: str = TEST_PASSWORD):
     return client.post("/admin/auth/login", json={"login_id": login_id, "password": password})
+
+
+def outbox_payloads(engine, topic: str = "ACCESS_LOG") -> list[dict]:
+    with engine.connect() as conn:
+        rows = conn.execute(
+            select(outbox.c.payload).where(outbox.c.topic == topic).order_by(outbox.c.id)
+        ).scalars()
+        return list(rows)
