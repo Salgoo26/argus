@@ -54,6 +54,7 @@ curl http://127.0.0.1:18001/healthz     # platform-api {"status":"ok","db":"ok"}
 | argus-db | `127.0.0.1:15433` | Argus 접속기록 원장 (PostgreSQL 16) |
 | argus-migrate | — | 기동 시 1회 실행: Alembic 마이그레이션 + API용 DB 계정 발급 후 종료 |
 | argus-api | `127.0.0.1:18000` | 수집 API `POST /ingest/v1/access-logs`, 취급자 동기화 `POST /ingest/v1/handler-events`, `GET /healthz`, API 문서 `/docs` |
+| argus-worker | — | 탐지 배치: `setting.detection_interval_min`(기본 5분)마다 원장을 순찰해 룰에 걸린 기록으로 탐지건 생성. 즉시 한 번: `docker compose exec argus-worker python -m app.worker --once` |
 | platform-migrate | — | 기동 시 1회 실행: 플랫폼 Alembic 마이그레이션 후 종료 |
 | platform-seed | — | 기동 시 1회 실행: 가상 회원 500명·취급자 5명(비어 있을 때만) 후 종료 |
 | platform-api | `127.0.0.1:18001` | 관리자 로그인 `POST /admin/auth/login`, 회원 목록 `GET /admin/members`, CSV `GET /admin/members/export`, API 문서 `/docs`. 관리자 라우트 요청은 접속기록으로 outbox에 적재 |
