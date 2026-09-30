@@ -25,6 +25,16 @@ def test_skeleton_tables_created(admin_engine):
     assert tables == SKELETON_TABLES
 
 
+def test_bulk_download_rule_seeded(admin_engine):
+    # M3 — Walking Skeleton의 유일한 룰 (db-schema 3-6 [S])
+    with admin_engine.connect() as conn:
+        row = conn.execute(
+            text("SELECT rule_type, access_path, severity, enabled, condition FROM detection_rule")
+        ).one()
+    assert row[:4] == ("EVENT", "APP", "HIGH", True)
+    assert row[4]["all"][0] == {"field": "action", "op": "eq", "value": "DOWNLOAD"}
+
+
 def test_reference_data_seeded(admin_engine):
     with admin_engine.connect() as conn:
         codes = set(conn.execute(text("SELECT code FROM source_system")).scalars())

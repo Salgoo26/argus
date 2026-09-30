@@ -11,9 +11,11 @@ from sqlalchemy import (
     DateTime,
     Integer,
     MetaData,
+    Numeric,
     SmallInteger,
     String,
     Table,
+    Text,
     Uuid,
 )
 from sqlalchemy.dialects.postgresql import ARRAY, CHAR, INET, JSONB
@@ -55,6 +57,86 @@ argus_user = Table(
     Column("failed_login_count", Integer, nullable=False),
     Column("last_login_at", DateTime(timezone=True)),
     Column("created_at", DateTime(timezone=True), nullable=False),
+)
+
+detection_rule = Table(
+    "detection_rule",
+    metadata,
+    Column("id", BigInteger, primary_key=True),
+    Column("name", String(100), nullable=False),
+    Column("description", Text),
+    Column("rule_type", String(16), nullable=False),
+    Column("access_path", String(8), nullable=False),
+    Column("severity", String(8), nullable=False),
+    Column("enabled", Boolean, nullable=False),
+    Column("condition", JSONB, nullable=False),
+    Column("aggregate", JSONB),
+    Column("group_by", String(32), nullable=False),
+    Column("version", Integer, nullable=False),
+)
+
+detection = Table(
+    "detection",
+    metadata,
+    Column("id", BigInteger, primary_key=True),
+    Column("rule_id", BigInteger, nullable=False),
+    Column("rule_version", Integer, nullable=False),
+    Column("rule_snapshot", JSONB, nullable=False),
+    Column("source_system_id", SmallInteger, nullable=False),
+    Column("actor_login_id", String(64), nullable=False),
+    Column("group_bucket", String(64), nullable=False),
+    Column("severity", String(8), nullable=False),
+    Column("status", String(16), nullable=False),
+    Column("round", Integer, nullable=False),
+    Column("log_count", Integer, nullable=False),
+    Column("aggregate_value", Numeric),
+    Column("log_summary", JSONB),
+    Column("first_occurred_at", DateTime(timezone=True), nullable=False),
+    Column("last_occurred_at", DateTime(timezone=True), nullable=False),
+    Column("detected_at", DateTime(timezone=True), nullable=False),
+    Column("closed_at", DateTime(timezone=True)),
+    Column("close_reason", Text),
+)
+
+detection_log = Table(
+    "detection_log",
+    metadata,
+    Column("detection_id", BigInteger, primary_key=True),
+    Column("access_log_id", BigInteger, primary_key=True),
+)
+
+detection_status_history = Table(
+    "detection_status_history",
+    metadata,
+    Column("id", BigInteger, primary_key=True),
+    Column("detection_id", BigInteger, nullable=False),
+    Column("from_status", String(16)),
+    Column("to_status", String(16), nullable=False),
+    Column("round", Integer, nullable=False),
+    Column("actor_user_id", BigInteger),
+    Column("comment", Text),
+    Column("created_at", DateTime(timezone=True), nullable=False),
+)
+
+detection_batch_run = Table(
+    "detection_batch_run",
+    metadata,
+    Column("id", BigInteger, primary_key=True),
+    Column("started_at", DateTime(timezone=True), nullable=False),
+    Column("finished_at", DateTime(timezone=True)),
+    Column("from_access_log_id", BigInteger, nullable=False),
+    Column("to_access_log_id", BigInteger, nullable=False),
+    Column("processed_count", Integer, nullable=False),
+    Column("detected_count", Integer, nullable=False),
+    Column("status", String(16), nullable=False),
+    Column("error", Text),
+)
+
+setting = Table(
+    "setting",
+    metadata,
+    Column("key", String(64), primary_key=True),
+    Column("value", JSONB, nullable=False),
 )
 
 access_log = Table(
