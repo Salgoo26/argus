@@ -35,6 +35,10 @@
 - PR #10(M2 PR ③) 머지 확인: CI 전부 통과, main CI(`ee5daec`)도 정상 실행. 로컬 main 최신화, 병합된 브랜치 삭제
 - Cowork "구현" 방에서 M2 설계 변경 1~9를 원본에 반영 → 사본 7개 갱신분(CLAUDE.md, docs/README.md, actor-flows, api-spec v0.4, architecture, db-schema, policy 4-3 신설)을 구현과 대조, 별도 `docs:` PR로 올림
 - 대조 결과: 설계 변경 9건 모두 반영, 1건 불일치(아래 미결), 1건 원문 확인 권장(아래 미결)
+- Cowork에서 정한 **CLAUDE.md 6절 "Skeleton 이후: v0.1 범위"** 추가분을 같은 `docs:` PR에 반영
+  - Must: Skeleton 완성(M3~M6), 심사자용 README, 시연 자료
+  - 여유 시(순서 고정): ① EVENT 룰 3개 → ② 언마스킹(LOG-10) → ③ DB 직접 접근(2티어) 최소판
+  - 게이트 A(Skeleton 완성 확인)·B(2티어 진행 여부), 기능 동결, 범위 밖 아이디어는 "v0.2 후보"로 기록만
 
 **결정사항**
 - 아래 미결 2건은 **보안성 검토 단계에서 정리**(사용자 판단) — 둘 다 문서 표현·인용 문제로 동작·M3에 영향 없음. 사본은 받은 그대로 반영
