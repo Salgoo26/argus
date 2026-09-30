@@ -1,6 +1,6 @@
 # DB 스키마 (Argus / 플랫폼)
 
-> 작성일: 2026-09-23 / v0.2 (2026-09-23 개정 — 요구사항 전수 대조 후 6개 테이블·다수 컬럼 추가) / **v0.3 (2026-09-29 개정 — 구현 M1 반영: 해시체인 정규화 규칙 v1 확정, DB 계정 구조·권한 확정, 알려진 한계 명시)**
+> 작성일: 2026-09-23 / v0.2 (2026-09-23 개정 — 요구사항 전수 대조 후 6개 테이블·다수 컬럼 추가) / **v0.3 (2026-09-29 개정 — 구현 M1 반영: 해시체인 정규화 규칙 v1 확정, DB 계정 구조·권한 확정, 알려진 한계 명시)** (2026-09-30 보완 — A5 초기 해시 주석)
 > 관련 문서: [[아키텍처_설계서.md]], [[API명세서_시스템간.md]], [[정책정의서.md]], [[액터별_플로우.md]], [[요구사항정의서.md]]
 > DBMS: PostgreSQL 16 (플랫폼 DB / Argus DB 별도 인스턴스)
 > 표기: **[S]** = Walking Skeleton에 필요한 테이블. 컬럼은 전체를 정의하되 Skeleton에서는 [S] 테이블만 생성한다.
@@ -144,7 +144,7 @@ CREATE TABLE handler (
 CREATE TABLE argus_user (
     id                  bigserial PRIMARY KEY,
     login_id            varchar(64)  NOT NULL UNIQUE,
-    password_hash       varchar(255) NOT NULL,     -- argon2id
+    password_hash       varchar(255) NOT NULL,     -- argon2id. A5는 동기화 시 무작위 해시(로그인 불가) → 관리 스크립트로 설정 (API ② 3-1)
     role                varchar(16)  NOT NULL CHECK (role IN ('OFFICER','HANDLER')), -- A4 / A5
     handler_id          bigint       REFERENCES handler(id),
     status              varchar(16)  NOT NULL DEFAULT 'ACTIVE' CHECK (status IN ('ACTIVE','LOCKED','DISABLED')),

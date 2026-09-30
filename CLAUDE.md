@@ -2,7 +2,7 @@
 
 > 이 파일은 Claude Code가 이 레포에서 작업을 시작할 때 자동으로 읽는 지침이다.
 > 기획·설계 원본은 claude.ai 프로젝트("정보보호 프로젝트")에 있고, `docs/`는 그 사본이다.
-> 작성: 2026-09-23 (설계 단계 종료 시점) / 개정: 2026-09-29 — 6절 M1 완료 기준에 Trivy config·도커 빌드 확인 반영(architecture 8-5 개정 이월분), M2 범위에 ② 취급자 동기화 수신(Argus) 추가(구현 M1 설계 변경 #7), 7절에 시크릿 파일 확인 규칙 추가
+> 작성: 2026-09-23 (설계 단계 종료 시점) / 개정: 2026-09-29 — 6절 M1 완료 기준에 Trivy config·도커 빌드 확인 반영(architecture 8-5 개정 이월분), M2 범위에 ② 취급자 동기화 수신(Argus) 추가(구현 M1 설계 변경 #7), 7절에 시크릿 파일 확인 규칙 추가 / 2026-09-30 — 5절 인증 방식 확정(구현 M2 설계 변경 #2)
 
 ---
 
@@ -93,7 +93,7 @@
 | 배치 | worker/relay는 API와 **같은 이미지, 다른 실행 명령**의 별도 컨테이너 (API 프로세스가 여러 개여도 배치가 중복 실행되지 않도록) |
 | Frontend | Next.js(App Router) + TypeScript, npm. Skeleton에서는 디자인 없이 표·버튼 수준 |
 | DB | PostgreSQL 16, 플랫폼·Argus **별도 컨테이너**. 스키마는 Alembic 마이그레이션으로 관리(DDL 원본은 `docs/db-schema.md`) |
-| 인증 | 플랫폼 관리자·Argus 사용자 모두 세션 또는 JWT 중 단순한 쪽. 로그인 실패 횟수 제한(계정 잠금)은 앱 레벨에서 |
+| 인증 | **JWT(HS256) `HttpOnly`·`SameSite=Strict` 쿠키, 30분 미사용 시 만료(요청마다 재발급), 매 요청 계정 상태 재확인** — 플랫폼 관리자 확정(M2), Argus 사용자(M4)도 같은 방식. 로그인 5회 연속 실패 시 잠금(앱 레벨). 상세는 `docs/policy.md` 4-3 |
 | 개발 환경 | **Windows + Docker Desktop.** Python/Node는 호스트에 설치하지 않고 컨테이너 안에서 실행. `.gitattributes`로 줄바꿈 LF 고정 |
 | Git | main + feature 브랜치, **혼자여도 PR로 병합**(변경관리 증적). Conventional Commits(`feat:`, `fix:`, `docs:`, `test:`, `chore:`) |
 | 주석 | 법적 근거가 있는 코드에는 조항을 짧게 표기. 예: `# §8③ 위·변조 방지 — append-only` |
