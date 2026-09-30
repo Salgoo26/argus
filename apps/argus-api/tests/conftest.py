@@ -31,6 +31,10 @@ from app.scripts.provision_db_roles import provision_app_login
 APP_ROOT = Path(__file__).resolve().parent.parent
 ADMIN_URL = os.environ.get("DATABASE_URL")
 TEST_SECRET = "test-ingest-secret-not-for-production"  # 테스트 전용 더미 값
+TEST_AUTH_SECRET = "test-auth-secret-not-for-production-0123456789"  # 테스트 전용 더미 값
+# 테스트 클라이언트 접속 주소 — 기본값 "testclient"는 IP가 아니라 접속지로 기록할 수 없다
+# (RFC 5737 문서용 대역)
+TEST_CLIENT_ADDR = ("203.0.113.20", 50000)
 
 requires_db = pytest.mark.skipif(not ADMIN_URL, reason="DATABASE_URL 미설정 — DB 테스트 생략")
 
@@ -91,6 +95,9 @@ def settings(test_db: TestDatabase) -> Settings:
         db_user=test_db.app_login,
         db_password=test_db.app_password,
         ingest_secret_platform=TEST_SECRET,
+        auth_secret=TEST_AUTH_SECRET,
+        # TestClient는 http://testserver — Secure 쿠키면 다음 요청에 실리지 않는다
+        cookie_secure=False,
     )
 
 
@@ -116,7 +123,7 @@ def app_engine(app) -> Engine:
 
 @pytest.fixture
 def client(app):
-    with TestClient(app) as c:
+    with TestClient(app, client=TEST_CLIENT_ADDR) as c:
         yield c
 
 

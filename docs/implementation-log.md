@@ -29,6 +29,73 @@
 
 ---
 
+## 2026-10-01 — 마일스톤 M4 착수 (계획 확정, 자동 소명 요청 → Cowork 논의 대기)
+
+**한 일**
+- PR #12(M3) 머지 확인, main 최신화
+- M4 계획 설명·결정. **소명 요청 방식을 사용자가 "자동 요청"으로 원함** → Skeleton 시나리오·상태도가 바뀌는 설계 변경이라 Cowork에서 먼저 정하기로 함(아래). 그동안 결정과 무관한 PR ①(Argus 로그인·계정 관리·자체 접속기록)을 먼저 진행
+
+**결정사항** (사용자 동의)
+- **필수 룰 범위는 Skeleton 완료 후 Cowork에서 결정, CLAUDE.md 6절은 그대로** (M3 로그의 "기본 룰 필수화" 미결을 대체)
+- Argus 인증 = 플랫폼과 같은 방식(policy 4-3): JWT(HS256) HttpOnly·SameSite=Strict 쿠키, 30분 미사용 만료, 매 요청 재확인, 5회 연속 실패 시 `argus_user.status=LOCKED`. 두 시스템은 별개 제품이라 코드는 공유하지 않음
+- **계정 준비는 관리 스크립트**(`app.scripts.users`: 담당자 생성·비밀번호 설정·잠금 해제), 비밀번호는 실행 후 직접 입력(셸 기록에 남지 않게). A5 계정은 동기화 뒤에야 생기므로 `.env` 시드 방식은 순서가 꼬임 — api-spec 3-1 "M4에서 관리 스크립트로 설정"의 구현
+- **에스컬레이션(REJECTED → ESCALATED) 포함** — M4 목록엔 없지만 policy 3-2 상태도의 정식 전이
+- M4는 PR 2개: ① 인증·계정·자체 접속기록 기반 / ② 탐지건 조회·마스킹·상태 전이
+- 상태 변경(요청·제출·승인 등)은 Argus 접속기록이 아니라 **상태 이력**(`detection_status_history`)으로 남김 — api-spec 2-7의 Argus 기록 대상은 LOGIN·READ·UNMASK·EXPORT, 상태 이력이 누가·언제·사유를 담음. 해당 라우트는 제외 사유를 명시
+- 남의 탐지건은 403이 아니라 404 — 존재 여부가 드러나지 않게
+
+**PR ① 구현 — Argus 로그인·계정 관리·자체 접속기록 기반**
+- 인증(`app/auth/`): `POST /api/auth/login`·`/logout`, `GET /api/auth/me`. JWT(HS256) `argus_session` 쿠키, 30분 연장, 매 요청 계정 상태(+ HANDLER는 명부 재직 상태) 재확인, 5회 실패 시 `status=LOCKED`(증가·잠금을 한 UPDATE 문으로), 없는 ID는 더미 해시 검증, 잠김·비활성은 비밀번호가 맞을 때만 403, 입력 상한 64/256자, 서명 키 32자 미만이면 기동 거부. 의존성 `pyjwt==2.15.1`
+- 계정 관리 `app.scripts.users`: `create-officer`·`set-password`·`unlock`. 비밀번호는 `getpass` 두 번 입력(자동화용 `--password-env`), 12자 이상, 앱 계정으로 접속. `set-password`는 상태를 바꾸지 않음(비활성 A5가 되살아나지 않게), `unlock`은 LOCKED만(DISABLED 제외)
+- 자체 접속기록 Agent(`app/agent/`): `/api` 경로만, 문패·제외 표시 없으면 기동 거부, 응답 헤더 직전에 **수집 API와 같은 `validate_event(internal=True)`를 거쳐 같은 `append_access_logs`로 원장에 직접**(source=ARGUS), 실패 시 500(fail-closed), 경로는 라우트 템플릿, 검색조건은 키 이름만, READ는 **건수만**(ids 없음), 신뢰 프록시일 때만 X-Forwarded-For
+- compose: argus-api에 `ARGUS_AUTH_SECRET`(필수)·`ARGUS_TRUSTED_PROXIES`, `.env.example`·README(계정 준비 절차)
+- 검증
+  - pytest 174개 통과(M3까지 140 + 신규 34: 로그인 17, 자체 접속기록 10, 계정 스크립트 7), ruff 통과
+  - 실제 서버: 점검용 임시 담당자 계정(무작위 비밀번호, 출력 안 함)으로 로그인 전 401 → 틀린 비밀번호 401 → 로그인 200(쿠키 속성 4종) → `/me` no-store → 5회 실패 후 403 LOCKED → ARGUS 출처 LOGIN 8건 원장 기록 → `verify_chain` ok(18건, 플랫폼·Argus 한 체인). 점검 계정은 DISABLED(앱 계정엔 DELETE 권한 없음, 원장 기록은 사실이므로 유지)
+
+**→ 자동 소명 요청: 사용자 확정 (같은 날, 아래 논의안을 단순화)**
+- **자동 소명 요청으로 간다.** 탐지건 생성 시 즉시 `REQUESTED`(1차, 요청자 = 시스템)
+- **취급자의 "오탐 취소 요청" 경로는 두지 않는다** — 흐름이 너무 복잡해지고, 취급자가 오탐 여부를 판단할 기준도 애매함(아래 (가)·(나) 모두 기각)
+- **담당자는 탐지건 목록을 보고 오탐으로 판단되면 요청을 취소**할 수 있다: `REQUESTED → DISMISSED`(사유 필수)
+- 담당자는 기존대로 전체 탐지건 목록을 본다
+- 구현 범위(PR ②): `detection_rule.auto_request`(기본 켜짐) / `explanation.requested_by` NULL 허용(NULL = 시스템) / 상태도에 `REQUESTED → DISMISSED`만 추가 / 탐지 배치가 탐지건 생성 시 같은 트랜잭션에서 자동 요청(행위자에게 로그인 가능한 A5 계정이 없으면 `DETECTED`로 남겨 담당자가 수동 처리)
+- `REQUESTED → ESCALATED`는 추가하지 않음. 요청 후 제출 전 퇴직으로 멈추는 모순은 담당자가 `REQUESTED → DISMISSED`로 닫을 수 있어 해소
+- **Cowork에서 원본 반영 필요**: CLAUDE.md 6절 Skeleton 시나리오("담당자 소명 요청" → "자동 소명 요청"), policy 3-1·3-2, actor-flows F-04·F-05·F-06, db-schema 3-3·3-4·3-7
+
+**(참고) Cowork 논의용으로 정리했던 원안 — 사용자 요구, 2026-10-01**
+- 배경: 현재 설계(F-05 #4)는 탐지 → `DETECTED` → **담당자가 검토 후 소명 요청 또는 불요**. 사용자는 **탐지 시 자동 요청**을 의도했음 — 수동이면 담당자 업무 부하(병목)·방치 위험이 큼
+- "하루 1건" 억제는 이미 충족 — M3 그룹핑이 `(취급자, 룰, KST 날짜)`라 하루 여러 번 걸려도 탐지건·소명 요청은 1개
+- 사용자 요구사항
+  1. **자동 소명 요청** — 탐지건 생성 시 즉시 `REQUESTED`(1차, 요청자 = 시스템)
+  2. **취급자의 오탐 숨구멍** — 취급자가 오탐이라 판단하면 사유와 함께 **취소를 요청**하고, **담당자가 받아들이면 요청 취소(`DISMISSED`)**, 아니면 계속 소명
+  3. **담당자는 기존대로 전체 탐지건 목록 확인 가능**
+- Claude Code 제안안
+  - 자동 요청 조건: 룰의 `auto_request`가 켜짐(기본 켜짐, 룰 빌더에서 조정) **그리고** 행위자에게 로그인 가능한 A5 계정이 있음. 아니면 `DETECTED`로 남겨 담당자가 수동 처리(미동기화·퇴직자 등 — 퇴직자 접속은 원래 담당자 사안)
+  - 오탐 숨구멍 구현 후보: **(가·추천)** 소명 제출 시 "오탐 주장" 표시 → 담당자가 `SUBMITTED`에서 승인·반려 외에 "오탐 인정(`DISMISSED`)" 선택 — 상태를 늘리지 않음 / (나) "취소 요청됨" 새 상태 — 흐름은 명확하나 상태도 복잡
+  - 담당자는 `REQUESTED`에서도 요청 취소(`DISMISSED`, 사유 필수) 가능 — 취급자 소명 전에 오탐을 걷어냄
+- 필요한 설계 변경
+  | 무엇 | 변경 | 영향 문서 |
+  |---|---|---|
+  | 룰 | `detection_rule.auto_request boolean NOT NULL DEFAULT true` | db-schema 3-3 |
+  | 소명 | `explanation.requested_by` NULL 허용(NULL = 시스템 요청) — 현재 NOT NULL이라 사람만 요청 가능. (가)면 `explanation.false_positive_claim boolean` 추가 | db-schema 3-4 |
+  | 상태도 | `REQUESTED → DISMISSED`(요청 취소), `REQUESTED → ESCALATED`, (가)면 `SUBMITTED → DISMISSED`(오탐 인정) | policy 3-1·3-2 |
+  | 탐지 배치 | 탐지건 생성 시 조건이 맞으면 같은 트랜잭션에서 자동 요청(상태 이력 2줄: DETECTED, REQUESTED — 모두 시스템) | db-schema 3-7, actor-flows F-04 |
+  | 시나리오 | "담당자 소명 요청" → "**자동 소명 요청** → 취급자 제출 → 담당자 반려·재요청·승인" | **CLAUDE.md 6절 Skeleton 시나리오**, actor-flows F-05·F-06 |
+- 함께 해소되는 모순: api-spec 3-1("퇴직 시 진행 중 소명 건은 담당자가 DISMISS 또는 ESCALATE") vs policy 3-2 상태도(`REQUESTED`에서 DISMISS·ESCALATE 불가) — 현재는 소명 요청 후 제출 전에 퇴직하면(A5 DISABLED) 건이 `REQUESTED`에 멈춤. 위 상태도 변경으로 해소
+- 취급자 노출 범위: "**소명 요청을 받은 건(round ≥ 1)만**" — 자동 요청이면 대부분 보이고, 자동 요청이 안 간 `DETECTED`(담당자 검토 대기)는 보이지 않음. 수동·자동 어느 쪽이든 일관
+- 부작용: 오탐도 일단 취급자에게 감 → 룰의 세밀한 설정과 담당자의 빠른 요청 취소가 중요해짐
+
+**미결·이슈**
+- **v0.2 후보** — 소명 제출 **후** 같은 탐지건에 새 기록이 붙으면 제출한 소명이 그 추가분을 설명하지 않을 수 있음 → 담당자 검토 화면에 "제출 후 추가된 기록" 표시
+- **v0.2 후보** — 더 세밀한 억제(예: 같은 룰은 N일에 한 번만 요청), 룰별 자동 요청 여부 화면 조정 — 룰 빌더와 함께
+- **v0.2 후보** — 담당자 대시보드의 "미조치 건수·경과 시간"(LOG-05) — 수동 처리 건의 방치 방지
+
+**다음 할 일**
+- PR ①(Argus 로그인·계정 관리 스크립트·자체 접속기록 기반) 구현
+- Cowork에서 자동 소명 요청 설계 확정 → PR ②(탐지건 조회·마스킹·상태 전이)에 반영
+
+---
+
 ## 2026-10-01 — 마일스톤 M3 (탐지 배치: argus-worker, 대량 다운로드 룰)
 
 **한 일**

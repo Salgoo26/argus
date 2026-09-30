@@ -182,6 +182,10 @@ services:
       ARGUS_DB_USER: ${ARGUS_APP_DB_USER}
       ARGUS_DB_PASSWORD: ${ARGUS_APP_DB_PASSWORD}
       ARGUS_INGEST_SECRET_PLATFORM: ${ARGUS_INGEST_SECRET_PLATFORM:?set ARGUS_INGEST_SECRET_PLATFORM in .env}
+      # 담당자·취급자 로그인 토큰(JWT HS256) 서명 키 — 32자 이상, 짧으면 기동 거부
+      ARGUS_AUTH_SECRET: ${ARGUS_AUTH_SECRET:?set ARGUS_AUTH_SECRET in .env}
+      # 접속 IP 헤더를 믿을 프록시 (운영: Caddy, M5부터 argus-web). 로컬은 비움 → 직접 연결 IP
+      ARGUS_TRUSTED_PROXIES: ${ARGUS_TRUSTED_PROXIES:-}
     depends_on:
       argus-migrate:
         condition: service_completed_successfully
