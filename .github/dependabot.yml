@@ -1,7 +1,7 @@
 # 의존성 취약점 알림 + 업데이트 PR 자동 생성 (architecture 8-1 [상시])
 # 앱이 추가되면 해당 생태계를 여기에 추가한다:
 #   - npm: apps/platform-web, apps/argus-web (M5)
-#   - docker: 나머지 앱 Dockerfile (M2~)
+#   - docker: 나머지 앱 Dockerfile (argus-api M1, platform-api M2)
 version: 2
 updates:
   - package-ecosystem: github-actions
@@ -30,6 +30,7 @@ updates:
   - package-ecosystem: docker
     directories:
       - /apps/argus-api
+      - /apps/platform-api
     schedule:
       interval: weekly
     # Python은 3.12 고정(CLAUDE.md 5절, requires-python >=3.12,<3.13) — 3.12.x 패치만 받는다.

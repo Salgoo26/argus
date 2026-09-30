@@ -1,11 +1,12 @@
 # Argus 로컬 개발 구성 (Walking Skeleton)
 # 레포 루트에서 실행: docker compose up -d   (.env의 COMPOSE_FILE이 이 파일을 가리킨다)
 #
-# M0: DB 2개 / M1: argus-migrate, argus-api
-# 나머지 앱 컨테이너(platform-api, platform-relay, argus-worker, *-web)는 각 마일스톤에서 추가한다.
+# M0: DB 2개 / M1: argus-migrate, argus-api / M2: platform-migrate, platform-seed, platform-api
+# 나머지 앱 컨테이너(platform-relay, argus-worker, *-web)는 각 마일스톤에서 추가한다.
 # Caddy·backup은 첫 배포 때 추가 (architecture 7-2).
 #
-# 테스트: docker compose run --rm argus-api-test   (profile "test" — up 할 때는 뜨지 않음)
+# 테스트: docker compose run --rm argus-api-test      (profile "test" — up 할 때는 뜨지 않음)
+#         docker compose run --rm platform-api-test
 
 name: argus
 
@@ -30,6 +31,76 @@ services:
       interval: 5s
       timeout: 3s
       retries: 10
+
+  # ── 플랫폼 마이그레이션 (일회성) ──────────────────────────
+  # 아래 네 컨테이너(migrate·seed·api·relay)는 같은 이미지를 실행 명령만 바꿔 띄운다.
+  # 플랫폼은 무대장치라 DB 계정은 하나(소유자)로 운영한다 — 권한 분리는 Argus에만.
+  platform-migrate:
+    build: &platform-api-build
+      context: ../apps/platform-api
+      target: runtime
+    image: platform-api:local
+    command: ["alembic", "upgrade", "head"]
+    environment: &platform-db-env
+      PLATFORM_DB_HOST: platform-db
+      PLATFORM_DB_NAME: ${PLATFORM_DB_NAME}
+      PLATFORM_DB_USER: ${PLATFORM_DB_USER}
+      PLATFORM_DB_PASSWORD: ${PLATFORM_DB_PASSWORD}
+    depends_on:
+      platform-db:
+        condition: service_healthy
+    networks:
+      - platform-net
+    restart: "no"
+
+  # ── 플랫폼 시드 (일회성) — 가상 회원 500명·취급자 5명, 비어 있을 때만 ──
+  platform-seed:
+    build: *platform-api-build
+    image: platform-api:local
+    command: ["python", "-m", "app.scripts.seed"]
+    environment:
+      <<: *platform-db-env
+      PLATFORM_SEED_OPERATOR_PASSWORD: ${PLATFORM_SEED_OPERATOR_PASSWORD:?set PLATFORM_SEED_OPERATOR_PASSWORD in .env}
+    depends_on:
+      platform-migrate:
+        condition: service_completed_successfully
+    networks:
+      - platform-net
+    restart: "no"
+
+  # ── 플랫폼 API: 관리자 로그인·회원 목록·다운로드 (Agent는 M2 PR ③) ──
+  platform-api:
+    build: *platform-api-build
+    image: platform-api:local
+    restart: unless-stopped
+    environment:
+      <<: *platform-db-env
+      PLATFORM_AUTH_SECRET: ${PLATFORM_AUTH_SECRET:?set PLATFORM_AUTH_SECRET in .env}
+    depends_on:
+      platform-seed:
+        condition: service_completed_successfully
+    ports:
+      # 로컬 확인용. 운영에서는 외부 비노출, Caddy만 접근 (architecture 7-2)
+      - "127.0.0.1:${PLATFORM_API_PORT:-18001}:8000"
+    networks:
+      - platform-net
+
+  platform-api-test:
+    profiles: ["test"]
+    build:
+      context: ../apps/platform-api
+      target: dev
+    image: platform-api:dev
+    environment:
+      # 임시 DB 생성·마이그레이션용 관리자 접속
+      DATABASE_URL: postgresql://${PLATFORM_DB_USER}:${PLATFORM_DB_PASSWORD}@platform-db:5432/${PLATFORM_DB_NAME}
+    volumes:
+      - ../apps/platform-api:/app
+    depends_on:
+      platform-db:
+        condition: service_healthy
+    networks:
+      - platform-net
 
   # ── Argus DB: 접속기록 원장 (§8③ append-only + 해시체인은 M1) ──
   argus-db:

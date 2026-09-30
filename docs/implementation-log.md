@@ -29,6 +29,58 @@
 
 ---
 
+## 2026-09-30 — 마일스톤 M2 PR ② (플랫폼 기반: 스키마·시드·관리자 로그인·회원 목록·CSV)
+
+**한 일**
+- platform-api 뼈대를 argus-api와 같은 구조로: `create_app` 팩토리, 설정(`PLATFORM_*`), 오류 형식, Dockerfile(dev/runtime, non-root, HEALTHCHECK), Alembic
+- 마이그레이션 `0001`: [S] 3개 `operator`·`member`·`outbox` (db-schema 4절 DDL 그대로, `ix_outbox_pending` 부분 인덱스 포함)
+- 시드 `app.scripts.seed`: 가상 회원 500명(id 10001부터) + 취급자 5명(`ops_park`·`mkt_lee`·`cs_kim`·`cs_choi`·`admin_han`), 취급자마다 outbox `HANDLER_CREATED`를 같은 트랜잭션에 적재
+- 관리자 로그인 `POST /admin/auth/login`·`/logout`, 인증 의존성 `current_operator`, 잠금 해제 스크립트 `app.scripts.unlock_operator`
+- 회원 목록 `GET /admin/members`(20건씩), CSV `GET /admin/members/export`(`joined_from`·`joined_to`·`limit`)
+- compose: `platform-migrate`·`platform-seed`(일회성) → `platform-api`, `platform-api-test`(profile). 네 컨테이너 모두 `platform-api:local` 이미지
+- CI docker-build·Dependabot docker에 platform-api 추가, `.env.example`·README 갱신
+- 의존성: FastAPI 등 argus-api와 같은 버전 + `argon2-cffi==25.1.0`, `pyjwt==2.15.1`, `faker==40.40.0`
+- 검증
+  - pytest 44개 통과: 마이그레이션 왕복, 시드(가상 형식·재현성·멱등·시드 계정 로그인·HANDLER 이벤트 형식과 마이크로초), 로그인(쿠키 속성, 해시 미노출, 실패 횟수 초기화, 없는 ID와 틀린 비밀번호 동일 응답, 5회 잠금, 잠김은 비밀번호가 맞을 때만 공개, 퇴직자 거부, 입력값 미반영 400), 토큰(다른 키·만료·alg=none·exp 없음·형식 오류 거부, 요청마다 연장, 로그인 후 퇴직·잠금 시 즉시 차단, 로그아웃), 회원(페이지, 120건 CSV, KST 날짜 필터, 탈퇴 회원 제외, 수식 주입 무력화, 잘못된 파라미터 400, no-store)
+  - `docker compose up` 후 실제 서버: 로그인 전 401 → 틀린 비밀번호 401 → 로그인 200(HttpOnly·SameSite=strict·Secure·Max-Age=1800) → 목록 총 500·첫 id 10001 → CSV 120행 → 로그아웃 후 401. outbox에 HANDLER_CREATED 5건 PENDING
+
+**결정사항**
+- **없는 ID로 로그인해도 더미 해시로 argon2 검증을 수행** — 응답 내용뿐 아니라 **응답 시간**으로도 계정 존재 여부가 드러나지 않게
+- **잠김·퇴직(403)은 비밀번호가 맞았을 때만 알려준다** — 비밀번호를 모르는 사람에게 "이 계정은 존재하고 잠겨 있다"를 알려주지 않음. 틀린 비밀번호는 잠긴 계정이어도 401 `INVALID_CREDENTIALS`
+- 실패 횟수 증가는 `failed_login_count + 1`을 DB에서 원자적으로. 트랜잭션 안에서 결과를 정하고 오류는 커밋 뒤에 던짐(예외로 빠져나가면 증가분까지 롤백되므로)
+- 로그인 입력 상한(`login_id` 64자, `password` 256자) — 초대형 비밀번호로 해시 계산 시간을 늘리는 공격 방지
+- JWT: 알고리즘 HS256 고정(토큰 헤더의 alg 불신), `sub`·`iat`·`exp` 필수, 토큰엔 operator id만. 서명 키 32자 미만이면 **앱 기동 거부**
+- 만료 연장 쿠키는 의존성이 `request.state`에 새 토큰을 두고 미들웨어가 응답에 싣는다 — 핸들러가 `Response`를 직접 반환하는 CSV에서도 빠지지 않게(FastAPI는 이 경우 의존성의 `Response` 헤더를 버림)
+- `/admin` 응답 전부에 `Cache-Control: no-store` — 개인정보 응답이 브라우저·프록시 캐시에 남지 않게
+- CSV: `=`,`+`,`-`,`@`,탭,CR로 시작하는 셀 앞에 `'`(OWASP CSV Injection), UTF-8 BOM(엑셀 한글), 파일명에 KST 시각, 가입일 필터는 KST 날짜 기준·양 끝 포함, 탈퇴 회원 제외, 최대 10,000행
+- 시드
+  - 이메일 `userNNNN@example.com`(RFC 2606 예약 도메인), 전화 `010-0000-NNNN` — Faker 결과가 우연히 실존 정보와 겹치는 것 방지
+  - Faker·난수 시드 고정(20260929) → 누가 실행해도 같은 회원이 같은 id. 테이블이 비었을 때만 실행
+  - 회원 id를 10001부터 — 마스킹 표시(`member_10***`)가 의미 있게 보이도록
+  - 회원 비밀번호는 무작위 해시 하나를 공유(고객 로그인은 범위 밖, argon2 500회 계산 회피)
+- 컨테이너별 최소 시크릿: `platform-migrate`는 DB 접속만, `platform-seed`만 시드 비밀번호, `platform-api`만 JWT 키. 잠금 해제 스크립트도 시크릿 없는 `platform-migrate`로 실행
+- `.env.example`의 새 더미 값은 일부러 길이 검사에 걸리는 `change-me` — 값을 안 바꾸면 조용히 도는 대신 기동이 거부됨
+
+**기각한 대안**
+- FastAPI 의존성에서 `Response` 파라미터로 쿠키 연장: CSV처럼 `Response`를 직접 반환하는 라우트에서 헤더가 버려짐 → 미들웨어
+- 시드에 `random` 대신 `secrets`: 재현성(고정 시드)이 목적이라 부적합. 보안 용도가 아니므로 ruff S311은 사유를 적고 예외 처리
+
+**설계 변경**
+- 없음 (전날 확정한 설계 변경 2·3을 구현)
+
+**미결·이슈**
+- **PR #8이 GitHub에서 "머지됨"으로 처리되지 않음 (GitHub 측 누락)**
+  - 경위: 2026-09-29 웹에서 머지 → main에 `e30f958 Merge pull request #8` 생성(작성자 사용자 계정). 버튼이 두 번 처리되며 두 번째가 "Base branch was modified" 오류
+  - 이후 하루가 지나도 PR은 open, `mergeable_state=dirty`로 표시. **그 머지 커밋에 대한 main CI도 실행되지 않음**, PR 타임라인에 머지·닫힘 이벤트 없음. GitHub 상태 페이지에 관련 장애 공지 없음
+  - 확인한 사실: PR 브랜치가 main의 조상(`merge-base --is-ancestor` 참), 합쳐도 충돌 없음(`merge-tree`), 두 트리 내용 동일 → **코드는 정상 반영, GitHub의 push 후처리(PR 상태 갱신·main CI)만 누락**
+  - 대응: 다시 머지하거나 브랜치를 건드리지 않음. PR ② 머지(다음 main push) 때 GitHub가 열린 PR을 재점검해 해소되는지 확인 → 안 되면 근거 코멘트를 남기고 Close. 누락된 main CI는 PR ② 머지 때 합쳐진 트리로 실행됨
+- Secure 쿠키는 http 내부망 요청에는 실리지 않음(규칙대로 동작). 브라우저는 `http://localhost`를 예외로 허용하므로 로컬 화면(M5)은 문제없음. M5에서 Next.js가 서버 측에서 platform-api를 호출하는 구조라면 쿠키 전달 방식을 그때 정함
+
+**다음 할 일**
+- PR ② 머지 → PR #8 상태 확인 → PR ③(Agent 미들웨어·데코레이터, 접속기록 outbox 적재, relay, LOGIN 기록)
+
+---
+
 ## 2026-09-29 — 마일스톤 M2 착수 (계획 확정, PR ①: Dependabot 제외 규칙 + ② 취급자 동기화 수신)
 
 **한 일**
