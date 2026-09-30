@@ -28,8 +28,17 @@ class Settings(BaseSettings):
     # Secure 쿠키(HTTPS에서만 전송). 브라우저는 http://localhost를 예외로 허용한다
     cookie_secure: bool = True
 
+    # 접속 IP 헤더(X-Forwarded-For)를 믿을 프록시 — 쉼표 구분 IP·CIDR. 비우면 아무도 믿지 않는다
+    # (로컬은 프록시가 없어 비움, 운영은 Caddy 주소. CLAUDE.md 3절 #10)
+    trusted_proxies: str = ""
+
     # 시드 취급자 계정의 비밀번호 — platform-seed에만
     seed_operator_password: SecretStr | None = None
+
+    # relay → Argus 수집 API (api-spec 1-2) — platform-relay에만.
+    # HMAC 키는 argus-api의 ARGUS_INGEST_SECRET_PLATFORM과 같은 값
+    argus_ingest_url: str = "http://argus-api:8000"
+    argus_ingest_secret: SecretStr | None = None
 
     def database_url(self) -> URL:
         return URL.create(
@@ -47,3 +56,12 @@ class Settings(BaseSettings):
             # 짧은 HMAC 키는 오프라인 대입으로 토큰 위조가 가능해진다
             raise ValueError(f"PLATFORM_AUTH_SECRET must be at least {MIN_SECRET_LENGTH} chars")
         return secret.encode()
+
+    def require_argus_ingest(self) -> tuple[str, bytes]:
+        if not self.argus_ingest_url.startswith(("http://", "https://")):
+            # urllib은 file:// 등도 연다 — 설정 실수로 로컬 파일을 읽는 일이 없게 스킴을 제한
+            raise ValueError("PLATFORM_ARGUS_INGEST_URL must be an http(s) URL")
+        secret = self.argus_ingest_secret.get_secret_value() if self.argus_ingest_secret else ""
+        if not secret:
+            raise ValueError("PLATFORM_ARGUS_INGEST_SECRET is required")
+        return self.argus_ingest_url.rstrip("/"), secret.encode()

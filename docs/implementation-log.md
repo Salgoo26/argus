@@ -29,6 +29,68 @@
 
 ---
 
+## 2026-09-30 — 마일스톤 M2 PR ③ (접속기록 Agent·relay) — M2 완료
+
+**한 일**
+- 접속기록 Agent (`apps/platform-api/app/agent/`)
+  - `@access_log(action, data_category)` 문패 / `@access_log_exempt("사유")` 명시적 제외
+  - 기록지 `AccessRecord`를 contextvars에 두고 `record_actor`·`record_subjects`로 채움
+  - 순수 ASGI 미들웨어 `AccessLogMiddleware`: `/admin` 경로만, 응답 헤더를 보내기 직전에 outbox 적재(업무와 별도 트랜잭션), 적재 실패 시 500 `ACCESS_LOG_UNAVAILABLE`(fail-closed), 처리되지 않은 예외는 FAILURE로 적재 후 재발생
+  - `check_admin_routes`: 문패·제외 표시 없는 `/admin` 라우트가 있으면 앱 기동 거부
+  - 접속 IP: `PLATFORM_TRUSTED_PROXIES`에 등록된 프록시에서 온 요청만 `X-Forwarded-For`를 오른쪽부터 읽음
+- 기존 라우트 연결: 로그인 `LOGIN`/`NONE`(존재하는 계정일 때만 식별자 기록), 로그아웃 제외, 목록 `READ`(표시된 회원 PK), CSV `DOWNLOAD`(파일에 담긴 회원 PK), 인증 의존성이 식별자 기록
+- relay (`app/relay.py`, compose `platform-relay`): 2초 주기, topic별 100건, `FOR UPDATE SKIP LOCKED`, HMAC 서명, api-spec 1-5 응답별 처리, 백오프 1분→최대 1시간. platform-net + argus-net
+- compose `PLATFORM_TRUSTED_PROXIES`(기본 빈 값), `.env.example`·README 갱신. `.env`에 추가할 필수 값 없음(relay는 기존 `ARGUS_INGEST_SECRET_PLATFORM` 공유)
+- 검증
+  - pytest 101개 통과(PR ② 44 + 신규 57), ruff 통과
+    - Agent: 120건 다운로드 기록(식별자·접속지·PK 120·건수·키 이름만), payload에 이름·이메일·전화·주소 없음, 검색값 미기록, 목록 READ, 로그인 성공·실패 기록, 없는 ID·미인증 미기록, 로그아웃 제외, **고객 라우트 미기록**, **업무 예외에도 FAILURE 기록**(대상 PK 포함), 400도 FAILURE(건수 0), **적재 실패 시 CSV 차단**, 경로 변수 값 미기록(템플릿), 1,000개 초과 잘림, 문패 누락 시 기동 거부, 잘못된 문패 거부, 위조 XFF 무시, 요청 간 기록지 격리
+    - Agent 26개(위), 접속 IP 9개, relay 22개(삭제·서명·DEAD·topic 경로·100건 배치·400·401/503/429/404/네트워크/해석 불가 200 → PENDING 백오프·413 분할·1건 413·백오프 상한·대기·DEAD 제외·잠긴 행 건너뜀)
+  - **실제 컨테이너 끝-끝**: relay가 argus-api보다 먼저 떠 HANDLER 5건 첫 전송이 NETWORK_ERROR → PENDING·1분 백오프(설계대로 유실 없음). ops_park 로그인 실패·성공 → 목록 → CSV 120건 → Argus `access_log`에 LOGIN FAILURE·LOGIN SUCCESS·READ(20)·DOWNLOAD(120) 도착. 1분 뒤 HANDLER 5건 accepted → Argus `handler` 5명 + A5 계정 5개. 플랫폼 outbox 0건, `verify_chain` ok(6건)
+
+**M2 완료 기준 대조** (CLAUDE.md 6절): ② 취급자 동기화 수신 ✅ / `operator`·`member` + 시드(회원 500·취급자 5) ✅ / 관리자 로그인 ✅ / `GET /admin/members/export` ✅ / 미들웨어 + 데코레이터(contextvars) ✅ / outbox 별도 트랜잭션 ✅ / relay(100건·지수 백오프·401 PENDING) ✅ / 취급자 동기화 호출 ✅ / 테스트: 고객 라우트 미기록 ✅, 업무 실패 FAILURE ✅
+
+**결정사항**
+- **`request.path`는 실제 URL이 아니라 라우트 템플릿**(`/admin/members/{member_id}`) — 경로 변수에 실린 값(검색어·이름)이 원장에 남지 않게. 대상 회원은 `subject.ids`로 이미 기록됨
+- 검색조건 키가 키 이름 형식(`[A-Za-z0-9_.\[\]-]{1,64}`)이 아니면 버림 — Argus가 이벤트 전체를 거부하지 않게, 값이 키 모양으로 새지 않게
+- 직접 연결 주소가 IP가 아니면 접속지를 지어내지 않고 요청을 실패시킴(fail-closed). 테스트 클라이언트 주소는 RFC 5737 문서용 대역 `203.0.113.10`
+- `subject.count`는 `max(기록된 건수, ids 개수)` — Argus의 "count ≥ ids 개수" 검증과 어긋나지 않게
+- 미들웨어는 가장 바깥(쿠키 연장 미들웨어보다 바깥) — 최종 응답 상태로 결과를 판정하고, 적재 실패 시 쿠키까지 포함한 응답 전체를 막음
+- **순수 ASGI 미들웨어**: 응답 시작 메시지를 가로채 적재 성공 후에만 내보내야 함
+- contextvars는 **가변 객체 하나를 공유**하는 방식 — 동기 핸들러·의존성이 스레드풀의 컨텍스트 복사본에서 실행되므로 `set()`은 미들웨어에 보이지 않음
+- relay
+  - topic 순서: HANDLER 먼저, 그다음 ACCESS_LOG — 명부가 기록보다 앞서 있게(순서가 뒤집혀도 Argus는 수락 후 조인으로 연결, api-spec 2-6)
+  - 전송하는 동안 `FOR UPDATE SKIP LOCKED` 락을 유지(트랜잭션 안에서 전송·결과 반영) — 여러 relay가 떠도 중복 전송 없음. HTTP 타임아웃 10초
+  - 200인데 본문 해석 불가·404 등 예상 밖 응답·1건짜리 413은 **DEAD가 아니라 PENDING + 백오프**(절대 규칙 #7). 일시 장애(네트워크·429·5xx)는 WARNING, 설정 문제(401·404 등)는 ERROR 로그
+  - HTTP 클라이언트는 표준 라이브러리 `urllib`(런타임 의존성 추가 없음), URL 스킴을 http(s)로 제한(urllib이 `file://`도 열기 때문)
+  - `depends_on`에 argus-api를 걸지 않음 — Argus가 꺼져 있어도 relay는 떠서 대기, 살아나면 전송. 이미지 HEALTHCHECK(8000번 웹 서버용)는 끔
+  - 로그에는 건수·오류 코드만, payload(회원 PK) 미기록
+
+**기각한 대안**
+- `BaseHTTPMiddleware`로 Agent 작성: 응답이 이미 만들어진 뒤에만 개입 가능 → 적재 실패 시 본문 차단이 어려움
+- 데코레이터가 핸들러를 감싸서 기록: FastAPI가 보는 시그니처·의존성 주입이 깨지기 쉬움 → 표시만 붙이고 미들웨어가 매칭된 라우트에서 읽음
+- 기록지를 `request.state`에 두기: 서비스 계층 깊은 곳에서 request 없이 기록하려면 contextvars가 맞음(설계 3-1 ThreadLocal 대응)
+- relay가 행을 "선점" 표시(lease 컬럼)하고 락 없이 전송: outbox 스키마 변경이 필요 → 락 유지로 충분(Skeleton은 relay 1개)
+- relay에 `httpx` 런타임 의존성 추가: 기능상 이점 대비 공급망 표면 증가 → `urllib` + 전송 함수 주입(테스트는 가짜 Argus)
+
+**설계 변경** (Cowork에서 원본 반영 필요 — 전날 1~5와 함께)
+6. **`request.path`에는 라우트 템플릿을 보낸다** — api-spec 2-2 `request.path` 설명("호출된 관리자 기능")을 구체화 / 영향: api-spec 2-1·2-2
+7. **로그아웃은 접속기록 대상에서 명시적으로 제외**(`@access_log_exempt`) — 개인정보 처리가 없고 api-spec 수행업무 코드에 로그아웃이 없음 / 영향: api-spec 2-4 표, actor-flows
+8. **정보주체를 기록하기 전에 실패한 요청은 `subject.count = 0`**, 대상이 정해진 요청은 핸들러가 업무 로직보다 먼저 대상 PK를 기록하는 것을 규칙으로 함 / 영향: api-spec 2-2·2-4, architecture 3-2 #3
+9. **문패 없는 관리자 라우트가 있으면 앱 기동 거부** — 기록 누락을 조용한 사고가 아닌 즉시 드러나는 실패로 / 영향: architecture 3-1(URL → 업무 매핑)
+
+**미결·이슈**
+- (보안성 검토 후보) **취급자 명부는 현재 상태만** 보유 — 부서 이동 후 과거 기록을 조회하면 현재 소속으로 보임. 탐지는 수 분 내 판정·`log_summary`·`rule_snapshot`으로 보완. 소속 이력이 필요하면 명부 이력화 검토
+- (보안성 검토 후보) relay ↔ argus-api 구간은 도커 내부망 http — api-spec 1-1은 HTTPS 전제(HMAC으로 무결성·인증은 확보, 기밀성은 내부망 의존)
+- (보안성 검토 후보) DB 직접 접속(DBeaver 등)은 Agent가 기록하지 못함 — architecture 6절의 2단계(pgaudit) 범위. 사용자가 DBeaver로 시드 데이터를 조회하며 확인
+- DEAD 건 운영 알림은 ERROR 로그뿐(api-spec 7절 미결), DEAD 재처리 도구 없음
+- relay는 전송 중 락을 잡으므로 Argus 응답이 느리면 처리량이 떨어짐 — Skeleton 규모에선 무관
+
+**다음 할 일**
+- PR ③ 머지 → **Cowork "구현" 방에서 진행기록·설계 변경(1~9) 동기화** → `docs:` PR로 사본 갱신
+- M3: argus-worker 탐지 배치(대량 다운로드 룰, `id` 커서, 진행 중 탐지건에만 하위 로그 추가)
+
+---
+
 ## 2026-09-30 — 마일스톤 M2 PR ② (플랫폼 기반: 스키마·시드·관리자 로그인·회원 목록·CSV)
 
 **한 일**
@@ -74,6 +136,14 @@
   - 이후 하루가 지나도 PR은 open, `mergeable_state=dirty`로 표시. **그 머지 커밋에 대한 main CI도 실행되지 않음**, PR 타임라인에 머지·닫힘 이벤트 없음. GitHub 상태 페이지에 관련 장애 공지 없음
   - 확인한 사실: PR 브랜치가 main의 조상(`merge-base --is-ancestor` 참), 합쳐도 충돌 없음(`merge-tree`), 두 트리 내용 동일 → **코드는 정상 반영, GitHub의 push 후처리(PR 상태 갱신·main CI)만 누락**
   - 대응: 다시 머지하거나 브랜치를 건드리지 않음. PR ② 머지(다음 main push) 때 GitHub가 열린 PR을 재점검해 해소되는지 확인 → 안 되면 근거 코멘트를 남기고 Close. 누락된 main CI는 PR ② 머지 때 합쳐진 트리로 실행됨
+  - **해소 (2026-09-30)**: PR #9 머지(10:32:59 UTC) **2초 뒤 PR #8이 자동으로 Merged 처리**(10:33:01). 새 push에서 GitHub가 열린 PR을 재점검해 커밋 포함을 감지. main CI도 `afbd789`로 정상 실행. Close 없이 "Merged" 기록으로 남음
+
+**보안 점검 결과 트리아지** (report-only 스캔 결과를 검토·판정한 기록 — architecture 8-2 "결과를 근거로 조치")
+- **CodeQL `py/clear-text-logging-sensitive-data` (High)** — `apps/platform-api/app/scripts/seed.py:108` (PR #9에서 신규)
+  - 판정: **오탐**. 로그 인자는 최소 길이 상수 `MIN_PASSWORD_LENGTH`(=12)와 고정 문구이며 비밀번호 값(`password` 변수)은 전달되지 않음. 변수명의 `password`에 반응하는 휴리스틱 탐지
+  - 조치: 코드 수정 없이 GitHub에서 False positive로 해제, 사유 기록 (2026-09-30, 사용자). PR 상태는 `UNSTABLE`(필수 아닌 검사 실패)로 머지 차단은 아니었음
+  - 기각한 대안: 상수명 변경 등으로 경고 회피 — 동작 차이 없이 "검토 후 판정했다"는 기록만 사라짐
+
 - Secure 쿠키는 http 내부망 요청에는 실리지 않음(규칙대로 동작). 브라우저는 `http://localhost`를 예외로 허용하므로 로컬 화면(M5)은 문제없음. M5에서 Next.js가 서버 측에서 platform-api를 호출하는 구조라면 쿠키 전달 방식을 그때 정함
 
 **다음 할 일**

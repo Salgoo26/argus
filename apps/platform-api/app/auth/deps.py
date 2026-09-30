@@ -1,7 +1,7 @@
 """관리자 인증 의존성 — 관리자 라우트마다 Depends(current_operator)로 건다.
 
-Spring Security의 SecurityContext처럼, 인증된 취급자를 request.state.operator에 둔다.
-접속기록 Agent(M2 PR ③)는 여기서 "식별자"(§2 3호)를 가져간다.
+Spring Security의 SecurityContext처럼, 인증된 취급자를 request.state.operator에 두고
+접속기록 기록지에 "식별자"(§2 3호)를 적는다.
 """
 
 from dataclasses import dataclass
@@ -10,6 +10,7 @@ from typing import Annotated
 from fastapi import Depends, Request
 from sqlalchemy import select
 
+from app.agent import record_actor
 from app.auth.tokens import COOKIE_NAME, issue_token, read_token
 from app.config import Settings
 from app.errors import ApiError
@@ -53,6 +54,7 @@ def current_operator(request: Request) -> AuthenticatedOperator:
         row["id"], row["login_id"], row["name"], row["team"], row["role"]
     )
     request.state.operator = authenticated
+    record_actor(authenticated.login_id)  # 접속기록 식별자 (§2 3호)
     # 30분 미사용 만료를 요청마다 연장 — 쿠키는 main.py의 미들웨어가 응답에 싣는다
     # (핸들러가 Response를 직접 돌려주는 CSV 다운로드에도 빠짐없이 붙이기 위해)
     request.state.session_token = issue_token(

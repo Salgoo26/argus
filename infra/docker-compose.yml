@@ -1,8 +1,8 @@
 # Argus 로컬 개발 구성 (Walking Skeleton)
 # 레포 루트에서 실행: docker compose up -d   (.env의 COMPOSE_FILE이 이 파일을 가리킨다)
 #
-# M0: DB 2개 / M1: argus-migrate, argus-api / M2: platform-migrate, platform-seed, platform-api
-# 나머지 앱 컨테이너(platform-relay, argus-worker, *-web)는 각 마일스톤에서 추가한다.
+# M0: DB 2개 / M1: argus-migrate, argus-api / M2: platform-migrate, platform-seed, platform-api, platform-relay
+# 나머지 앱 컨테이너(argus-worker, *-web)는 각 마일스톤에서 추가한다.
 # Caddy·backup은 첫 배포 때 추가 (architecture 7-2).
 #
 # 테스트: docker compose run --rm argus-api-test      (profile "test" — up 할 때는 뜨지 않음)
@@ -68,7 +68,7 @@ services:
       - platform-net
     restart: "no"
 
-  # ── 플랫폼 API: 관리자 로그인·회원 목록·다운로드 (Agent는 M2 PR ③) ──
+  # ── 플랫폼 API: 관리자 로그인·회원 목록·다운로드 + 접속기록 Agent ──
   platform-api:
     build: *platform-api-build
     image: platform-api:local
@@ -76,6 +76,8 @@ services:
     environment:
       <<: *platform-db-env
       PLATFORM_AUTH_SECRET: ${PLATFORM_AUTH_SECRET:?set PLATFORM_AUTH_SECRET in .env}
+      # 접속 IP 헤더를 믿을 프록시 (운영: Caddy). 로컬은 비움 → 직접 연결 IP를 기록
+      PLATFORM_TRUSTED_PROXIES: ${PLATFORM_TRUSTED_PROXIES:-}
     depends_on:
       platform-seed:
         condition: service_completed_successfully
@@ -84,6 +86,29 @@ services:
       - "127.0.0.1:${PLATFORM_API_PORT:-18001}:8000"
     networks:
       - platform-net
+
+  # ── 플랫폼 relay: outbox → Argus 수집·취급자 동기화 API (HMAC 서명) ──
+  # 플랫폼 쪽에서 유일하게 두 네트워크에 붙는 컨테이너. platform-api 자체는 Argus에 닿지 않는다
+  platform-relay:
+    build: *platform-api-build
+    image: platform-api:local
+    command: ["python", "-m", "app.relay"]
+    restart: unless-stopped
+    environment:
+      <<: *platform-db-env
+      PLATFORM_ARGUS_INGEST_URL: http://argus-api:8000
+      # argus-api가 검증에 쓰는 것과 같은 키
+      PLATFORM_ARGUS_INGEST_SECRET: ${ARGUS_INGEST_SECRET_PLATFORM:?set ARGUS_INGEST_SECRET_PLATFORM in .env}
+    # 이미지의 HEALTHCHECK는 웹 서버(8000)용 — relay는 웹 서버를 띄우지 않는다
+    healthcheck:
+      disable: true
+    depends_on:
+      # Argus가 꺼져 있어도 기동한다 — 그동안 outbox에 쌓였다가 Argus가 뜨면 전송 (§8③ 분실 방지)
+      platform-migrate:
+        condition: service_completed_successfully
+    networks:
+      - platform-net
+      - argus-net
 
   platform-api-test:
     profiles: ["test"]
@@ -187,7 +212,7 @@ services:
 
 # 두 시스템은 네트워크도 분리한다. 플랫폼 쪽 컨테이너는 argus-db에 닿을 수 없고,
 # 연결은 수집 API·취급자 동기화 API뿐이다 (architecture 2절).
-# platform-relay만 두 네트워크에 붙어 argus-api를 호출하게 된다 (M2).
+# platform-relay만 두 네트워크에 붙어 argus-api를 호출한다 (M2).
 networks:
   platform-net:
   argus-net:
