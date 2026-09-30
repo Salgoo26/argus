@@ -19,6 +19,15 @@ class Settings(BaseSettings):
     # 출처 시스템별 HMAC 공유 비밀키 (api-spec 1-2). Skeleton은 PLATFORM 하나, 키 1개.
     ingest_secret_platform: SecretStr | None = None
 
+    # Argus 사용자(담당자 A4·취급자 A5) 로그인 토큰(JWT HS256) 서명 키 — argus-api에만.
+    # 인증 방식은 플랫폼 관리자와 같다 (policy 4-3)
+    auth_secret: SecretStr | None = None
+    session_idle_minutes: int = 30
+    # Secure 쿠키(HTTPS에서만 전송). 브라우저는 http://localhost를 예외로 허용한다
+    cookie_secure: bool = True
+    # 접속 IP 헤더(X-Forwarded-For)를 믿을 프록시 — 쉼표 구분 IP·CIDR, 비우면 아무도 믿지 않는다
+    trusted_proxies: str = ""
+
     def database_url(self) -> URL:
         # URL.create는 비밀번호의 특수문자를 알아서 이스케이프한다
         return URL.create(
@@ -29,6 +38,13 @@ class Settings(BaseSettings):
             port=self.db_port,
             database=self.db_name,
         )
+
+    def require_auth_secret(self) -> bytes:
+        secret = self.auth_secret.get_secret_value() if self.auth_secret else ""
+        if len(secret) < 32:
+            # 짧은 HMAC 키는 오프라인 대입으로 토큰 위조가 가능해진다
+            raise ValueError("ARGUS_AUTH_SECRET must be at least 32 chars")
+        return secret.encode()
 
     def ingest_secret(self, source_code: str) -> bytes | None:
         secrets = {"PLATFORM": self.ingest_secret_platform}

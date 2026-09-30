@@ -53,7 +53,7 @@ curl http://127.0.0.1:18001/healthz     # platform-api {"status":"ok","db":"ok"}
 | platform-db | `127.0.0.1:15432` | 플랫폼 DB (PostgreSQL 16) |
 | argus-db | `127.0.0.1:15433` | Argus 접속기록 원장 (PostgreSQL 16) |
 | argus-migrate | — | 기동 시 1회 실행: Alembic 마이그레이션 + API용 DB 계정 발급 후 종료 |
-| argus-api | `127.0.0.1:18000` | 수집 API `POST /ingest/v1/access-logs`, 취급자 동기화 `POST /ingest/v1/handler-events`, `GET /healthz`, API 문서 `/docs` |
+| argus-api | `127.0.0.1:18000` | 수집 API `POST /ingest/v1/access-logs`, 취급자 동기화 `POST /ingest/v1/handler-events`, 로그인 `POST /api/auth/login`, `GET /healthz`, API 문서 `/docs`. `/api` 요청은 Argus 자체 접속기록(ARGUS 출처)으로 원장에 기록 |
 | argus-worker | — | 탐지 배치: `setting.detection_interval_min`(기본 5분)마다 원장을 순찰해 룰에 걸린 기록으로 탐지건 생성. 즉시 한 번: `docker compose exec argus-worker python -m app.worker --once` |
 | platform-migrate | — | 기동 시 1회 실행: 플랫폼 Alembic 마이그레이션 후 종료 |
 | platform-seed | — | 기동 시 1회 실행: 가상 회원 500명·취급자 5명(비어 있을 때만) 후 종료 |
@@ -67,6 +67,18 @@ curl http://127.0.0.1:18001/healthz     # platform-api {"status":"ok","db":"ok"}
 ```bash
 docker compose run --rm platform-migrate python -m app.scripts.unlock_operator ops_park
 ```
+
+### Argus 계정 준비 (담당자·취급자)
+
+취급자(A5) 계정은 플랫폼 취급자 동기화로 자동으로 생기지만 **로그인할 수 없는 상태**(무작위 비밀번호)다. 담당자(A4) 계정은 없다. 관리 스크립트로 만든다 — 비밀번호는 명령줄에 쓰지 않고 실행 후 입력창에서 입력한다(셸 기록에 남지 않게, 12자 이상).
+
+```bash
+docker compose exec argus-api python -m app.scripts.users create-officer officer   # 담당자 계정 생성
+docker compose exec argus-api python -m app.scripts.users set-password ops_park    # 취급자 비밀번호 설정
+docker compose exec argus-api python -m app.scripts.users unlock ops_park          # 5회 실패로 잠긴 계정 해제
+```
+
+> Git Bash에서 "the input device is not a TTY"가 나오면 명령 앞에 `winpty`를 붙인다.
 
 ### 테스트
 
