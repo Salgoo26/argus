@@ -4,12 +4,12 @@
 """
 
 import json
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime, timedelta, timezone
 
 import pytest
 from sqlalchemy import func, select, text, update
 
-from app.detection.batch import BATCH_LOCK_KEY, group_bucket, run_batch
+from app.detection.batch import BATCH_LOCK_KEY, UNREGISTERED_NOTE, group_bucket, run_batch
 from app.ledger.append import append_access_logs
 from app.models import (
     detection,
@@ -19,31 +19,34 @@ from app.models import (
     detection_status_history,
 )
 
-from conftest import make_entry
+from conftest import make_entry, reset_rules
 
 NOW = datetime.now(UTC)
 
 
-@pytest.fixture(autouse=True)
-def clean_detection(admin_engine):
-    """탐지 결과를 비우고, 테스트가 바꾼 룰을 시드 상태로 되돌린다 (소유자 계정)"""
-    yield
+def clear_detections(admin_engine) -> None:
     with admin_engine.begin() as conn:
         conn.execute(text("DELETE FROM detection_log"))
         conn.execute(text("DELETE FROM detection_status_history"))
         conn.execute(text("DELETE FROM explanation"))
         conn.execute(text("DELETE FROM detection"))
         conn.execute(text("DELETE FROM detection_batch_run"))
-        conn.execute(text("DELETE FROM detection_rule WHERE name <> '대량 다운로드'"))
-        conn.execute(
-            text(
-                """UPDATE detection_rule SET enabled = true, auto_request = true,
-                   condition = '{"all": [
-                    {"field": "action", "op": "eq", "value": "DOWNLOAD"},
-                    {"field": "subject_count", "op": "gte", "value": 50}]}'
-                   WHERE name = '대량 다운로드'"""
-            )
-        )
+
+
+@pytest.fixture(autouse=True)
+def clean_detection(admin_engine, seed_rules):
+    """룰은 대량 다운로드만 켠 시드 상태로 시작하고, 끝나면 탐지 결과를 비운다 (소유자 계정)
+
+    다른 룰을 다루는 테스트는 use_rules로 켠다.
+    """
+    reset_rules(admin_engine, seed_rules, enabled=("대량 다운로드",))
+    yield
+    clear_detections(admin_engine)
+    reset_rules(admin_engine, seed_rules, enabled=("대량 다운로드",))
+
+
+def use_rules(admin_engine, seed_rules, *names: str) -> None:
+    reset_rules(admin_engine, seed_rules, enabled=names)
 
 
 def add_log(app_engine, **overrides) -> int:
@@ -438,3 +441,139 @@ def test_rule_with_auto_request_off_stays_detected(app_engine, admin_engine, cle
     download(app_engine)
     run_batch(app_engine)
     assert detections(app_engine)[0]["status"] == "DETECTED"
+
+
+# ── 야간·주말·퇴직자 계정 접속 (기능 레이어 1) ──────────────
+# 시각은 모두 고정값 — 테스트를 실행하는 시각과 무관하게 같은 결과가 나와야 한다.
+# 2026-09-29(화)·2026-10-03(토)·2026-10-05(월)은 한국 시각 기준 요일이다.
+
+KST = timezone(timedelta(hours=9))
+
+
+def kst(*args) -> datetime:
+    return datetime(*args, tzinfo=KST)
+
+
+def rule_names(app_engine) -> list[str]:
+    return [d["rule_snapshot"]["name"] for d in detections(app_engine)]
+
+
+def first_history_comment(app_engine, detection_id: int) -> str:
+    with app_engine.connect() as conn:
+        return (
+            conn.execute(
+                select(detection_status_history.c.comment)
+                .where(detection_status_history.c.detection_id == detection_id)
+                .order_by(detection_status_history.c.id)
+            )
+            .scalars()
+            .first()
+        )
+
+
+@pytest.mark.parametrize(
+    ("occurred_at", "action", "expected"),
+    [
+        (kst(2026, 9, 29, 21, 59), "READ", False),
+        (kst(2026, 9, 29, 22, 0), "READ", True),  # 시작 포함
+        (kst(2026, 9, 30, 3, 0), "DOWNLOAD", True),  # 자정 넘김
+        (kst(2026, 9, 30, 5, 59, 59), "READ", True),
+        (kst(2026, 9, 30, 6, 0), "READ", False),  # 끝 미포함
+        (kst(2026, 9, 29, 23, 0), "LOGIN", False),  # 조회·다운로드만
+    ],
+    ids=["21:59", "22:00", "03:00-download", "05:59:59", "06:00", "login"],
+)
+def test_night_access(app_engine, admin_engine, seed_rules, occurred_at, action, expected):
+    use_rules(admin_engine, seed_rules, "야간 접속")
+    add_log(app_engine, occurred_at=occurred_at, action=action)
+    run_batch(app_engine)
+    assert rule_names(app_engine) == (["야간 접속"] if expected else [])
+
+
+def test_night_access_is_judged_in_korean_time(app_engine, admin_engine, seed_rules):
+    use_rules(admin_engine, seed_rules, "야간 접속")
+    add_log(app_engine, occurred_at=datetime(2026, 9, 29, 14, 0, tzinfo=UTC))  # KST 23:00
+    add_log(app_engine, occurred_at=datetime(2026, 9, 29, 23, 0, tzinfo=UTC))  # KST 08:00
+    run_batch(app_engine)
+    [case] = detections(app_engine)
+    assert case["log_count"] == 1 and case["group_bucket"] == "2026-09-29"
+
+
+def test_weekend_access_uses_korean_weekday(app_engine, admin_engine, seed_rules):
+    use_rules(admin_engine, seed_rules, "주말 접속")
+    add_log(app_engine, occurred_at=kst(2026, 10, 3, 0, 30), action="LOGIN")  # UTC로는 금요일
+    add_log(app_engine, occurred_at=kst(2026, 10, 5, 8, 0))  # UTC로는 일요일
+    add_log(app_engine, occurred_at=kst(2026, 10, 1, 14, 0))  # 목요일
+    run_batch(app_engine)
+    [case] = detections(app_engine)
+    assert case["rule_snapshot"]["name"] == "주말 접속" and case["group_bucket"] == "2026-10-03"
+    assert case["severity"] == "LOW" and case["log_count"] == 1
+
+
+def add_terminated_handler(admin_engine, login_id: str, terminated_at: datetime) -> None:
+    with admin_engine.begin() as conn:
+        conn.execute(
+            text(
+                """INSERT INTO handler (source_system_id, login_id, name, team,
+                                        employment_status, terminated_at, last_event_at)
+                   VALUES (1, :login, '최유나', 'CS', 'TERMINATED', :term, now())"""
+            ),
+            {"login": login_id, "term": terminated_at},
+        )
+
+
+def test_terminated_account_is_judged_at_the_time_of_access(
+    app_engine, admin_engine, seed_rules, cleanup_accounts
+):
+    use_rules(admin_engine, seed_rules, "퇴직자 계정 접속")
+    terminated_at = kst(2026, 9, 30, 18, 0)
+    add_terminated_handler(admin_engine, "cs_choi", terminated_at)
+    # 퇴직 전 정상 접속은 지금 퇴직 상태여도 탐지하지 않는다 (소급 탐지 방지)
+    add_log(app_engine, actor_login_id="cs_choi", occurred_at=terminated_at - timedelta(hours=1))
+    add_log(app_engine, actor_login_id="cs_choi", occurred_at=terminated_at, action="LOGIN")
+    add_log(app_engine, actor_login_id="cs_choi", occurred_at=terminated_at + timedelta(days=1))
+    add_log(app_engine, occurred_at=terminated_at + timedelta(days=1))  # 재직 중인 ops_park
+    add_handler_account(admin_engine)  # ops_park 명부 등록
+
+    run_batch(app_engine)
+
+    cases = detections(app_engine)
+    assert [(c["actor_login_id"], c["group_bucket"], c["log_count"]) for c in cases] == [
+        ("cs_choi", "2026-09-30", 1),
+        ("cs_choi", "2026-10-01", 1),
+    ]
+    # 퇴직자에게는 소명을 받을 계정이 없다 — 담당자가 처리
+    assert all(c["status"] == "DETECTED" and c["severity"] == "HIGH" for c in cases)
+    assert UNREGISTERED_NOTE not in first_history_comment(app_engine, cases[0]["id"])
+
+
+def test_account_missing_from_roster_is_detected_with_reason(app_engine, admin_engine, seed_rules):
+    # 명부에 없는 계정 = 퇴직 여부 판정 불가 → 넘기지 않고 탐지 (2026-10-01 사용자 결정)
+    use_rules(admin_engine, seed_rules, "퇴직자 계정 접속", "대량 다운로드")
+    download(app_engine, actor_login_id="ghost_kim", occurred_at=kst(2026, 9, 29, 10, 0))
+
+    run_batch(app_engine)
+
+    by_rule = {d["rule_snapshot"]["name"]: d for d in detections(app_engine)}
+    assert set(by_rule) == {"퇴직자 계정 접속", "대량 다운로드"}
+    retired = by_rule["퇴직자 계정 접속"]
+    assert retired["status"] == "DETECTED"
+    assert first_history_comment(app_engine, retired["id"]).endswith(UNREGISTERED_NOTE)
+    # 명부를 보지 않는 룰의 탐지건에는 붙이지 않는다
+    bulk = by_rule["대량 다운로드"]
+    assert UNREGISTERED_NOTE not in first_history_comment(app_engine, bulk["id"])
+
+
+def test_argus_self_access_logs_are_not_evaluated(app_engine, admin_engine, seed_rules):
+    # Argus 자체 기록(출처 ARGUS = 2)은 원장에 남지만 룰로 평가하지 않는다 (2026-10-01 결정)
+    use_rules(
+        admin_engine, seed_rules, "대량 다운로드", "야간 접속", "주말 접속", "퇴직자 계정 접속"
+    )
+    night_saturday = kst(2026, 10, 3, 23, 0)
+    add_log(app_engine, source_system_id=2, actor_login_id="officer", occurred_at=night_saturday)
+    download(app_engine, source_system_id=2, actor_login_id="officer", occurred_at=night_saturday)
+
+    result = run_batch(app_engine)
+
+    assert result.processed == 2  # 순찰은 했다 — 평가만 하지 않음
+    assert result.detected == 0 and detections(app_engine) == []

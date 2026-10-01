@@ -75,8 +75,10 @@ winpty docker compose exec argus-api python -m app.scripts.users set-password op
 **③ 탐지 배치** — 5분마다 자동으로 돌지만, 기다리지 않고 바로 한 번 실행할 수 있다:
 
 ```bash
-docker compose exec argus-worker python -m app.worker --once   # detected=1 이면 탐지건 생성
+docker compose exec argus-worker python -m app.worker --once   # detected=1 이상이면 탐지건 생성
 ```
+
+> 기본 룰은 4개다 — 대량 다운로드(50건 이상), 야간 접속(22:00~06:00 조회·다운로드), 주말 접속, 퇴직자 계정 접속(시각·요일은 한국 시각). 밤이나 주말에 따라 하면 같은 다운로드가 야간·주말 룰로도 탐지되어 탐지건이 더 생긴다 — 아래 흐름은 **"대량 다운로드"** 건으로 진행한다. 룰은 플랫폼 기록에만 적용하고, Argus 자체 접속기록(담당자·취급자의 Argus 사용)은 원장에 남기기만 한다.
 
 **④ Argus: 결재 흐름** — http://localhost:3001
 

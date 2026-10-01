@@ -12,14 +12,25 @@
     {"all": [조건, ...]} (AND) / {"any": [조건, ...]} (OR), 1단계 중첩 허용
     조건 = {"field": ..., "op": ..., "value": ...}
 
-Walking Skeleton이 평가하는 필드는 아래 4개다. 야간·주말·퇴직자 계정 접속 룰에 필요한
-occurred_time·occurred_weekday·actor_team·actor_terminated_at_or_before는 해당 룰을 넣을 때
-FIELDS에 추가한다 (Skeleton 이후 단계).
+조건식은 접속기록 컬럼과 그로부터 계산한 값(evaluation_facts)을 본다:
+- occurred_time·occurred_weekday: 발생 시각의 **한국 시각(KST)** 시:분·요일 (db-schema 3-7 v0.4)
+- actor_terminated_at_or_before: 행위 시점에 이미 퇴직했는가 — 현재 재직상태가 아니라
+  `handler.terminated_at <= occurred_at` (policy 1-3: 퇴직 전 정상 접속의 소급 탐지·늦게 도착한
+  기록의 오판정 방지). **명부에 없는 계정은 판정 불가 → 참으로 본다**(2026-10-01 사용자 결정):
+  판정 불가를 "이상 없음"으로 넘기면 탐지 누락이고, relay가 명부를 기록보다 먼저 보내므로
+  정상이라면 생기지 않는다 — 생겼다면 동기화 실패나 명부 밖 계정이라 그 자체가 점검 대상
+actor_team(db-schema 3-6)은 아직 쓰는 룰이 없어 넣지 않았다 — 룰 빌더(기능 레이어 6) 때 추가.
 """
 
+import re
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
+from datetime import datetime, timedelta, timezone
 from typing import Any
+
+KST = timezone(timedelta(hours=9))  # 판정 기준 시간대 — 한국은 서머타임이 없어 고정 오프셋
+WEEKDAYS = ("MON", "TUE", "WED", "THU", "FRI", "SAT", "SUN")  # datetime.weekday() 순서
+_HHMM = re.compile(r"^([01]\d|2[0-3]):[0-5]\d$")
 
 
 class RuleError(ValueError):
@@ -38,9 +49,28 @@ def _is_str_list(value: Any) -> bool:
     return isinstance(value, list) and len(value) > 0 and all(isinstance(v, str) for v in value)
 
 
+def _is_time_range(value: Any) -> bool:
+    # ["22:00", "06:00"] — 시작 포함·끝 미포함, 시작 > 끝이면 자정을 넘긴다. 같으면 뜻이 모호해 거부
+    return (
+        isinstance(value, list)
+        and len(value) == 2
+        and all(isinstance(v, str) and _HHMM.match(v) for v in value)
+        and value[0] != value[1]
+    )
+
+
+def _is_weekday_list(value: Any) -> bool:
+    return _is_str_list(value) and all(v in WEEKDAYS for v in value)
+
+
+def _is_true(value: Any) -> bool:
+    # "행위 시점에 퇴직하지 않았음"(false)은 명부 미등록을 어떻게 볼지 모호해 받지 않는다
+    return value is True
+
+
 @dataclass(frozen=True)
 class _Field:
-    column: str  # access_log 컬럼
+    key: str  # evaluation_facts의 키 (접속기록 컬럼 또는 계산한 값)
     ops: Mapping[str, Callable[[Any], bool]]  # 연산자 → 값 형식 검사
 
 
@@ -49,7 +79,12 @@ FIELDS: Mapping[str, _Field] = {
     "data_category": _Field("data_category", {"eq": _is_str, "in": _is_str_list}),
     "result": _Field("result", {"eq": _is_str}),
     "subject_count": _Field("subject_count", {"gte": _is_int, "lte": _is_int, "eq": _is_int}),
+    "occurred_time": _Field("occurred_time", {"between": _is_time_range}),
+    "occurred_weekday": _Field("occurred_weekday", {"in": _is_weekday_list}),
+    "actor_terminated_at_or_before": _Field("actor_terminated_at_or_before", {"eq": _is_true}),
 }
+# 취급자 명부(handler)를 봐야 판정할 수 있는 필드
+ROSTER_FIELDS = frozenset({"actor_terminated_at_or_before"})
 
 SUPPORTED_RULE_TYPES = frozenset({"EVENT"})  # AGGREGATE는 v0.1 범위 밖 (CLAUDE.md 6절)
 SUPPORTED_GROUP_BY = frozenset({"ACTOR_RULE_DATE"})  # policy 2-2 기본 그룹핑
@@ -101,8 +136,47 @@ def applies_to_path(rule_access_path: str, log_access_path: str) -> bool:
     return rule_access_path in ("ALL", log_access_path)
 
 
-def _leaf_matches(leaf: Mapping[str, Any], log: Mapping[str, Any]) -> bool:
-    actual = log[FIELDS[leaf["field"]].column]
+def uses_fields(condition: Mapping[str, Any], names: frozenset[str]) -> bool:
+    """조건식이 names 중 하나라도 쓰는가 (검증된 조건식)"""
+    (_, items) = next(iter(condition.items()))
+    return any(
+        uses_fields(item, names) if next(iter(item)) in _GROUP_KEYS else item["field"] in names
+        for item in items
+    )
+
+
+def evaluation_facts(
+    log: Mapping[str, Any], roster: Mapping[tuple[int, str], datetime | None]
+) -> dict[str, Any]:
+    """룰이 보는 값 — 접속기록 컬럼 + 계산한 값
+
+    roster: (출처, 계정) → 퇴직 시각(재직 중이면 None). 키가 없으면 명부 미등록.
+    """
+    occurred_at: datetime = log["occurred_at"]
+    local = occurred_at.astimezone(KST)
+    key = (log["source_system_id"], log["actor_login_id"])
+    registered = key in roster
+    terminated_at = roster.get(key)
+    return dict(log) | {
+        "occurred_time": local.strftime("%H:%M"),
+        "occurred_weekday": WEEKDAYS[local.weekday()],
+        "actor_registered": registered,
+        # 명부 미등록 = 판정 불가 → 참 (모듈 설명 참고)
+        "actor_terminated_at_or_before": (
+            not registered or (terminated_at is not None and terminated_at <= occurred_at)
+        ),
+    }
+
+
+def _in_time_range(actual: str, start: str, end: str) -> bool:
+    # "HH:MM" 0 채움 문자열이라 사전순 비교 = 시각 비교. 분 단위로 잘라 [시작, 끝)
+    if start < end:
+        return start <= actual < end
+    return actual >= start or actual < end  # 자정 넘김 (22:00~06:00)
+
+
+def _leaf_matches(leaf: Mapping[str, Any], facts: Mapping[str, Any]) -> bool:
+    actual = facts[FIELDS[leaf["field"]].key]
     expected = leaf["value"]
     match leaf["op"]:
         case "eq":
@@ -113,14 +187,16 @@ def _leaf_matches(leaf: Mapping[str, Any], log: Mapping[str, Any]) -> bool:
             return actual >= expected
         case "lte":
             return actual <= expected
+        case "between":
+            return _in_time_range(actual, *expected)
     raise RuleError(f"unsupported op: {leaf['op']}")  # validate_rule을 거쳤다면 도달하지 않음
 
 
-def matches(condition: Mapping[str, Any], log: Mapping[str, Any]) -> bool:
-    """검증된 조건식을 접속기록 1건에 적용 (EVENT 룰)"""
+def matches(condition: Mapping[str, Any], facts: Mapping[str, Any]) -> bool:
+    """검증된 조건식을 접속기록 1건(evaluation_facts)에 적용 (EVENT 룰)"""
     (kind, items) = next(iter(condition.items()))
     results = (
-        matches(item, log) if next(iter(item)) in _GROUP_KEYS else _leaf_matches(item, log)
+        matches(item, facts) if next(iter(item)) in _GROUP_KEYS else _leaf_matches(item, facts)
         for item in items
     )
     return all(results) if kind == "all" else any(results)

@@ -23,6 +23,7 @@ from conftest import (
 )
 
 EXPORT_COUNT = 120
+BULK_DOWNLOAD = "대량 다운로드"
 MASKED = re.compile(r"^member_\d+\*\*\*$")  # 저장 "10293" → 마스킹 member_10***
 
 
@@ -39,14 +40,21 @@ def download_members(login_id: str, count: int) -> list[dict]:
 
 
 def wait_for_detection(officer_browser, actor: str, subject_count: int) -> dict:
-    """relay 전송과 탐지 배치는 비동기 — 배치를 돌려 가며 해당 탐지건이 나타날 때까지 기다린다"""
+    """relay 전송과 탐지 배치는 비동기 — 배치를 돌려 가며 해당 탐지건이 나타날 때까지 기다린다
+
+    룰 이름으로 고른다 — CI가 밤·주말에 돌면 같은 다운로드가 야간·주말 접속 룰로도 탐지된다.
+    """
 
     def probe():
         run_detection_batch()
         response = officer_browser.get("/api/detections", params={"size": 100})
         assert response.status_code == 200, response.text
         for item in response.json()["items"]:
-            if item["actor_login_id"] == actor and item["subject_count_sum"] == subject_count:
+            if (
+                item["rule_name"] == BULK_DOWNLOAD
+                and item["actor_login_id"] == actor
+                and item["subject_count_sum"] == subject_count
+            ):
                 return item
         return None
 
