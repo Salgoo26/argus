@@ -29,6 +29,40 @@
 
 ---
 
+## 2026-10-01 — 마일스톤 M6 PR ② (README 로컬 실행·시나리오 따라하기, .env 생성 스크립트) — M6 완료
+
+**한 일**
+- PR #21 CI 통과 확인(e2e job 약 2분, 시나리오 테스트 8초), 러너 Compose 버전(v2.38.2) 확인 → PR ① 항목에 기록
+- `scripts/init-env.sh`: `.env.example` → `.env`, change-me 칸만 `openssl rand -hex 32`로 채움. 값은 출력하지 않고, 이미 `.env`가 있으면 덮어쓰지 않음(기존 DB 비밀번호와 어긋나지 않게). **CI e2e job도 이 스크립트로 일회용 `.env` 생성** — README 경로가 CI에서 그대로 검증됨
+- README 재구성 (Windows·Git Bash 기준)
+  1. **처음 실행**: clone → `bash scripts/init-env.sh` → `docker compose up -d --build` → `docker compose ps`로 화면 healthy 확인 (`--wait` 제거 — PR ① CI 실패와 같은 이유)
+  2. **화면으로 시나리오 따라하기**: ① Argus 계정 준비(담당자 생성, 취급자 비밀번호 — `winpty`) ② 플랫폼 CSV 다운로드(시드 비밀번호는 `grep`으로 확인) ③ 탐지 배치 즉시 1회 ④ 결재 흐름 표(일반 창 = 담당자, 시크릿 창 = 취급자, 5단계와 상태) + 오탐 요청 취소 갈림길, 다른 취급자로는 안 보임 ⑤ 해시체인 검증
+  3. **자동 검증(E2E)**: `bash scripts/e2e.sh`, 확인 항목, `E2E_KEEP=1`
+  - 서비스 표(화면 2개를 맨 위로), 계정 잠금 해제(플랫폼·Argus 모두), 단위·통합 테스트, 중지
+- **README대로 새로 clone해 실측**: 임시 폴더에 브랜치를 clone → `init-env.sh`(Windows Git Bash에서 8칸 채움, 두 번째 실행은 거부) → 프로젝트 이름·포트만 바꿔(`argus-readme`, 2만번대) 기동 → 계정 준비 → 화면 서버 경유 120건 다운로드 → `worker --once` "detected=1" → **내장 브라우저로 Argus 화면에서 1~5단계 수행**(마스킹 `member_10***`·1차 요청자 "시스템(자동 요청)" 확인, 제출 → 반려 → 재요청(2차) → 재제출 → 승인, 상태 이력 7줄이 README 표와 일치) → 체인 검증 OK(24건) → 볼륨까지 삭제
+
+**M6 완료 기준 대조** (CLAUDE.md 6절): 시나리오 자동 테스트 스크립트 ✅(PR ①) / 해시체인 검증 스크립트 ✅(PR ①) / README 로컬 실행법(Windows) ✅(이 PR)
+**Skeleton 전체 완료 기준**: 새로 clone → README대로 기동 → 시나리오를 화면으로 끝까지 ✅(위 실측) / M6 테스트 CI 통과 ✅(PR #21) → **Walking Skeleton 완료** (PR #21·#22·이 PR 머지 시점)
+
+**결정사항**
+- `.env` 생성을 스크립트로 — 기각: README에 "change-me 8칸을 직접 바꾸기" 유지 — 처음 받은 사람이 가장 막히기 쉬운 단계이고, 손으로 넣으면 짧은 값·URL 특수문자(`@ : /`)로 기동 거부가 나기 쉬움. hex만 쓰므로 그 문제도 없음
+- 실측에서 CSV 다운로드는 **버튼 대신 같은 요청을 화면 서버로 직접 보냄** — 브라우저 파일 다운로드는 사용자 허락이 필요한 동작이라. 버튼 자체는 M5에서 사용자가 브라우저로 확인함
+- 실측에서 비밀번호 입력창(`winpty` 대화형) 대신 같은 명령의 `--password-env`를 사용 — 대화형 경로는 사용자가 직접 확인 필요(M4·M5에서 사용자가 이미 사용한 경로)
+
+**설계 변경**
+- 없음
+
+**미결·이슈**
+- **v0.1 Must 남은 항목**: 심사자용 README(프로젝트 소개·설계 포인트·보안 판단 근거 — 이번 README는 "실행법" 중심), 시연 자료(시나리오 GIF 또는 스크린샷)
+- **게이트 A(Skeleton 완성 확인)**: 이 PR 머지로 완료 기준 충족 — 사용자 확인 후 여유 항목 ① EVENT 룰 3개로 진행 여부 판단
+- relay·worker에 healthcheck가 없어 `up --wait`를 쓸 수 없음 — 하트비트 파일 등으로 healthcheck를 주는 방안은 **v0.2 후보**(운영 모니터링에도 도움)
+
+**다음 할 일**
+- PR #22(설계 사본) → #21(M6 ①) → 이 PR 머지 → **M6 완료 → Cowork 동기화**(architecture CI 표에 e2e job, Skeleton 완료)
+- 게이트 A 확인 → v0.1 Must(심사자용 README·시연 자료)와 여유 항목 순서 결정
+
+---
+
 ## 2026-10-01 — 마일스톤 M6 PR ① (해시체인 검증 명령어, 시나리오 E2E, CI e2e job)
 
 **한 일**
@@ -57,7 +91,7 @@
 - 없음 — CI에 e2e job 추가는 CLAUDE.md 6절 M6 완료 기준("M6 테스트가 CI에서 통과")의 구현. 단 architecture 8-1·8-5의 CI 구성 표에는 e2e job이 없음 → **Cowork 동기화 시 반영 요청**(PR 검사 ①에 "Skeleton 시나리오 E2E — 전체 스택 기동 + 해시체인 검증")
 
 **미결·이슈**
-- **CI 첫 실행 실패와 조치**: `docker compose up --wait`가 healthcheck를 일부러 끈 `argus-worker`·`platform-relay`에서 "no healthcheck configured"로 중단. 로컬 Compose(v5.5.1)는 통과시켜 로컬에선 재현되지 않았음(러너 Compose 버전 차이로 추정, CI에 버전 출력 추가) → `--wait` 제거. 화면 서버 healthy 대기는 e2e 서비스의 `depends_on`이 이미 맡고, relay·worker는 실행만 되면 테스트가 최대 90초 기다림
+- **CI 첫 실행 실패와 조치**: `docker compose up --wait`가 healthcheck를 일부러 끈 `argus-worker`·`platform-relay`에서 "no healthcheck configured"로 중단. 로컬 Compose(v5.5.1)는 통과시켜 로컬에선 재현되지 않았음(**확인: 러너 Compose v2.38.2 vs 로컬 v5.5.1** — CI에 버전 출력을 넣어 확인) → `--wait` 제거. 화면 서버 healthy 대기는 e2e 서비스의 `depends_on`이 이미 맡고, relay·worker는 실행만 되면 테스트가 최대 90초 기다림
   - README의 로컬 실행법도 `--wait`를 쓴다 — 사용자 PC(Docker Desktop 최신)에선 동작하지만 Compose 버전에 따라 같은 오류가 날 수 있음 → **PR ② README에서 함께 정리**
 - e2e job은 이미지 4개를 매번 새로 빌드해 CI 시간이 가장 긴 job — 느려지면 빌드 캐시(GitHub Actions cache) 도입 검토
 - e2e 린트의 ruff 버전(0.16.9)을 CI에 직접 적어 Dependabot이 갱신하지 않음 — argus-api의 ruff를 올릴 때 함께 수정
