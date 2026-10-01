@@ -2,7 +2,7 @@
 
 > 이 파일은 Claude Code가 이 레포에서 작업을 시작할 때 자동으로 읽는 지침이다.
 > 기획·설계 원본은 claude.ai 프로젝트("정보보호 프로젝트")에 있고, `docs/`는 그 사본이다.
-> 작성: 2026-09-23 (설계 단계 종료 시점) / 개정: 2026-09-29 — 6절 M1 완료 기준에 Trivy config·도커 빌드 확인 반영(architecture 8-5 개정 이월분), M2 범위에 ② 취급자 동기화 수신(Argus) 추가(구현 M1 설계 변경 #7), 7절에 시크릿 파일 확인 규칙 추가 / 2026-09-30 — 5절 인증 방식 확정(구현 M2 설계 변경 #2) / 2026-10-01 — 6절에 "Skeleton 이후: v0.1 범위" 추가
+> 작성: 2026-09-23 (설계 단계 종료 시점) / 개정: 2026-09-29 — 6절 M1 완료 기준에 Trivy config·도커 빌드 확인 반영(architecture 8-5 개정 이월분), M2 범위에 ② 취급자 동기화 수신(Argus) 추가(구현 M1 설계 변경 #7), 7절에 시크릿 파일 확인 규칙 추가 / 2026-09-30 — 5절 인증 방식 확정(구현 M2 설계 변경 #2) / 2026-10-01 — 6절에 "Skeleton 이후: v0.1 범위" 추가 / 2026-10-01 — 5절 기본 디자인 포함, 6절 시나리오 자동 소명 요청 반영(구현 M4·M5 설계 변경)
 
 ---
 
@@ -91,7 +91,7 @@
 |---|---|
 | Python | 3.12, FastAPI, SQLAlchemy 2.x, Alembic, Pydantic v2, pytest, ruff |
 | 배치 | worker/relay는 API와 **같은 이미지, 다른 실행 명령**의 별도 컨테이너 (API 프로세스가 여러 개여도 배치가 중복 실행되지 않도록) |
-| Frontend | Next.js(App Router) + TypeScript, npm. Skeleton에서는 디자인 없이 표·버튼 수준 |
+| Frontend | Next.js(App Router) + TypeScript, npm. **v0.1부터 기본 디자인 포함**(보여줘야 하는 프로젝트 — 2026-10-01 사용자 결정): CSS 한 장, 외부 글꼴·CDN 미사용, 강조색으로 두 시스템 구분. 브라우저 ↔ API는 Next.js rewrite(같은 출처). 화면 서버는 신뢰 프록시가 아님(`docs/architecture.md` 3-2) |
 | DB | PostgreSQL 16, 플랫폼·Argus **별도 컨테이너**. 스키마는 Alembic 마이그레이션으로 관리(DDL 원본은 `docs/db-schema.md`) |
 | 인증 | **JWT(HS256) `HttpOnly`·`SameSite=Strict` 쿠키, 30분 미사용 시 만료(요청마다 재발급), 매 요청 계정 상태 재확인** — 플랫폼 관리자 확정(M2), Argus 사용자(M4)도 같은 방식. 로그인 5회 연속 실패 시 잠금(앱 레벨). 상세는 `docs/policy.md` 4-3 |
 | 개발 환경 | **Windows + Docker Desktop.** Python/Node는 호스트에 설치하지 않고 컨테이너 안에서 실행. `.gitattributes`로 줄바꿈 LF 고정 |
@@ -109,10 +109,10 @@
 ```
 플랫폼 관리자(ops_park) 로그인 → 회원 목록 120건 CSV 다운로드
  → Agent가 접속기록 생성 → outbox → relay → Argus 수집 API → 원장 저장(해시체인)
- → 탐지 배치: "대량 다운로드" 룰(subject_count ≥ 50) → 탐지건 생성(DETECTED)
- → 정보보호 담당자(officer) 로그인 → 탐지건 확인(마스킹 상태) → 소명 요청(REQUESTED)
+ → 탐지 배치: "대량 다운로드" 룰(subject_count ≥ 50) → 탐지건 생성 + **자동 소명 요청(REQUESTED, 요청자 = 시스템)**
+ → 정보보호 담당자(officer) 로그인 → 탐지건 확인(마스킹 상태) → (오탐이면 요청 취소 → DISMISSED)
  → 취급자(ops_park) Argus 로그인 → 본인 탐지건 확인 → 소명 제출(SUBMITTED)
- → 담당자 승인(APPROVED, 종결)
+ → 담당자 반려(REJECTED) → 재요청(REQUESTED, round 2) → 재제출 → 승인(APPROVED, 종결)
 ```
 
 **범위 안**: `docs/db-schema.md`의 **[S] 테이블**(Argus 11개 — `setting` 포함 / 플랫폼 3개: `operator`, `member`, `outbox`), 룰 1개(대량 다운로드, 시드), 수집 API·취급자 동기화 API·헬스체크, 상태 전이 전체(요청→제출→반려→재요청→승인), Argus 자체 접속기록(LOGIN·READ), 식별값 마스킹 표시.
@@ -139,7 +139,7 @@
 
 | 구분 | 항목 |
 |---|---|
-| **Must** | Walking Skeleton 완성(M3~M6), 심사자용 README, 시연 자료(시나리오 GIF 또는 스크린샷) |
+| **Must** | Walking Skeleton 완성(M3~M6), **기본 디자인**(M5에서 적용), 심사자용 README, 시연 자료(시나리오 GIF 또는 스크린샷) |
 | **여유 시 — 이 순서대로, 앞 항목이 끝나야 다음으로** | ① EVENT 룰 3개 추가(야간·주말·퇴직자 계정 접속, `docs/policy.md` 1-3) → ② 식별값 언마스킹(LOG-10: 사유 입력 + `UNMASK` 기록) → ③ **DB 직접 접근(2티어) 최소판** (`docs/architecture.md` 6절: pgaudit 객체 감사 → 수집기 → 기존 수집 API `access_path=DB`, 룰 1개) |
 | **v0.1 제외** | 배포·Caddy·CD·백업, AGGREGATE 룰, 결제수단 조회 룰, 보고서, 소명 첨부, 이메일 알림, 파기 배치, 화이트리스트, 룰 빌더 UI, 결제·주문·문의 |
 

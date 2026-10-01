@@ -1,6 +1,6 @@
 # DB 스키마 (Argus / 플랫폼)
 
-> 작성일: 2026-09-23 / v0.2 (2026-09-23 개정 — 요구사항 전수 대조 후 6개 테이블·다수 컬럼 추가) / **v0.3 (2026-09-29 개정 — 구현 M1 반영: 해시체인 정규화 규칙 v1 확정, DB 계정 구조·권한 확정, 알려진 한계 명시)** (2026-09-30 보완 — A5 초기 해시 주석) / **v0.4 (2026-10-01 개정 — 구현 M3 반영: 탐지 날짜 KST 기준, 해석 불가 룰 시 순찰 실패, 빈 순찰 기록, 순찰 상한, `log_summary` 잘림 표시)**
+> 작성일: 2026-09-23 / v0.2 (2026-09-23 개정 — 요구사항 전수 대조 후 6개 테이블·다수 컬럼 추가) / **v0.3 (2026-09-29 개정 — 구현 M1 반영: 해시체인 정규화 규칙 v1 확정, DB 계정 구조·권한 확정, 알려진 한계 명시)** (2026-09-30 보완 — A5 초기 해시 주석) / **v0.4 (2026-10-01 개정 — 구현 M3 반영: 탐지 날짜 KST 기준, 해석 불가 룰 시 순찰 실패, 빈 순찰 기록, 순찰 상한, `log_summary` 잘림 표시)** (2026-10-01 보완 — 구현 M4: `detection_rule.auto_request`, `explanation.requested_by` NULL 허용, 자동 소명 요청, A5 조회 범위)
 > 관련 문서: [[아키텍처_설계서.md]], [[API명세서_시스템간.md]], [[정책정의서.md]], [[액터별_플로우.md]], [[요구사항정의서.md]]
 > DBMS: PostgreSQL 16 (플랫폼 DB / Argus DB 별도 인스턴스)
 > 표기: **[S]** = Walking Skeleton에 필요한 테이블. 컬럼은 전체를 정의하되 Skeleton에서는 [S] 테이블만 생성한다.
@@ -157,7 +157,7 @@ CREATE TABLE argus_user (
 
 > **취급자 동기화의 중복 판정 (v0.3)**: `handler`는 API ②의 `event_id`를 저장하지 않는다. 이벤트가 상태 전체(스냅샷)를 싣고 오므로 `occurred_at > last_event_at`일 때만 upsert하고, 그 외는 변경 없이 중복으로 처리한다. event_id 저장 테이블(`handler_event`)은 기각 — 사유는 API명세서 3-1.
 >
-> **A5의 조회 범위**: 취급자(A5)는 **자신의 `handler_id`에 연결된 탐지건만** 볼 수 있다. DB 제약이 아니라 애플리케이션 계층에서 강제하며(모든 조회 쿼리에 actor 필터 주입), 이 규칙은 액터별_플로우 F-06 #2와 대응한다.
+> **A5의 조회 범위**: 취급자(A5)는 **자신의 `handler_id`에 연결된 탐지건 중 소명 요청을 받은 건(`round ≥ 1`)만** 볼 수 있다(2026-10-01 구체화 — 담당자 검토 대기 `DETECTED` 건은 제외, 남의 건은 404). DB 제약이 아니라 애플리케이션 계층에서 강제하며(모든 조회 쿼리에 actor 필터 주입), 이 규칙은 액터별_플로우 F-06 #2와 대응한다.
 
 ### 3-2. 접속기록 원장
 
@@ -223,6 +223,7 @@ CREATE TABLE detection_rule (
     condition    jsonb        NOT NULL,            -- 조건식 (3-6절)
     aggregate    jsonb,                            -- AGGREGATE 전용 (3-6절)
     group_by     varchar(32)  NOT NULL DEFAULT 'ACTOR_RULE_DATE',
+    auto_request boolean      NOT NULL DEFAULT true,  -- 탐지건 생성 시 자동 소명 요청 여부 (2026-10-01, 정책정의서 3-2)
     version      int          NOT NULL DEFAULT 1,  -- 수정 시 +1
     created_by   bigint       REFERENCES argus_user(id),
     created_at   timestamptz  NOT NULL DEFAULT now(),
@@ -305,7 +306,7 @@ CREATE TABLE explanation (
     id               bigserial   PRIMARY KEY,
     detection_id     bigint      NOT NULL REFERENCES detection(id),
     round            int         NOT NULL,
-    requested_by     bigint      NOT NULL REFERENCES argus_user(id),
+    requested_by     bigint      REFERENCES argus_user(id),  -- NULL = 시스템(자동 소명 요청) (2026-10-01)
     requested_at     timestamptz NOT NULL DEFAULT now(),
     request_message  text,
     submitted_by     bigint      REFERENCES argus_user(id),
@@ -546,6 +547,7 @@ GRANT SELECT, DELETE ON access_log TO argus_purge;  -- 파기 배치 전용
 1. 직전 성공 실행의 `to_access_log_id` **초과** ~ 현재 최대 `id` **이하**를 이번 범위로 잡고 `detection_batch_run` 생성(RUNNING — 별도 트랜잭션으로 먼저 기록해 진행 중인 순찰이 밖에서 보이게). **순찰 1회 최대 10,000건**, 밀려 있으면 쉬지 않고 다음 순찰. **새 기록이 없어도 순찰 이력을 남긴다**(v0.4 — "탐지가 주기적으로 수행됐다"는 점검 증적이자, worker 중단 기간과 기록 없는 기간을 구분하는 근거). 동시 실행은 advisory lock으로 막고, 비정상 종료로 남은 RUNNING은 다음 순찰이 정리한다.
 2. 활성 룰 로드 → **켜진 룰 중 해석할 수 없는 룰(모르는 필드·연산자, 값 타입, 구조, 미지원 유형)이 하나라도 있으면 순찰 전체를 FAILED로 끝내고 책갈피를 유지**(v0.4 — 그 룰만 건너뛰면 책갈피가 넘어가 그 사이 기록이 그 룰로 영영 평가되지 않음. 기준값의 적절성은 해석 가능성과 별개로 담당자 판단) → 룰의 `access_path`로 대상 로그를 먼저 필터 → `rule_exception` 해당 건 제외
 3. **EVENT**: 조건식 판정 → 그룹 키 `(rule, source, actor, occurred_at의 날짜)`로 **진행 중** 탐지건 조회(`FOR UPDATE`) → 없으면 생성(`DETECTED`) + 룰 사본 + 상태 이력(시스템) + 알림, 있으면 하위 로그만 추가하고 `log_count`·`last_occurred_at`·`log_summary` 갱신. 같은 룰로 이미 어떤 탐지건에 붙은 기록은 다시 붙이지 않는다(재처리 시 증거 복제 방지)
+   - **자동 소명 요청** (2026-10-01): 탐지건을 **새로 만들 때** 룰의 `auto_request`가 켜져 있고 행위자에게 재직 중·비활성 아닌 A5 계정이 있으면 같은 트랜잭션에서 `REQUESTED`(round 1, `explanation.requested_by` NULL) + 상태 이력 2줄(DETECTED·REQUESTED, 모두 시스템). 룰 사본에 `auto_request` 포함. `explanation (detection_id, round)` 유일 제약이 이중 요청을 DB에서 막는다
    - **날짜는 한국 시각(KST, +09:00 고정) 기준**(v0.4) — UTC 날짜를 쓰면 KST 새벽 0~9시 행위가 전날 탐지건으로 묶인다. 야간·주말 룰의 시각·요일 판정도 KST. DB 시간대 데이터에 의존하지 않도록 앱에서 고정 오프셋으로 계산
 4. **AGGREGATE**: 범위 내 로그가 속한 윈도우들을 다시 집계(늦게 도착한 로그 포함) → 임계치 초과 시 같은 방식으로 upsert
 5. 판정·탐지건·하위 로그·SUCCESS를 **한 트랜잭션**으로 기록. 실패 시 FAILED로 남기고 다음 실행이 같은 범위부터 재처리(멱등: 하위 로그 PK 중복은 무시). 실패 사유에는 예외 메시지 **첫 줄만** 남긴다(DB 오류의 상세 줄에 값이 실릴 수 있음)
