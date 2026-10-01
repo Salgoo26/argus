@@ -8,7 +8,7 @@
 | `requirements.md` | 요구사항정의서.md | 기획 | 2026-10-01 (LOG-06 자동 요청) |
 | `policy.md` | 정책정의서.md | 기획 | 2026-10-01 (M4 반영: 자동 소명 요청) |
 | `actor-flows.md` | 액터별_플로우.md | 기획 | 2026-10-01 (M4 반영) |
-| `architecture.md` | 아키텍처_설계서.md | 설계 | 2026-10-01 (M5 반영) |
+| `architecture.md` | 아키텍처_설계서.md | 설계 | 2026-10-01 (M6 반영: e2e job) |
 | `api-spec.md` | API명세서_시스템간.md | 설계 | 2026-10-01 (v0.4 + 401 문구·퇴직 처리 정합화) |
 | `db-schema.md` | DB스키마.md | 설계 | 2026-10-01 (v0.4 + M4 보완) |
 | `implementation-log.md` | (레포에서 작성 → 진행기록.md로 동기화) | 구현 | — |
