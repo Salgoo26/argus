@@ -6,6 +6,7 @@ import { useEffect, useState } from "react";
 import { AppHeader, useMe } from "@/components/app-header";
 import { api, type CaseSummary, type Status } from "@/lib/api";
 import { SEVERITY_LABELS, STATUS_LABELS, formatDateTime, statusBadgeClass } from "@/lib/labels";
+import { severityBadgeClass } from "@/lib/rules";
 
 type CasePage = { items: CaseSummary[]; page: number; size: number; total: number };
 
@@ -83,7 +84,7 @@ export default function DetectionsPage() {
                     <td className="num">#{c.id}</td>
                     <td>{c.rule_name}</td>
                     <td>
-                      <span className={c.severity === "HIGH" ? "badge badge-danger" : "badge"}>
+                      <span className={severityBadgeClass(c.severity)}>
                         {SEVERITY_LABELS[c.severity]}
                       </span>
                     </td>

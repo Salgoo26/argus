@@ -71,9 +71,26 @@ detection_rule = Table(
     Column("enabled", Boolean, nullable=False),
     Column("auto_request", Boolean, nullable=False),
     Column("condition", JSONB, nullable=False),
-    Column("aggregate", JSONB),
+    # None은 SQL NULL로 — JSON null이면 CHECK(EVENT ↔ aggregate IS NULL)에 걸린다
+    Column("aggregate", JSONB(none_as_null=True)),
     Column("group_by", String(32), nullable=False),
     Column("version", Integer, nullable=False),
+    Column("created_by", BigInteger),  # NULL = 시스템(마이그레이션 시드)
+    Column("created_at", DateTime(timezone=True), nullable=False),
+    Column("updated_at", DateTime(timezone=True), nullable=False),
+)
+
+# 룰 변경 이력 (LOG-13) — 추가·조회만 (0008)
+detection_rule_history = Table(
+    "detection_rule_history",
+    metadata,
+    Column("id", BigInteger, primary_key=True),
+    Column("rule_id", BigInteger, nullable=False),
+    Column("version", Integer, nullable=False),
+    Column("change_type", String(16), nullable=False),
+    Column("snapshot", JSONB, nullable=False),
+    Column("changed_by", BigInteger),  # NULL = 시스템(마이그레이션)
+    Column("changed_at", DateTime(timezone=True), nullable=False),
 )
 
 detection = Table(

@@ -69,6 +69,7 @@ body {
 }
 
 .header-nav a {
+  white-space: nowrap;
   padding: 6px 12px;
   border-radius: 6px;
   color: var(--muted);
@@ -297,6 +298,66 @@ textarea {
 .badge-danger {
   background: var(--danger-soft);
   color: var(--danger);
+}
+
+/* 심각도 "중" (LOG-11) — 상은 danger, 하는 기본 */
+.badge-warn {
+  background: var(--warn-soft);
+  color: #7a4d00;
+}
+
+/* ── 룰 빌더 ─────────────────────────────── */
+
+.title-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.notice-ok {
+  padding: 10px 12px;
+  border-radius: var(--radius);
+  background: var(--accent-soft);
+  color: var(--accent-strong);
+  margin-bottom: 12px;
+}
+
+.rule-form {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  align-items: flex-start;
+}
+
+.rule-form > .toolbar,
+.rule-form > .field {
+  align-self: stretch;
+}
+
+.rule-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  align-self: stretch;
+}
+
+.checks,
+.inline {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.checks label {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
 }
 
 /* ── 페이지 이동 ─────────────────────────── */

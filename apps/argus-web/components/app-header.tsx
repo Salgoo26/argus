@@ -38,6 +38,7 @@ export function useMe(): { me: Me | null; handleError: (e: unknown) => string | 
 const OFFICER_MENU = [
   { href: "/detections", label: "탐지건" },
   { href: "/access-logs", label: "접속기록" },
+  { href: "/rules", label: "룰" },
 ];
 
 export function AppHeader({ me }: { me: Me | null }) {
