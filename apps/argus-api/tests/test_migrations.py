@@ -19,6 +19,7 @@ SKELETON_TABLES = {
     "explanation",
     "detection_batch_run",
     "setting",
+    "detection_rule_history",  # 기능 레이어 6 (0008)
 }
 
 

@@ -20,13 +20,13 @@ from alembic import command
 from alembic.config import Config
 from fastapi.testclient import TestClient
 from psycopg import sql
-from sqlalchemy import create_engine, delete, null, select, update
+from sqlalchemy import create_engine, delete, select, update
 from sqlalchemy.engine import URL, Engine, make_url
 
 from app.config import Settings
 from app.ingest.auth import sign
 from app.main import create_app
-from app.models import detection_rule
+from app.models import detection_rule, detection_rule_history
 from app.scripts.provision_db_roles import provision_app_login
 
 APP_ROOT = Path(__file__).resolve().parent.parent
@@ -156,20 +156,33 @@ def reset_rules(admin_engine, seed_rules: list[dict], enabled: tuple[str, ...]) 
     야간·주말 룰은 테스트를 **실행하는 시각**에 따라 결과가 달라진다 — 그 룰을 다루지 않는
     테스트는 꺼 두고, 다루는 테스트는 켜고 고정된 시각의 기록으로 검증한다.
     """
+    seed_ids = [r["id"] for r in seed_rules]
     with admin_engine.begin() as conn:
+        # 테스트가 만든 룰·남긴 변경 이력부터 지운다 (이력이 룰을 참조) — 소유자 계정
+        for seed in seed_rules:
+            conn.execute(
+                delete(detection_rule_history).where(
+                    detection_rule_history.c.rule_id == seed["id"],
+                    detection_rule_history.c.version > seed["version"],
+                )
+            )
         conn.execute(
-            delete(detection_rule).where(detection_rule.c.id.not_in([r["id"] for r in seed_rules]))
+            delete(detection_rule_history).where(detection_rule_history.c.rule_id.not_in(seed_ids))
         )
+        conn.execute(delete(detection_rule).where(detection_rule.c.id.not_in(seed_ids)))
         for seed in seed_rules:
             conn.execute(
                 update(detection_rule)
                 .where(detection_rule.c.id == seed["id"])
                 .values(
+                    name=seed["name"],
+                    description=seed["description"],
+                    severity=seed["severity"],
                     condition=seed["condition"],
-                    # None은 JSON null로 저장돼 CHECK(EVENT ↔ aggregate IS NULL)에 걸린다
-                    aggregate=seed["aggregate"] if seed["aggregate"] is not None else null(),
+                    aggregate=seed["aggregate"],
                     access_path=seed["access_path"],
                     auto_request=seed["auto_request"],
+                    version=seed["version"],
                     enabled=seed["name"] in enabled,
                 )
             )
