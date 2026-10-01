@@ -18,6 +18,8 @@ class AccessRecord:
     actor_login_id: str | None = None
     # 처리한 정보주체 "건수"만 — Argus 자체 기록은 회원 PK를 다시 적재하지 않는다 (policy 6-3)
     subject_count: int = 0
+    # api-spec 2-3 context — 예: 첨부 다운로드의 대상 탐지건 {"target": {"detection_id": 12}}
+    context: dict | None = None
 
 
 _current: ContextVar[AccessRecord | None] = ContextVar("argus_access_record", default=None)
@@ -49,3 +51,10 @@ def record_subject_count(count: int) -> None:
     record = _current.get()
     if record is not None:
         record.subject_count = count
+
+
+def record_target(detection_id: int) -> None:
+    """무엇을 대상으로 했는지 — 경로 변수 값은 원장에 남기지 않으므로(라우트 템플릿) context로"""
+    record = _current.get()
+    if record is not None:
+        record.context = {"target": {"detection_id": detection_id}}

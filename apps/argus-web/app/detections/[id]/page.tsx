@@ -5,6 +5,7 @@ import { useParams } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
 
 import { AppHeader, useMe } from "@/components/app-header";
+import { AttachmentList, AttachmentUploader } from "@/components/attachments";
 import { api, type CaseDetail } from "@/lib/api";
 import {
   ACTION_LABELS,
@@ -70,6 +71,9 @@ export default function DetectionDetailPage() {
   const buttons = me && detail ? actionsFor(me.role, detail.status) : [];
   const needsText = buttons.length > 0;
   const isAggregate = detail?.rule.rule_type === "AGGREGATE";
+  // 지금 차수의 소명 — 취급자가 요청 중일 때 첨부를 올리고 지울 수 있다
+  const currentRound = detail?.explanations.find((e) => e.round === detail.round);
+  const canAttach = me?.role === "HANDLER" && detail?.status === "REQUESTED" && !!currentRound;
 
   return (
     <>
@@ -163,6 +167,14 @@ export default function DetectionDetailPage() {
                       : "요청 메시지 또는 사유·의견 (불요·요청 취소·반려는 필수)"
                   }
                 />
+                {canAttach && detail && currentRound && (
+                  <AttachmentUploader
+                    detectionId={detail.id}
+                    attachments={currentRound.attachments}
+                    onChanged={load}
+                    onError={setError}
+                  />
+                )}
                 <div className="actions">
                   {buttons.map((b) => (
                     <button
@@ -249,6 +261,11 @@ export default function DetectionDetailPage() {
                       </p>
                       {/* 취급자가 쓴 내용은 텍스트로만 표시 — HTML로 해석하지 않는다(XSS 방지) */}
                       <div className="quote">{e.content}</div>
+                      <AttachmentList
+                        detectionId={detail.id}
+                        attachments={e.attachments}
+                        onError={setError}
+                      />
                     </>
                   ) : (
                     <p className="muted">제출 대기 중</p>

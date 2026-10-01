@@ -44,6 +44,7 @@ from app.models import (
     detection_log,
     detection_status_history,
     explanation,
+    explanation_attachment,
     handler,
 )
 
@@ -156,7 +157,7 @@ def get_detection(detection_id: int, request: Request, user: CurrentUser) -> dic
         if row is None:
             raise _not_found()
         logs = _logs(conn, detection_id)
-        explanations = _explanations(conn, detection_id)
+        explanations = _explanations(conn, detection_id, user)
         history = _history(conn, detection_id)
 
     record_subject_count(sum(len(log["subjects"]) for log in logs))
@@ -224,23 +225,52 @@ def _logs(conn: Connection, detection_id: int) -> list[dict]:
     ]
 
 
-def _explanations(conn: Connection, detection_id: int) -> list[dict]:
+def _attachments_by_explanation(conn: Connection, explanation_ids: list[int]) -> dict:
+    """차수별 첨부 목록 (메타데이터·해시만 — 파일은 다운로드 API로, 기능 레이어 7 ③)"""
+    if not explanation_ids:
+        return {}
+    rows = conn.execute(
+        select(explanation_attachment)
+        .where(explanation_attachment.c.explanation_id.in_(explanation_ids))
+        .order_by(explanation_attachment.c.id)
+    ).mappings()
+    grouped: dict[int, list[dict]] = {}
+    for r in rows:
+        grouped.setdefault(r["explanation_id"], []).append(
+            {
+                "id": r["id"],
+                "original_name": r["original_name"],
+                "content_type": r["content_type"],
+                "size_bytes": r["size_bytes"],
+                "sha256": r["sha256"],
+                "uploaded_at": r["uploaded_at"],
+            }
+        )
+    return grouped
+
+
+def _explanations(conn: Connection, detection_id: int, user: AuthenticatedUser) -> list[dict]:
     requester, submitter, reviewer = (
         argus_user.alias(n) for n in ("requester", "submitter", "reviewer")
     )
-    rows = conn.execute(
-        select(
-            explanation,
-            requester.c.login_id.label("requested_by_login"),
-            submitter.c.login_id.label("submitted_by_login"),
-            reviewer.c.login_id.label("reviewed_by_login"),
+    rows = (
+        conn.execute(
+            select(
+                explanation,
+                requester.c.login_id.label("requested_by_login"),
+                submitter.c.login_id.label("submitted_by_login"),
+                reviewer.c.login_id.label("reviewed_by_login"),
+            )
+            .outerjoin(requester, requester.c.id == explanation.c.requested_by)
+            .outerjoin(submitter, submitter.c.id == explanation.c.submitted_by)
+            .outerjoin(reviewer, reviewer.c.id == explanation.c.reviewed_by)
+            .where(explanation.c.detection_id == detection_id)
+            .order_by(explanation.c.round)
         )
-        .outerjoin(requester, requester.c.id == explanation.c.requested_by)
-        .outerjoin(submitter, submitter.c.id == explanation.c.submitted_by)
-        .outerjoin(reviewer, reviewer.c.id == explanation.c.reviewed_by)
-        .where(explanation.c.detection_id == detection_id)
-        .order_by(explanation.c.round)
-    ).mappings()
+        .mappings()
+        .all()
+    )
+    attachments = _attachments_by_explanation(conn, [r["id"] for r in rows])
     return [
         {
             "round": r["round"],
@@ -254,6 +284,12 @@ def _explanations(conn: Connection, detection_id: int) -> list[dict]:
             "reviewed_at": r["reviewed_at"],
             "review_result": r["review_result"],
             "review_comment": r["review_comment"],
+            # 담당자에게는 제출된 차수의 첨부만 — 취급자가 고치는 중인 초안은 숨긴다
+            "attachments": (
+                attachments.get(r["id"], [])
+                if user.role == HANDLER or r["submitted_at"] is not None
+                else []
+            ),
         }
         for r in rows
     ]

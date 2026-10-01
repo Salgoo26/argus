@@ -13,6 +13,7 @@ dependencies = [
     "psycopg[binary]==3.3.6",
     "argon2-cffi==25.1.0",
     "pyjwt==2.15.1",
+    "python-multipart==0.0.32",  # 소명 첨부 업로드(multipart/form-data) — FastAPI File()
 ]
 
 [project.optional-dependencies]

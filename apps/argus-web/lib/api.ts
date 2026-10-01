@@ -40,6 +40,13 @@ const MESSAGES: Record<string, string> = {
   INVALID_RULE: "룰 설정을 해석할 수 없습니다. 조건과 기준값을 확인하세요.",
   DUPLICATE_NAME: "같은 이름의 룰이 이미 있습니다.",
   VERSION_CONFLICT: "다른 담당자가 먼저 수정했습니다. 새로고침한 뒤 다시 시도하세요.",
+  EMPTY_FILE: "빈 파일은 첨부할 수 없습니다.",
+  FILE_TOO_LARGE: "파일은 5MB 이하만 첨부할 수 있습니다.",
+  UNSUPPORTED_FILE_TYPE: "PNG·JPG·PDF 파일만 첨부할 수 있습니다.",
+  TOO_MANY_ATTACHMENTS: "소명 한 차수에 최대 3개까지 첨부할 수 있습니다.",
+  NOT_EDITABLE: "소명 요청 중에만 첨부를 바꿀 수 있습니다.",
+  ATTACHMENT_TAMPERED: "첨부 파일이 저장 뒤에 바뀌어(해시 불일치) 내려받을 수 없습니다. 관리자에게 알리세요.",
+  ATTACHMENT_UNAVAILABLE: "첨부 파일을 찾을 수 없습니다.",
 };
 
 export function errorMessage(error: unknown): string {
@@ -106,6 +113,16 @@ export type Explanation = {
   reviewed_at: string | null;
   review_result: "APPROVED" | "REJECTED" | null;
   review_comment: string | null;
+  attachments: Attachment[]; // 담당자에게는 제출된 차수의 첨부만 온다
+};
+
+export type Attachment = {
+  id: number;
+  original_name: string;
+  content_type: string;
+  size_bytes: number;
+  sha256: string; // 올릴 때 계산 — 내려받을 때마다 서버가 다시 확인
+  uploaded_at: string;
 };
 
 export type HistoryEntry = {
