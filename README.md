@@ -59,6 +59,7 @@ curl http://127.0.0.1:18001/healthz     # platform-api {"status":"ok","db":"ok"}
 | platform-seed | — | 기동 시 1회 실행: 가상 회원 500명·취급자 5명(비어 있을 때만) 후 종료 |
 | platform-api | `127.0.0.1:18001` | 관리자 로그인 `POST /admin/auth/login`, 회원 목록 `GET /admin/members`, CSV `GET /admin/members/export`, API 문서 `/docs`. 관리자 라우트 요청은 접속기록으로 outbox에 적재 |
 | platform-relay | — | outbox → Argus 전송(HMAC 서명). 2초 주기, 실패 시 1분→최대 1시간 백오프. 플랫폼 쪽에서 유일하게 Argus 네트워크에 붙는다 |
+| platform-web | `127.0.0.1:3000` | **플랫폼 관리자 화면** — 로그인·회원 목록·CSV 다운로드. `/api/*`는 Next.js가 platform-api로 전달(같은 출처라 세션 쿠키 그대로) |
 
 - 포트는 호스트 루프백(`127.0.0.1`)에만 열린다. 두 DB는 도커 네트워크도 분리되어 있어 플랫폼 쪽 컨테이너에서 argus-db에 접근할 수 없다.
 - argus-api는 DB 소유자가 아닌 **앱 계정**(`ARGUS_APP_DB_USER`)으로 접속한다. 이 계정은 접속기록(`access_log`)에 조회·추가만 할 수 있고 수정·삭제는 할 수 없다(§8③).

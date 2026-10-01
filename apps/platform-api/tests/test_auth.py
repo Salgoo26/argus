@@ -196,3 +196,11 @@ def test_admin_responses_are_not_cached(client, engine, password_hash):
     add_operator(engine, password_hash)
     login(client)
     assert client.get("/admin/members").headers["cache-control"] == "no-store"
+
+
+def test_me_returns_current_operator(client, engine, password_hash):
+    add_operator(engine, password_hash)
+    assert client.get("/admin/auth/me").status_code == 401
+    login(client)
+    res = client.get("/admin/auth/me")
+    assert res.json() == {"login_id": "ops_park", "name": "박지훈", "team": "OPS", "role": "OPS"}
