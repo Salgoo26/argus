@@ -25,6 +25,13 @@
 - 취급자 명부가 필요한 조건(퇴직 여부)은 순찰마다 명부를 한 번 읽어 판정 — 명부에 없는 계정은
   판정 불가로 탐지하고 상태 이력에 사유를 남긴다 (rules.evaluation_facts)
 
+AGGREGATE 룰 (기능 레이어 4 — aggregate.py):
+- 범위의 기록이 속한 (취급자, 윈도우)를 골라 그 윈도우를 원장에서 통째로 다시 집계한다
+- 그룹 키의 날짜 자리에 윈도우 시작 시각(KST)을 쓴다 — 집계 단위가 곧 탐지건 (policy 2-2)
+- 진행 중 건이 있으면 새 기록을 붙이고 집계값을 갱신, **이미 종결된 윈도우는 다시 탐지하지 않는다**
+  (EVENT의 "종결 후엔 새 건"과 다르다 — 집계는 누적이라 순찰마다 새 건이 생김)
+- 전월 동기 비율 룰은 전월 기록이 없으면 판정하지 않는다(비율을 정할 수 없음)
+
 자동 소명 요청 (2026-10-01 사용자 확정):
 새 탐지건은 룰의 auto_request가 켜져 있고 행위자에게 비활성이 아닌 A5 계정이 있으면
 같은 트랜잭션에서 바로 REQUESTED(1차, 요청자 = 시스템). 아니면 DETECTED로 남아 담당자가 처리.
@@ -40,6 +47,13 @@ from typing import Any
 from sqlalchemy import Connection, Engine, func, insert, select, text, tuple_, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 
+from app.detection.aggregate import (
+    bucket_label,
+    measure,
+    prev_month_same_period,
+    window_end,
+    window_start,
+)
 from app.detection.rules import (
     KST,
     ROSTER_FIELDS,
@@ -216,11 +230,12 @@ def _evaluate(conn: Connection, run_id: int, from_id: int, to_id: int) -> tuple[
 
     detected = 0
     for rule in rules:
+        if rule["rule_type"] == "AGGREGATE":
+            detected += _evaluate_aggregate(conn, run_id, rule, facts, roster, to_id)
+            continue
         groups: dict[tuple[int, str, str], list[Any]] = defaultdict(list)
         for fact in facts:
-            if applies_to_path(rule["access_path"], fact["access_path"]) and matches(
-                rule["condition"], fact
-            ):
+            if _hits(rule, fact):
                 key = (
                     fact["source_system_id"],
                     fact["actor_login_id"],
@@ -230,6 +245,93 @@ def _evaluate(conn: Connection, run_id: int, from_id: int, to_id: int) -> tuple[
         for key, matched in groups.items():
             detected += _attach(conn, run_id, rule, key, matched)
     return len(logs), detected
+
+
+def _hits(rule: Any, fact: dict[str, Any]) -> bool:
+    return applies_to_path(rule["access_path"], fact["access_path"]) and matches(
+        rule["condition"], fact
+    )
+
+
+def _evaluate_aggregate(
+    conn: Connection,
+    run_id: int,
+    rule: Any,
+    facts: list[dict[str, Any]],
+    roster: dict[tuple[int, str], datetime | None],
+    to_id: int,
+) -> int:
+    """이번 범위의 기록이 속한 윈도우들을 **윈도우 전체로** 다시 집계한다 (db-schema 3-7 #4)
+
+    이번 순찰에 새로 들어온 기록만 세면 윈도우가 순찰 경계에서 쪼개진다 — 그래서 범위의 기록은
+    "어느 윈도우를 다시 볼지" 고르는 데만 쓰고, 집계는 원장에서 그 윈도우를 통째로 읽어 한다.
+    """
+    spec = rule["aggregate"]
+    windows = {
+        (f["source_system_id"], f["actor_login_id"], window_start(f["occurred_at"], spec["window"]))
+        for f in facts
+        if _hits(rule, f)
+    }
+    detected = 0
+    for source_system_id, actor, start in sorted(windows):
+        end = window_end(start, spec["window"])
+        logs = _window_logs(conn, rule, roster, source_system_id, actor, start, end, to_id)
+        value = measure(logs, spec["measure"])
+        if spec["compare"] == "ABSOLUTE":
+            note = f"집계 {value} ≥ 기준 {spec['threshold']}"
+            exceeded, aggregate_value = value >= spec["threshold"], value
+        else:  # RATIO_TO_BASELINE — 전월 동기 대비
+            as_of = min(datetime.now(UTC), end)
+            b_start, b_end = prev_month_same_period(start, as_of)
+            base = measure(
+                _window_logs(conn, rule, roster, source_system_id, actor, b_start, b_end, to_id),
+                spec["measure"],
+            )
+            if base < spec.get("min_baseline", 1):
+                # 기준선이 없거나 너무 작으면 비율을 믿을 수 없다 — 신규 취급자·첫 달·월초는
+                # 판정하지 않는다 (대량 조회 같은 절대 기준 룰이 따로 본다)
+                continue
+            ratio = value / base
+            note = f"당월 {value} / 전월 동기 {base} = {ratio:.2f}배 ≥ {spec['threshold']}배"
+            exceeded, aggregate_value = ratio >= spec["threshold"], round(ratio, 4)
+        if exceeded and logs:
+            key = (source_system_id, actor, bucket_label(start))
+            detected += _attach(conn, run_id, rule, key, logs, aggregate_value, note)
+    return detected
+
+
+def _window_logs(
+    conn: Connection,
+    rule: Any,
+    roster: dict[tuple[int, str], datetime | None],
+    source_system_id: int,
+    actor: str,
+    start: datetime,
+    end: datetime,
+    to_id: int,
+) -> list[dict[str, Any]]:
+    """한 취급자의 [start, end) 기록 중 룰에 맞는 것 — 이번 순찰이 본 범위(id ≤ to_id)까지만"""
+    columns = list(_LOG_COLUMNS)
+    if rule["aggregate"]["measure"] == "DISTINCT_SUBJECT":
+        columns.append(access_log.c.subject_ids)
+    rows = (
+        conn.execute(
+            select(*columns)
+            .join(source_system, source_system.c.id == access_log.c.source_system_id)
+            .where(
+                access_log.c.source_system_id == source_system_id,
+                access_log.c.actor_login_id == actor,
+                access_log.c.occurred_at >= start,
+                access_log.c.occurred_at < end,
+                access_log.c.id <= to_id,
+            )
+            .order_by(access_log.c.id)
+        )
+        .mappings()
+        .all()
+    )
+    facts = (evaluation_facts(row, roster) for row in rows)
+    return [f for f in facts if _hits(rule, f)]
 
 
 def _load_roster(conn: Connection, logs: list[Any]) -> dict[tuple[int, str], datetime | None]:
@@ -245,8 +347,19 @@ def _load_roster(conn: Connection, logs: list[Any]) -> dict[tuple[int, str], dat
     return {(r.source_system_id, r.login_id): r.terminated_at for r in rows}
 
 
-def _attach(conn: Connection, run_id: int, rule: Any, key: tuple, logs: list[Any]) -> int:
-    """그룹의 기록을 진행 중 탐지건에 붙인다. 새로 만들었으면 1"""
+def _attach(
+    conn: Connection,
+    run_id: int,
+    rule: Any,
+    key: tuple,
+    logs: list[Any],
+    aggregate_value: float | None = None,
+    note: str | None = None,
+) -> int:
+    """그룹의 기록을 진행 중 탐지건에 붙인다. 새로 만들었으면 1
+
+    AGGREGATE는 집계값(aggregate_value)을 함께 갱신하고, note(집계 근거)를 탐지 이력에 남긴다.
+    """
     source_system_id, actor, bucket = key
     ids = [log["id"] for log in logs]
 
@@ -276,6 +389,16 @@ def _attach(conn: Connection, run_id: int, rule: Any, key: tuple, logs: list[Any
         .with_for_update()
     ).scalar_one_or_none()
 
+    if (
+        detection_id is None
+        and rule["rule_type"] == "AGGREGATE"
+        and _window_was_judged(conn, rule, key)
+    ):
+        # 집계 윈도우는 한 번만 판단한다 — 종결된 윈도우에 기록이 더 쌓여도 새 건을 만들지 않는다.
+        # 집계는 누적이라 승인 뒤에도 같은 윈도우가 계속 기준을 넘어, 순찰마다 새 건이 생기기 때문
+        # (2026-10-01, 사용자 확인 대기 — 구현 로그 설계 변경)
+        return 0
+
     created = detection_id is None
     if created:
         first = min(log["occurred_at"] for log in logs)
@@ -301,7 +424,7 @@ def _attach(conn: Connection, run_id: int, rule: Any, key: tuple, logs: list[Any
                 to_status="DETECTED",
                 round=0,
                 actor_user_id=None,  # 시스템(탐지 배치)
-                comment=_detected_comment(run_id, rule, logs),
+                comment=_detected_comment(run_id, rule, logs, note),
             )
         )
         if rule["auto_request"] and _can_receive_request(conn, source_system_id, actor):
@@ -312,12 +435,35 @@ def _attach(conn: Connection, run_id: int, rule: Any, key: tuple, logs: list[Any
         .values([{"detection_id": detection_id, "access_log_id": i} for i in ids])
         .on_conflict_do_nothing()
     )
+    if aggregate_value is not None:
+        conn.execute(
+            update(detection)
+            .where(detection.c.id == detection_id)
+            .values(aggregate_value=aggregate_value)
+        )
     _refresh_summary(conn, detection_id)
     return 1 if created else 0
 
 
-def _detected_comment(run_id: int, rule: Any, logs: list[Any]) -> str:
+def _window_was_judged(conn: Connection, rule: Any, key: tuple) -> bool:
+    source_system_id, actor, bucket = key
+    return (
+        conn.execute(
+            select(detection.c.id).where(
+                detection.c.rule_id == rule["id"],
+                detection.c.source_system_id == source_system_id,
+                detection.c.actor_login_id == actor,
+                detection.c.group_bucket == bucket,
+            )
+        ).first()
+        is not None
+    )
+
+
+def _detected_comment(run_id: int, rule: Any, logs: list[Any], note: str | None = None) -> str:
     comment = f"탐지 배치 #{run_id}"
+    if note:
+        comment += f" — {note}"
     # 그룹의 행위자는 하나라 명부 등록 여부도 같다 — 판정 불가로 탐지했다면 담당자가 알 수 있게
     if uses_fields(rule["condition"], ROSTER_FIELDS) and not logs[0]["actor_registered"]:
         comment += f" — {UNREGISTERED_NOTE}"

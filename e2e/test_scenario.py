@@ -13,6 +13,7 @@
 import csv
 import io
 import re
+from datetime import datetime, timedelta, timezone
 
 from conftest import (
     admin_command,
@@ -25,6 +26,7 @@ from conftest import (
 EXPORT_COUNT = 120
 BULK_DOWNLOAD = "대량 다운로드"
 MASKED = re.compile(r"^member_\d+\*\*\*$")  # 저장 "10293" → 마스킹 member_10***
+KST = timezone(timedelta(hours=9))
 
 
 def download_members(login_id: str, count: int) -> list[dict]:
@@ -185,6 +187,33 @@ def test_false_positive_request_is_cancelled(officer, handler_password):
 
     for browser in (officer_browser, handler):
         browser.close()
+
+
+def test_baseline_history_arrived_through_the_ingest_api(officer):
+    """시드한 지난달 조회 기록(기준선)이 relay → 수집 API를 거쳐 원장에 도착했다 (기능 레이어 4)
+
+    형식이 틀리면 relay가 DEAD로 두고 조용히 사라지므로, 원장에서 실제로 찾아 확인한다.
+    """
+    this_month = datetime.now(KST).date().replace(day=1)
+    last_month_end = this_month - timedelta(days=1)
+    criteria = {
+        "actor": "ops_park",
+        "action": "READ",
+        "date_from": last_month_end.replace(day=1).isoformat(),
+        "date_to": last_month_end.isoformat(),
+    }
+    officer_browser = argus_login(*officer)
+
+    def probe():
+        response = officer_browser.post("/api/access-logs/search", json=criteria)
+        assert response.status_code == 200, response.text
+        total = response.json()["total"]
+        return total if total > 0 else None
+
+    total = wait_until("지난달 기준선 기록 도착", probe)
+    # 평일마다 하루 5건 (apps/platform-api app/scripts/baseline.py)
+    assert total % 5 == 0 and 15 * 5 <= total <= 23 * 5
+    officer_browser.close()
 
 
 def test_ledger_hash_chain_is_intact():

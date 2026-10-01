@@ -66,6 +66,7 @@ export type CaseSummary = {
   status: Status;
   round: number;
   log_count: number;
+  aggregate_value: number | null; // AGGREGATE 집계값 (EVENT는 null)
   subject_count_sum: number | null;
   distinct_subject_count: number | null;
   first_occurred_at: string;
@@ -113,7 +114,14 @@ export type HistoryEntry = {
 };
 
 export type CaseDetail = CaseSummary & {
-  rule: { name: string; description: string | null; severity: string; version: number };
+  rule: {
+    name: string;
+    description: string | null;
+    severity: string;
+    version: number;
+    rule_type: "EVENT" | "AGGREGATE";
+    aggregate: { window: string; measure: string; compare: string; threshold: number } | null;
+  };
   log_summary: { subject_ids_truncated?: boolean } | null;
   close_reason: string | null;
   logs: CaseLog[];

@@ -100,6 +100,10 @@ def _case_summary(row) -> dict:
         "status": row["status"],
         "round": row["round"],
         "log_count": row["log_count"],
+        # AGGREGATE 집계값 — 절대 기준이면 건수, 전월 대비면 배율 (EVENT는 null)
+        "aggregate_value": (
+            float(row["aggregate_value"]) if row["aggregate_value"] is not None else None
+        ),
         "subject_count_sum": summary.get("subject_count_sum"),
         "distinct_subject_count": summary.get("distinct_subject_count"),
         "first_occurred_at": row["first_occurred_at"],
@@ -162,7 +166,9 @@ def get_detection(detection_id: int, request: Request, user: CurrentUser) -> dic
             "name": snapshot["name"],
             "description": snapshot.get("description"),
             "severity": snapshot["severity"],
+            "rule_type": snapshot["rule_type"],
             "condition": snapshot["condition"],
+            "aggregate": snapshot.get("aggregate"),
             "version": snapshot["version"],
         },
         "log_summary": row["log_summary"],

@@ -28,7 +28,7 @@ def test_skeleton_tables_created(admin_engine):
 
 
 def test_default_rules_seeded(admin_engine, seed_rules):
-    # 대량 다운로드(M3, [S]) + 야간·주말·퇴직자 계정 접속(기능 레이어 1) — db-schema 3-6
+    # 대량 다운로드(M3, [S]) + 야간·주말·퇴직자(기능 레이어 1) + 대량 조회·급증(4) — db-schema 3-6
     # 다른 테스트가 켜고 끈 상태가 아니라 마이그레이션 직후 상태(seed_rules)를 본다
     rows = {
         r["name"]: (r["rule_type"], r["access_path"], r["severity"], r["enabled"])
@@ -39,6 +39,8 @@ def test_default_rules_seeded(admin_engine, seed_rules):
         "야간 접속": ("EVENT", "APP", "MEDIUM", True),
         "주말 접속": ("EVENT", "APP", "LOW", True),
         "퇴직자 계정 접속": ("EVENT", "APP", "HIGH", True),
+        "대량 조회": ("AGGREGATE", "APP", "HIGH", True),
+        "전월 대비 급증": ("AGGREGATE", "APP", "MEDIUM", True),
     }
     bulk = next(r for r in seed_rules if r["name"] == "대량 다운로드")
     assert bulk["condition"]["all"][0] == {"field": "action", "op": "eq", "value": "DOWNLOAD"}

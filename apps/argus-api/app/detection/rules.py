@@ -86,8 +86,53 @@ FIELDS: Mapping[str, _Field] = {
 # 취급자 명부(handler)를 봐야 판정할 수 있는 필드
 ROSTER_FIELDS = frozenset({"actor_terminated_at_or_before"})
 
-SUPPORTED_RULE_TYPES = frozenset({"EVENT"})  # AGGREGATE는 v0.1 범위 밖 (CLAUDE.md 6절)
-SUPPORTED_GROUP_BY = frozenset({"ACTOR_RULE_DATE"})  # policy 2-2 기본 그룹핑
+SUPPORTED_RULE_TYPES = frozenset({"EVENT", "AGGREGATE"})
+# 기본 그룹핑 (policy 2-2) — EVENT는 (취급자, 룰, KST 날짜), AGGREGATE는 (취급자, 룰, 윈도우)
+SUPPORTED_GROUP_BY = frozenset({"ACTOR_RULE_DATE"})
+
+# AGGREGATE 집계 스펙 (db-schema 3-6) — 윈도우는 한국 시각 기준의 **고정** 구간(매시 정각·매일 0시·
+# 매월 1일 0시). 정책 예시 "cs_kim의 9/15 14:00~15:00 대량조회 = 1건"이 고정 구간이다
+WINDOWS = frozenset({"1h", "1d", "1mo"})
+MEASURES = frozenset({"LOG_COUNT", "SUBJECT_COUNT", "DISTINCT_SUBJECT"})
+BASELINES = frozenset({"PREV_MONTH_SAME_PERIOD"})
+
+
+def _is_positive_number(value: Any) -> bool:
+    return isinstance(value, int | float) and not isinstance(value, bool) and value > 0
+
+
+def _validate_aggregate(spec: Any) -> None:
+    if not isinstance(spec, dict):
+        raise RuleError("aggregate must be an object")
+    compare = spec.get("compare")
+    if compare == "ABSOLUTE":
+        expected = {"window", "measure", "compare", "threshold"}
+        if not (_is_int(spec.get("threshold")) and spec["threshold"] > 0):
+            raise RuleError("ABSOLUTE threshold must be a positive integer")
+    elif compare == "RATIO_TO_BASELINE":
+        expected = {"window", "measure", "compare", "baseline", "threshold"}
+        if "min_baseline" in spec:
+            # 기준선이 이보다 작으면 판정하지 않는다 — 월초·휴일 직후처럼 기준선이 몇 건뿐이면
+            # 비율이 쉽게 튄다(2026-10-01, 시드 1년치 검사에서 발견 — 사용자 확인 대기)
+            expected.add("min_baseline")
+            if not (_is_int(spec["min_baseline"]) and spec["min_baseline"] >= 1):
+                raise RuleError("min_baseline must be a positive integer")
+        if spec.get("baseline") not in BASELINES:
+            raise RuleError(f"unsupported baseline: {spec.get('baseline')!r}")
+        if spec.get("window") != "1mo":  # 전월 동기 비교는 월 윈도우에서만 뜻이 있다
+            raise RuleError("PREV_MONTH_SAME_PERIOD needs window 1mo")
+        if not _is_positive_number(spec.get("threshold")):
+            raise RuleError("ratio threshold must be a positive number")
+    else:
+        raise RuleError(f"unsupported compare: {compare!r}")
+    if set(spec) != expected:
+        raise RuleError(f"aggregate keys must be {sorted(expected)}")
+    if spec["window"] not in WINDOWS:
+        raise RuleError(f"unsupported window: {spec['window']!r}")
+    if spec["measure"] not in MEASURES:
+        raise RuleError(f"unsupported measure: {spec['measure']!r}")
+
+
 ACCESS_PATHS = frozenset({"APP", "DB", "ALL"})
 _GROUP_KEYS = ("all", "any")
 
@@ -129,6 +174,10 @@ def validate_rule(rule: Mapping[str, Any]) -> None:
     if rule["access_path"] not in ACCESS_PATHS:
         raise RuleError(f"unsupported access_path: {rule['access_path']}")
     _validate_group(rule["condition"], depth=0)
+    if rule["rule_type"] == "AGGREGATE":
+        _validate_aggregate(rule.get("aggregate"))
+    elif rule.get("aggregate") is not None:
+        raise RuleError("EVENT rule must not have aggregate")
 
 
 def applies_to_path(rule_access_path: str, log_access_path: str) -> bool:

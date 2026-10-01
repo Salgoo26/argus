@@ -577,3 +577,129 @@ def test_argus_self_access_logs_are_not_evaluated(app_engine, admin_engine, seed
 
     assert result.processed == 2  # 순찰은 했다 — 평가만 하지 않음
     assert result.detected == 0 and detections(app_engine) == []
+
+
+# ── AGGREGATE: 대량 조회·전월 대비 급증 (기능 레이어 4) ─────
+
+
+def add_reads(app_engine, times: list[datetime], **overrides) -> list[int]:
+    """조회 기록 여러 건을 한 번에 (회원 목록 한 화면 = 20명)"""
+    entries = [
+        make_entry(
+            action="READ",
+            occurred_at=t,
+            subject_ids=[str(n) for n in range(10001, 10021)],
+            subject_count=20,
+            request_path="/admin/members",
+            **overrides,
+        )
+        for t in times
+    ]
+    with app_engine.begin() as conn:
+        return append_access_logs(conn, entries, received_at=datetime.now(UTC)).inserted_ids
+
+
+def spread(start: datetime, count: int, span: timedelta) -> list[datetime]:
+    return [start + span * i / count for i in range(count)]
+
+
+def aggregate_cases(app_engine, name: str) -> list[dict]:
+    return [d for d in detections(app_engine) if d["rule_snapshot"]["name"] == name]
+
+
+@pytest.mark.parametrize(("count", "expected"), [(99, 0), (100, 1)])
+def test_bulk_read_threshold_in_a_clock_hour(app_engine, admin_engine, seed_rules, count, expected):
+    use_rules(admin_engine, seed_rules, "대량 조회")
+    add_reads(app_engine, spread(kst(2026, 9, 15, 14, 0), count, timedelta(minutes=59)))
+    run_batch(app_engine)
+    cases = aggregate_cases(app_engine, "대량 조회")
+    assert len(cases) == expected
+    if expected:
+        [case] = cases
+        assert case["group_bucket"] == "2026-09-15T14:00+09:00"  # 윈도우 시작 시각
+        assert case["aggregate_value"] == 100 and case["log_count"] == 100
+        assert case["severity"] == "HIGH"
+        assert "집계 100 ≥ 기준 100" in first_history_comment(app_engine, case["id"])
+
+
+def test_bulk_read_does_not_span_two_clock_hours(app_engine, admin_engine, seed_rules):
+    use_rules(admin_engine, seed_rules, "대량 조회")
+    # 14:30~15:29에 120건이어도 정각 기준으로 60 + 60
+    add_reads(app_engine, spread(kst(2026, 9, 15, 14, 30), 120, timedelta(minutes=59)))
+    run_batch(app_engine)
+    assert aggregate_cases(app_engine, "대량 조회") == []
+
+
+def test_window_is_recounted_across_batches(app_engine, admin_engine, seed_rules):
+    # 순찰 경계에서 윈도우가 쪼개져도 원장에서 통째로 다시 센다
+    use_rules(admin_engine, seed_rules, "대량 조회")
+    times = spread(kst(2026, 9, 15, 14, 0), 100, timedelta(minutes=59))
+    add_reads(app_engine, times[:60])
+    run_batch(app_engine)
+    assert aggregate_cases(app_engine, "대량 조회") == []
+    add_reads(app_engine, times[60:])  # 늦게 도착한 기록 포함
+    run_batch(app_engine)
+    [case] = aggregate_cases(app_engine, "대량 조회")
+    assert case["log_count"] == 100
+
+
+def test_open_window_case_receives_late_logs_and_new_value(app_engine, admin_engine, seed_rules):
+    use_rules(admin_engine, seed_rules, "대량 조회")
+    add_reads(app_engine, spread(kst(2026, 9, 15, 14, 0), 100, timedelta(minutes=50)))
+    run_batch(app_engine)
+    add_reads(app_engine, [kst(2026, 9, 15, 14, 55)] * 5)
+    assert run_batch(app_engine).detected == 0  # 새 건이 아니라 기존 건에
+    [case] = aggregate_cases(app_engine, "대량 조회")
+    assert case["aggregate_value"] == 105 and case["log_count"] == 105
+
+
+def test_closed_window_is_not_detected_again(app_engine, admin_engine, seed_rules):
+    # 집계는 누적이라 종결 뒤에도 같은 윈도우가 계속 기준을 넘는다 — 한 번만 판단 (확인 대기 결정)
+    use_rules(admin_engine, seed_rules, "대량 조회")
+    add_reads(app_engine, spread(kst(2026, 9, 15, 14, 0), 100, timedelta(minutes=50)))
+    run_batch(app_engine)
+    [case] = aggregate_cases(app_engine, "대량 조회")
+    set_status(admin_engine, case["id"], "APPROVED")
+    add_reads(app_engine, [kst(2026, 9, 15, 14, 55)] * 5)
+    assert run_batch(app_engine).detected == 0
+    assert len(aggregate_cases(app_engine, "대량 조회")) == 1
+
+
+def weekday_reads(year: int, month: int, per_day: int) -> list[datetime]:
+    day = kst(year, month, 1)
+    times = []
+    while day.month == month:
+        if day.weekday() < 5:
+            times += spread(day + timedelta(hours=10), per_day, timedelta(hours=6))
+        day += timedelta(days=1)
+    return times
+
+
+@pytest.mark.parametrize(("august_per_day", "expected"), [(3, True), (2, False)])
+def test_surge_compares_with_the_previous_month(
+    app_engine, admin_engine, seed_rules, august_per_day, expected
+):
+    # 지난 달끼리라 "같은 기간" = 달 전체. 7월 평일 23일 × 1건 = 23건(기준선 ≥ 20)
+    # 8월 평일 21일 × 3건 = 63건 → 2.74배 탐지 / × 2건 = 42건 → 1.83배 미탐지
+    use_rules(admin_engine, seed_rules, "전월 대비 급증")
+    add_reads(app_engine, weekday_reads(2026, 7, 1))
+    add_reads(app_engine, weekday_reads(2026, 8, august_per_day))
+    run_batch(app_engine)
+    cases = aggregate_cases(app_engine, "전월 대비 급증")
+    # 7월 윈도우는 6월 기록이 없어(기준선 0) 판정하지 않는다
+    assert [c["group_bucket"] for c in cases] == (["2026-08-01T00:00+09:00"] if expected else [])
+    if expected:
+        [case] = cases
+        assert float(case["aggregate_value"]) == pytest.approx(63 / 23, abs=1e-4)
+        assert case["log_count"] == 63 and case["severity"] == "MEDIUM"
+        comment = first_history_comment(app_engine, case["id"])
+        assert "당월 63 / 전월 동기 23" in comment
+
+
+def test_surge_needs_a_baseline(app_engine, admin_engine, seed_rules):
+    # 기준선이 min_baseline(20) 미만이면 비율을 믿을 수 없어 판정하지 않는다
+    use_rules(admin_engine, seed_rules, "전월 대비 급증")
+    add_reads(app_engine, [kst(2026, 7, 6, 10, 0)] * 19)  # 7월 19건
+    add_reads(app_engine, weekday_reads(2026, 8, 5))  # 8월 105건
+    run_batch(app_engine)
+    assert aggregate_cases(app_engine, "전월 대비 급증") == []
