@@ -27,12 +27,17 @@ export async function api<T>(path: string, init?: RequestInit): Promise<T> {
 
 // 서버 오류 코드 → 화면 문구. 없는 ID와 틀린 비밀번호는 서버가 같은 코드로 답한다(계정 열거 방지)
 const MESSAGES: Record<string, string> = {
-  INVALID_CREDENTIALS: "아이디 또는 비밀번호가 올바르지 않습니다.",
+  INVALID_CREDENTIALS: "아이디(이메일) 또는 비밀번호가 올바르지 않습니다.",
   ACCOUNT_LOCKED: "로그인 5회 실패로 계정이 잠겼습니다. 관리자에게 해제를 요청하세요.",
   ACCOUNT_DISABLED: "사용할 수 없는 계정입니다.",
   UNAUTHENTICATED: "로그인이 필요합니다.",
   ACCESS_LOG_UNAVAILABLE: "접속기록을 남길 수 없어 요청을 처리하지 않았습니다. 잠시 후 다시 시도하세요.",
   BAD_REQUEST: "입력값을 확인하세요.",
+  EMAIL_TAKEN: "이미 가입된 이메일입니다.",
+  REQUIRED_CONSENT_MISSING: "필수 항목에 모두 동의해야 가입할 수 있습니다.",
+  REQUIRED_CONSENT: "필수 동의는 철회할 수 없습니다. 원하지 않으면 회원 탈퇴를 이용하세요.",
+  WRONG_PASSWORD: "비밀번호가 일치하지 않습니다.",
+  NOT_FOUND: "대상을 찾을 수 없습니다.",
 };
 
 export function errorMessage(error: unknown): string {
@@ -41,3 +46,59 @@ export function errorMessage(error: unknown): string {
 }
 
 export type Operator = { login_id: string; name: string; team: string; role: string };
+
+// ── 고객 화면 ─────────────────────────────────────────
+
+export type Consent = {
+  code: string;
+  name: string;
+  required: boolean;
+  version: string | null;
+  agreed: boolean;
+  acted_at: string | null;
+};
+
+export type Customer = {
+  id: number;
+  email: string;
+  name: string;
+  phone: string | null;
+  address: string | null;
+  created_at: string;
+  consents: Consent[];
+};
+
+export type ConsentItem = {
+  code: string;
+  name: string;
+  required: boolean;
+  version: string;
+  purpose: string;
+  items: string;
+  retention: string;
+};
+
+// 고객 로그인 잠금은 15분 뒤 자동 해제 (관리자와 다름 — 비밀번호 찾기가 없어서)
+export function customerErrorMessage(error: unknown): string {
+  if (error instanceof ApiError && error.code === "ACCOUNT_LOCKED") {
+    return "로그인 5회 실패로 15분 동안 로그인할 수 없습니다. 잠시 후 다시 시도하세요.";
+  }
+  return errorMessage(error);
+}
+
+export function formatDate(iso: string): string {
+  return new Date(iso).toLocaleDateString("ko-KR", { timeZone: "Asia/Seoul" });
+}
+
+export function formatDateTime(iso: string): string {
+  return new Date(iso).toLocaleString("ko-KR", { timeZone: "Asia/Seoul" });
+}
+
+// 서버와 같은 비밀번호 규칙 — 10자 이상, 영문·숫자·특수문자 중 2종류 이상
+export function passwordProblem(value: string): string | null {
+  const kinds = [/[A-Za-z]/, /[0-9]/, /[^A-Za-z0-9]/].filter((re) => re.test(value)).length;
+  if (value.length < 10 || kinds < 2) {
+    return "비밀번호는 10자 이상, 영문·숫자·특수문자 중 2종류 이상이어야 합니다.";
+  }
+  return null;
+}

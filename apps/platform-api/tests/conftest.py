@@ -108,7 +108,7 @@ def clean_tables(request):
         return
     eng = request.getfixturevalue("engine")
     with eng.begin() as conn:
-        conn.execute(text("TRUNCATE operator, member, outbox RESTART IDENTITY"))
+        conn.execute(text("TRUNCATE operator, member, member_consent, outbox RESTART IDENTITY"))
     yield
 
 
@@ -141,3 +141,22 @@ def outbox_payloads(engine, topic: str = "ACCESS_LOG") -> list[dict]:
             select(outbox.c.payload).where(outbox.c.topic == topic).order_by(outbox.c.id)
         ).scalars()
         return list(rows)
+
+
+CUSTOMER_PASSWORD = "customer-pass-1234"  # 테스트 전용 더미 값
+REQUIRED_CONSENTS = {"TOS": True, "PRIVACY_REQUIRED": True, "AGE_OVER_14": True}
+
+
+def signup(client, email: str = "buyer@example.com", **overrides):
+    body = {
+        "email": email,
+        "password": CUSTOMER_PASSWORD,
+        "name": "구매자",  # 가상
+        "consents": {**REQUIRED_CONSENTS, "MARKETING": False},
+    }
+    body.update(overrides)
+    return client.post("/shop/auth/signup", json=body)
+
+
+def shop_login(client, email: str = "buyer@example.com", password: str = CUSTOMER_PASSWORD):
+    return client.post("/shop/auth/login", json={"email": email, "password": password})
