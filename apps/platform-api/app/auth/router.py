@@ -14,7 +14,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy import select, update
 
 from app.agent import access_log, access_log_exempt, record_actor
-from app.auth.deps import MAX_FAILED_LOGINS
+from app.auth.deps import MAX_FAILED_LOGINS, CurrentOperator
 from app.auth.passwords import dummy_password_hash, verify_password
 from app.auth.tokens import clear_session_cookie, issue_token, set_session_cookie
 from app.config import Settings
@@ -91,3 +91,15 @@ def login(body: LoginRequest, request: Request, response: Response) -> dict:
 @access_log_exempt("개인정보 처리 없음 — api-spec 수행업무 코드에 로그아웃 없음")
 def logout(request: Request, response: Response) -> None:
     clear_session_cookie(response, request.app.state.settings)
+
+
+@router.get("/me")
+@access_log_exempt("본인 계정 정보만 반환 — 정보주체 처리 없음")
+def me(operator: CurrentOperator) -> dict:
+    """화면이 현재 로그인한 취급자를 확인하는 용도 (M5 platform-web)"""
+    return {
+        "login_id": operator.login_id,
+        "name": operator.name,
+        "team": operator.team,
+        "role": operator.role,
+    }

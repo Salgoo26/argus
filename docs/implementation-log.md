@@ -29,6 +29,59 @@
 
 ---
 
+## 2026-10-01 — 마일스톤 M5 PR ① (platform-web: 플랫폼 관리자 화면)
+
+**한 일**
+- PR #15(M4 PR ②) 머지 확인 → **M4 완료**. main 최신화
+- M5 계획 설명·결정(아래), `create-next-app@16.3.8`로 뼈대 생성(Tailwind·AI 안내 파일·git 초기화 제외) 후 정리 — 생성기가 고른 검증된 조합(Next 16.3.8, React 19.2.8, TypeScript 5.9.3, ESLint 9.39.5)을 **정확한 버전으로 고정**, `@types/node`는 런타임(Node 24)에 맞춰 24.19.0
+- `apps/platform-web`
+  - `next.config.ts`: `output: "standalone"`, `poweredByHeader: false`, **rewrite `/api/*` → platform-api**(같은 출처라 HttpOnly·SameSite=Strict 세션 쿠키가 그대로 동작, CORS 불필요)
+  - 화면: `/login`(로그인), `/members`(회원 목록 20명씩·페이지 이동, CSV 다운로드 — 건수·가입일 기간), 상단 바(로그인한 취급자·로그아웃), 전 화면 상단에 "모든 데이터는 가상" 안내
+  - CSV는 링크 이동이 아니라 요청으로 받아 파일 저장 — 401·접속기록 실패(500 `ACCESS_LOG_UNAVAILABLE`)를 화면에 보여주기 위해
+  - `lib/api.ts`: 같은 출처 `/api` 호출, 오류 코드 → 한국어 문구(없는 ID와 틀린 비밀번호는 서버가 같은 코드로 답함)
+  - **기본 디자인**(`app/globals.css`, CSS 한 장): 여백·글꼴·표·폼·버튼·배지·카드, 외부 글꼴 CDN 미사용, 강조색 변수로 argus-web과 구분
+  - Dockerfile: deps(`npm ci`) → build → runtime(standalone, non-root `web` uid 10001, HEALTHCHECK), `NEXT_TELEMETRY_DISABLED=1`. `typecheck` 스크립트는 `next typegen && tsc --noEmit`(라우트 타입 자동 생성이 먼저 필요)
+- platform-api: `GET /admin/auth/me`(본인 계정 정보, 접속기록 명시 제외) + 테스트 1
+- compose `platform-web`(127.0.0.1:3000, platform-api healthy 후 기동), `.env.example`(`PLATFORM_WEB_PORT`), README 서비스 표
+- CI: `web` job(Node 24, `npm ci` → eslint → typecheck → build), docker-build를 `include` 목록으로 바꿔 platform-web runtime 추가. Dependabot: npm(platform-web), docker에 platform-web·`node` 메이저 업 제외
+- 검증
+  - eslint·typecheck·build 통과(컨테이너), platform-api pytest 102개 통과
+  - **화면 서버를 거친 실제 요청**: 로그인 전 401 → 틀린 비밀번호 401 → 로그인 200(쿠키 4속성) → 목록 500명 → CSV 120행 → 로그아웃 후 401 — 모두 `platform-web:3000/api/...` 경유
+  - 브라우저(앱 내장): `localhost:3000` → 세션 없음 → `/login`으로 이동, 로그인 폼 렌더링 확인(스크린샷은 창 가림으로 실패, 텍스트로 확인)
+
+**결정사항** (사용자 동의)
+- 브라우저 ↔ API는 **Next.js rewrite(같은 출처 프록시)** — 운영의 Caddy 구조(architecture 7-2)와 같은 모양, CORS를 열지 않음
+- compose는 **운영용 빌드**(`next build` → `next start`)로 실행 — 로컬 = 운영
+- 화면 방식은 클라이언트 컴포넌트 + fetch(표·버튼 수준이라 서버 렌더링 이점 없음)
+- M5는 PR 2개: ① platform-web(+ CI·Dependabot 프론트 추가) ② argus-web
+- 소명 내용 등 사용자 입력은 React 기본 이스케이프만 사용, `dangerouslySetInnerHTML` 금지(XSS)
+- Next.js 텔레메트리 끔(빌드·실행 정보 외부 전송 방지)
+
+**⚠ 구현 중 발견: 접속지 위조 구멍을 만들 뻔함 → 설계 수정**
+- 계획: platform-web에 고정 IP를 주고 platform-api가 그 IP만 신뢰 프록시로 믿어, Next.js가 붙이는 `X-Forwarded-For`로 원래 요청자 IP를 기록
+- 실측: 화면 경유 요청의 접속지가 원래 요청자(`172.30.10.5`)가 아니라 **화면 서버(`172.30.10.10`)**로 기록됨
+- 원인(Next.js 소스 `server/lib/router-utils/proxy-request.js` 확인): rewrite 프록시(httpxy)는 `xfwd` 옵션 없이 `x-forwarded-host`만 붙임 → **원래 요청자 IP를 넣지 않으면서, 클라이언트가 보낸 `X-Forwarded-For`는 그대로 전달**
+- 위험: 화면 서버를 신뢰하면 누구든 `X-Forwarded-For: 8.8.8.8`을 붙여 **접속지를 위조**할 수 있음(절대 규칙 #10 위반) — `X-Forwarded-For`는 브라우저 fetch로도 보낼 수 있는 헤더
+- 조치: **화면 서버를 신뢰 프록시에서 제외**(`PLATFORM_TRUSTED_PROXIES` 기본 빈 값), 고정 IP·대역 설정 제거. 확인: 화면 경유로 `X-Forwarded-For: 8.8.8.8`을 붙인 로그인 → 원장에 화면 서버 실제 IP 기록(위조 무시)
+- 대가(로컬 한계): 로컬에서는 모든 사용자의 접속지가 화면 서버 IP로 기록됨. 다만 로컬은 Docker 포트 포워딩 때문에 원래 브라우저 IP가 컨테이너에 보이지 않는 환경이라 실질 손실 없음
+- 운영: Caddy가 `/api`를 화면을 거치지 않고 **API로 직접** 보내고 Caddy만 신뢰 → 실제 IP 기록. **배포 시 확인 항목**: Caddy가 클라이언트가 보낸 `X-Forwarded-For`를 덮어쓰는지(신뢰 프록시 설정), API의 `*_TRUSTED_PROXIES`가 Caddy 주소만인지
+- 기각한 대안: Next.js 커스텀 서버로 소켓 주소를 직접 헤더에 넣기(standalone 서버를 대체 — 복잡·업그레이드 부담), 로컬에도 Caddy 두기(v0.1 제외 항목)
+
+**설계 변경** (Cowork에서 원본 반영 필요)
+1. **v0.1에 기본 디자인 포함** (사용자 요청, 2026-10-01) — "보여줘야 하는 프로젝트라 기본 수준의 디자인은 v0.1에서 완성". M5에서 CSS 한 장(외부 의존 없음)으로 기본 정돈을 함께 적용 / 영향: **CLAUDE.md 5절**("Skeleton에서는 디자인 없이 표·버튼 수준"), **6절 v0.1 범위**(Must 또는 여유 항목에 "기본 디자인" 추가)
+2. **로컬 화면 서버는 신뢰 프록시가 아님** — 화면 경유 API 요청의 접속지는 로컬에서 화면 서버 IP로 기록, 운영은 Caddy 직접 라우팅 / 영향: architecture 3-2 #1·7-2(Caddy 신뢰 프록시 설정을 배포 체크리스트로)
+3. `platform-api GET /admin/auth/me` 추가(화면용, 접속기록 명시 제외) — 화면용 내부 API라 api-spec 범위 밖, 기록만
+
+**미결·이슈**
+- **(배포 체크리스트)** Caddy의 `X-Forwarded-For` 처리·API 신뢰 프록시 설정 확인 — 위 발견 사항
+- 로컬 한계: 쿠키는 포트를 구분하지 않아 `localhost:3000`의 플랫폼 쿠키가 `localhost:3001`(argus-web) 요청에도 실림(이름이 달라 서로 무시). 운영은 서브도메인이 달라 해당 없음
+- 보안 헤더(CSP·X-Frame-Options 등)는 운영 Caddy 담당(architecture 7-2) — 화면에 직접 넣지 않음
+
+**다음 할 일**
+- PR ① 머지 → PR ②(argus-web: 로그인·탐지 목록·상세·결재 버튼, 같은 디자인 체계), CI·Dependabot에 argus-web 추가
+
+---
+
 ## 2026-10-01 — 마일스톤 M4 PR ② (탐지건 조회·마스킹·상태 전이·자동 소명 요청) — M4 완료
 
 **한 일**

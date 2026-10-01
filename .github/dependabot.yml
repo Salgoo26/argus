@@ -1,7 +1,7 @@
 # 의존성 취약점 알림 + 업데이트 PR 자동 생성 (architecture 8-1 [상시])
 # 앱이 추가되면 해당 생태계를 여기에 추가한다:
-#   - npm: apps/platform-web, apps/argus-web (M5)
-#   - docker: 나머지 앱 Dockerfile (argus-api M1, platform-api M2)
+#   - npm: apps/platform-web (M5), apps/argus-web (M5 PR ②)
+#   - docker: 앱 Dockerfile (argus-api M1, platform-api M2, platform-web M5)
 version: 2
 updates:
   - package-ecosystem: github-actions
@@ -26,11 +26,24 @@ updates:
     commit-message:
       prefix: chore
 
-  # Dockerfile 베이스 이미지 (python:3.12-slim) 갱신
+  # 프론트엔드 (Next.js) — 버전은 package.json에 정확히 고정, 갱신은 이 PR로만
+  - package-ecosystem: npm
+    directories:
+      - /apps/platform-web
+    schedule:
+      interval: weekly
+    groups:
+      web:
+        patterns: ["*"]
+    commit-message:
+      prefix: chore
+
+  # Dockerfile 베이스 이미지 (python:3.12-slim, node:24-alpine) 갱신
   - package-ecosystem: docker
     directories:
       - /apps/argus-api
       - /apps/platform-api
+      - /apps/platform-web
     schedule:
       interval: weekly
     # Python은 3.12 고정(CLAUDE.md 5절, requires-python >=3.12,<3.13) — 3.12.x 패치만 받는다.
@@ -38,5 +51,8 @@ updates:
     ignore:
       - dependency-name: python
         update-types: ["version-update:semver-major", "version-update:semver-minor"]
+      # Node는 24 LTS 고정 — 24.x 갱신만 받는다. 메이저 업은 Next.js 호환 확인이 필요한 별도 작업
+      - dependency-name: node
+        update-types: ["version-update:semver-major"]
     commit-message:
       prefix: chore

@@ -1,5 +1,6 @@
 # PR 검사 (architecture 8-1 ①)
 # - lint(ruff) + 테스트(pytest, Postgres 16 서비스 컨테이너) — 앱별 matrix
+# - 프론트엔드 lint(eslint)·타입 검사(tsc)·빌드 — M5부터
 # - 시크릿 스캔(gitleaks) — 전체 커밋 이력 대상
 # - 설정 파일 스캔(Trivy config, report-only) + 도커 빌드 가능 여부(push 안 함) — M1부터 (architecture 8-5)
 # CodeQL은 GitHub 기본 설정(default setup)으로 별도 실행된다.
@@ -72,6 +73,42 @@ jobs:
       - name: Test (pytest)
         run: pytest
 
+  # 프론트엔드 — lint(eslint)·타입 검사(tsc)·빌드 (architecture 8-5 "프론트 추가 PR(M5)")
+  web:
+    name: web (${{ matrix.app }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        app: [platform-web]
+    defaults:
+      run:
+        working-directory: apps/${{ matrix.app }}
+    env:
+      NEXT_TELEMETRY_DISABLED: 1 # 빌드 정보가 외부로 나가지 않게
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: apps/${{ matrix.app }}/package-lock.json
+
+      - name: Install
+        run: npm ci
+
+      - name: Lint (eslint)
+        run: npm run lint
+
+      - name: Typecheck (tsc)
+        run: npm run typecheck
+
+      - name: Build
+        run: npm run build
+
   gitleaks:
     name: secret scan (gitleaks)
     runs-on: ubuntu-latest
@@ -111,8 +148,12 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        app: [argus-api, platform-api]
-        target: [runtime, dev]
+        include:
+          - { app: argus-api, target: runtime }
+          - { app: argus-api, target: dev }
+          - { app: platform-api, target: runtime }
+          - { app: platform-api, target: dev }
+          - { app: platform-web, target: runtime }
     steps:
       - uses: actions/checkout@v7
         with:
