@@ -33,6 +33,11 @@ updates:
       - /apps/argus-web
     schedule:
       interval: weekly
+    # 메이저 업(TypeScript 7·ESLint 10·@types/node 26·Next 17 등)은 호환 확인이 필요한 별도 작업 —
+    # create-next-app이 고른 검증 조합을 유지하고 같은 메이저 안의 갱신만 받는다 (2026-10-01 #17 사유)
+    ignore:
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major"]
     groups:
       web:
         patterns: ["*"]
