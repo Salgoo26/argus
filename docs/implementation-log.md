@@ -32,7 +32,8 @@
 ## 2026-10-01 — 마일스톤 M6 PR ① (해시체인 검증 명령어, 시나리오 E2E, CI e2e job)
 
 **한 일**
-- 새 세션 시작. Cowork 동기화로 받은 설계 사본(M4·M5 반영: policy 3절 자동 소명 요청, architecture 화면 서버 비신뢰, CLAUDE.md 5·6절 등) 커밋
+- 새 세션 시작. Cowork 동기화로 받은 설계 사본 8개(M4·M5 반영: policy 3절 자동 소명 요청, architecture 화면 서버 비신뢰, CLAUDE.md 5·6절 등)를 **구현과 대조 → 별도 PR #22**로 분리. 대조 결과 불일치 없음(auto_request·requested_by NULL = 마이그레이션 0005 / 자동 요청 조건·메시지·이력 2줄 = batch.py / 요청 취소·404 → 403 → 409 = 전이 표·`_transition` / 취급자 round ≥ 1 = `_visible` / 퇴직 → DISABLED = handlers/sync.py / 화면 서버 비신뢰 = compose)
+  - 처음에는 사본을 M6 브랜치에 커밋만 하고 대조를 빠뜨림 — 사용자가 Cowork 지시("구현과 대조한 뒤 docs: PR")를 다시 확인해 줘서 바로잡음. M6 브랜치에서는 해당 커밋을 rebase로 빼고 force-with-lease로 push(이 세션에서 만든 브랜치)
 - Dependabot 확인: #17은 닫혔고, 같은 메이저 안 갱신(react·react-dom 19.2.8 → 19.3.0, 웹 2개)만 담은 **#20**이 새로 열림(CI 전부 통과) — 사용자 머지 대기
 - **해시체인 검증 명령어** `python -m app.scripts.verify_chain` (argus-api): M1의 `verify_chain`에 실행 입구만 붙임. 종료 코드 0 정상 / 1 끊김(위치·사유, 그 앞 정상 건수) / 2 실행 오류. 앱 계정(원장 SELECT만)으로 실행, 서버 측 커서(1,000건씩)로 1년치 원장도 메모리에 한 번에 올리지 않음. 테스트 4개(정상·빈 원장·변조 위치·DB 오류 시 비밀번호 미출력). 로컬 원장 75건 OK
 - **시나리오 E2E** (`e2e/`, pytest)
@@ -56,6 +57,8 @@
 - 없음 — CI에 e2e job 추가는 CLAUDE.md 6절 M6 완료 기준("M6 테스트가 CI에서 통과")의 구현. 단 architecture 8-1·8-5의 CI 구성 표에는 e2e job이 없음 → **Cowork 동기화 시 반영 요청**(PR 검사 ①에 "Skeleton 시나리오 E2E — 전체 스택 기동 + 해시체인 검증")
 
 **미결·이슈**
+- **CI 첫 실행 실패와 조치**: `docker compose up --wait`가 healthcheck를 일부러 끈 `argus-worker`·`platform-relay`에서 "no healthcheck configured"로 중단. 로컬 Compose(v5.5.1)는 통과시켜 로컬에선 재현되지 않았음(러너 Compose 버전 차이로 추정, CI에 버전 출력 추가) → `--wait` 제거. 화면 서버 healthy 대기는 e2e 서비스의 `depends_on`이 이미 맡고, relay·worker는 실행만 되면 테스트가 최대 90초 기다림
+  - README의 로컬 실행법도 `--wait`를 쓴다 — 사용자 PC(Docker Desktop 최신)에선 동작하지만 Compose 버전에 따라 같은 오류가 날 수 있음 → **PR ② README에서 함께 정리**
 - e2e job은 이미지 4개를 매번 새로 빌드해 CI 시간이 가장 긴 job — 느려지면 빌드 캐시(GitHub Actions cache) 도입 검토
 - e2e 린트의 ruff 버전(0.16.9)을 CI에 직접 적어 Dependabot이 갱신하지 않음 — argus-api의 ruff를 올릴 때 함께 수정
 - E2E 실행이 `argus-api:local` 등 공용 이미지 태그를 현재 소스로 다시 빌드 → 다른 브랜치의 개발 스택은 다음 `up --build` 때 자기 소스로 돌아감(영향 작음, README에 적을 필요는 없음)
