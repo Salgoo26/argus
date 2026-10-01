@@ -29,6 +29,45 @@
 
 ---
 
+## 2026-10-01 — 마일스톤 M6 PR ① (해시체인 검증 명령어, 시나리오 E2E, CI e2e job)
+
+**한 일**
+- 새 세션 시작. Cowork 동기화로 받은 설계 사본 8개(M4·M5 반영: policy 3절 자동 소명 요청, architecture 화면 서버 비신뢰, CLAUDE.md 5·6절 등)를 **구현과 대조 → 별도 PR #22**로 분리. 대조 결과 불일치 없음(auto_request·requested_by NULL = 마이그레이션 0005 / 자동 요청 조건·메시지·이력 2줄 = batch.py / 요청 취소·404 → 403 → 409 = 전이 표·`_transition` / 취급자 round ≥ 1 = `_visible` / 퇴직 → DISABLED = handlers/sync.py / 화면 서버 비신뢰 = compose)
+  - 처음에는 사본을 M6 브랜치에 커밋만 하고 대조를 빠뜨림 — 사용자가 Cowork 지시("구현과 대조한 뒤 docs: PR")를 다시 확인해 줘서 바로잡음. M6 브랜치에서는 해당 커밋을 rebase로 빼고 force-with-lease로 push(이 세션에서 만든 브랜치)
+- Dependabot 확인: #17은 닫혔고, 같은 메이저 안 갱신(react·react-dom 19.2.8 → 19.3.0, 웹 2개)만 담은 **#20**이 새로 열림(CI 전부 통과) — 사용자 머지 대기
+- **해시체인 검증 명령어** `python -m app.scripts.verify_chain` (argus-api): M1의 `verify_chain`에 실행 입구만 붙임. 종료 코드 0 정상 / 1 끊김(위치·사유, 그 앞 정상 건수) / 2 실행 오류. 앱 계정(원장 SELECT만)으로 실행, 서버 측 커서(1,000건씩)로 1년치 원장도 메모리에 한 번에 올리지 않음. 테스트 4개(정상·빈 원장·변조 위치·DB 오류 시 비밀번호 미출력). 로컬 원장 75건 OK
+- **시나리오 E2E** (`e2e/`, pytest)
+  - `test_bulk_download_to_approval`: ops_park 120건 CSV → relay → 수집 → 탐지 + 자동 소명 요청(요청자 시스템) → 담당자 상세(120명 모두 `member_10***`) → 취급자 본인 건 → 제출 → 반려 → 재요청(2차) → 재제출 → 승인, 최종 차수별 소명·상태 이력 7단계 전체 대조
+  - 시나리오 중간의 보안 확인: 응답에 원본 회원 PK 없음(#8), CSV의 이름·이메일·전화가 Argus 응답 어디에도 없음(#3), 다른 취급자(cs_kim)는 목록에 없고 상세·제출 **404**, 취급자 승인 시도 **403**, 중복 제출·종결 후 반려 **409**, 사유 없는 반려 400
+  - `test_false_positive_request_is_cancelled`: 시나리오 갈림길 — mkt_lee 60건 → 담당자 요청 취소(사유 필수) → DISMISSED → 취급자 제출 409
+  - `test_ledger_hash_chain_is_intact`: 시나리오 뒤 원장(플랫폼 + Argus 자체 접속기록) 체인 검증
+- `infra/docker-compose.e2e.yml`(덧붙임 파일) + `scripts/e2e.sh`: 별도 프로젝트 `argus-e2e`로 새로 기동 → e2e 컨테이너에서 pytest → 볼륨까지 정리(실패 시 컨테이너 로그 출력, `E2E_KEEP=1`이면 남김)
+- CI `e2e` job: 실행마다 `.env.example`의 change-me 칸을 무작위 값으로 채운 일회용 `.env` → 같은 스크립트 실행. `e2e/` ruff 린트
+- 검증: 로컬 `bash scripts/e2e.sh` 3 passed(시나리오 자체 약 11초), 실행 후 argus-e2e 컨테이너·볼륨 없음, 개발 스택(argus) 영향 없음
+
+**결정사항**
+- **E2E는 API 수준**(사용자 확인): 화면 버튼이 부르는 API를 같은 경로(**화면 서버 Next.js rewrite 경유**)로 호출 — 기각: 브라우저 자동화(Playwright) — 무겁고 화면 문구·배치 변경에 자주 깨짐, 화면 자체는 M5에서 사람이 확인했고 v0.1 시연 자료 제작 때 다시 확인
+- **사람 역할 = HTTP, 운영자 역할 = README의 관리 명령 그대로**(담당자 계정 발급 `users create-officer`, 취급자 비밀번호 `users set-password`, 탐지 배치 `app.worker --once`, `verify_chain`) — 그래서 e2e 컨테이너는 argus-api dev 이미지(관리 명령 + pytest)를 쓰고 argus-api와 같은 앱 계정을 받는다. 두 화면을 모두 부르므로 두 네트워크에 붙음(테스트 전용 profile)
+- **별도 compose 프로젝트로 격리** — 기각: 개발 스택에 그대로 실행 — M5 때 사용자가 만든 ops_park 비밀번호를 덮어쓰고, 진행 중인 ops_park 탐지건이 있으면 새 다운로드가 그 건에 합쳐져(그룹 키 = 룰·출처·행위자·날짜) 시나리오가 재현되지 않음. 매번 빈 DB에서 출발하므로 로컬·CI 결과가 같음. 호스트 포트는 `!reset`으로 모두 닫아 개발 스택과 충돌 없음
+- 담당자 계정·취급자 비밀번호는 매 실행 무작위 생성(레포·CI 설정에 비밀번호 없음). CI의 `.env`도 실행마다 생성·폐기
+- 세션 쿠키가 `Secure`라 HTTP 클라이언트의 쿠키 저장소는 `http://`로 보내지 않음(브라우저는 localhost만 예외) → E2E가 쿠키를 직접 들고 다니며 매 응답에서 갱신(30분 슬라이딩 재발급)
+- relay(2초 주기)·탐지 배치는 비동기 → "배치 1회 실행 후 목록 확인"을 최대 90초 반복. 다른 순찰과 겹쳐 건너뛴 경우(skipped)는 실패로 보지 않음
+
+**설계 변경**
+- 없음 — CI에 e2e job 추가는 CLAUDE.md 6절 M6 완료 기준("M6 테스트가 CI에서 통과")의 구현. 단 architecture 8-1·8-5의 CI 구성 표에는 e2e job이 없음 → **Cowork 동기화 시 반영 요청**(PR 검사 ①에 "Skeleton 시나리오 E2E — 전체 스택 기동 + 해시체인 검증")
+
+**미결·이슈**
+- **CI 첫 실행 실패와 조치**: `docker compose up --wait`가 healthcheck를 일부러 끈 `argus-worker`·`platform-relay`에서 "no healthcheck configured"로 중단. 로컬 Compose(v5.5.1)는 통과시켜 로컬에선 재현되지 않았음(러너 Compose 버전 차이로 추정, CI에 버전 출력 추가) → `--wait` 제거. 화면 서버 healthy 대기는 e2e 서비스의 `depends_on`이 이미 맡고, relay·worker는 실행만 되면 테스트가 최대 90초 기다림
+  - README의 로컬 실행법도 `--wait`를 쓴다 — 사용자 PC(Docker Desktop 최신)에선 동작하지만 Compose 버전에 따라 같은 오류가 날 수 있음 → **PR ② README에서 함께 정리**
+- e2e job은 이미지 4개를 매번 새로 빌드해 CI 시간이 가장 긴 job — 느려지면 빌드 캐시(GitHub Actions cache) 도입 검토
+- e2e 린트의 ruff 버전(0.16.9)을 CI에 직접 적어 Dependabot이 갱신하지 않음 — argus-api의 ruff를 올릴 때 함께 수정
+- E2E 실행이 `argus-api:local` 등 공용 이미지 태그를 현재 소스로 다시 빌드 → 다른 브랜치의 개발 스택은 다음 `up --build` 때 자기 소스로 돌아감(영향 작음, README에 적을 필요는 없음)
+
+**다음 할 일**
+- PR ② README(심사자용 로컬 실행법 Windows, 화면으로 시나리오 따라하기 — 일반 창/시크릿 창, E2E·체인 검증 실행법) → M6 완료 → Cowork 동기화
+
+---
+
 ## 2026-10-01 — 마일스톤 M5 PR ② (argus-web: Argus 화면) — M5 완료
 
 **한 일**

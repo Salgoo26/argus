@@ -1,0 +1,10 @@
+# apps/argus-api의 ruff 설정과 같은 규칙 (E2E는 테스트 코드라 assert 허용)
+line-length = 100
+target-version = "py312"
+
+[lint]
+select = ["E", "W", "F", "I", "B", "UP", "S"]
+ignore = ["S101"]
+
+[lint.isort]
+known-local-folder = ["conftest"]
