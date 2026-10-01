@@ -37,6 +37,13 @@ def record_actor(login_id: str) -> None:
         record.actor_login_id = login_id
 
 
+def record_query_keys(keys: list[str]) -> None:
+    """검색 조건의 **키 이름만** — 조건을 URL이 아니라 요청 본문으로 받는 검색용 (policy 6-2)"""
+    record = _current.get()
+    if record is not None:
+        record.query_keys = list(keys)
+
+
 def record_subject_count(count: int) -> None:
     """화면에 보여준(마스킹된) 정보주체 식별값의 수"""
     record = _current.get()

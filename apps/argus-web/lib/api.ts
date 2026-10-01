@@ -36,6 +36,7 @@ const MESSAGES: Record<string, string> = {
   INVALID_TRANSITION: "현재 상태에서는 할 수 없는 작업입니다. 화면을 새로고침하세요.",
   ACCESS_LOG_UNAVAILABLE: "접속기록을 남길 수 없어 요청을 처리하지 않았습니다. 잠시 후 다시 시도하세요.",
   BAD_REQUEST: "입력값을 확인하세요.",
+  PERIOD_TOO_LONG: "기간은 최대 1년(366일)까지 검색할 수 있습니다.",
 };
 
 export function errorMessage(error: unknown): string {
@@ -118,4 +119,46 @@ export type CaseDetail = CaseSummary & {
   logs: CaseLog[];
   explanations: Explanation[];
   history: HistoryEntry[];
+};
+
+// 접속기록 조회·검색 (담당자 전용)
+export type Source = "PLATFORM" | "ARGUS";
+
+export type AccessLogSearch = {
+  actor?: string;
+  date_from?: string; // 한국 날짜 YYYY-MM-DD, 양 끝 포함
+  date_to?: string;
+  action?: string;
+  subject?: string; // 회원번호 — 10293 또는 member_10293
+  access_path?: "APP" | "DB";
+  source: Source;
+  page: number;
+  size: number;
+};
+
+export type AccessLogItem = {
+  id: number;
+  occurred_at: string;
+  source: Source;
+  actor_login_id: string;
+  actor_name: string | null;
+  client_ip: string;
+  access_path: "APP" | "DB";
+  action: string;
+  data_category: string;
+  result: "SUCCESS" | "FAILURE";
+  request_method: string | null;
+  request_path: string | null;
+  subject_count: number;
+  subject_truncated: boolean;
+  subjects: string[]; // 서버에서 마스킹한 앞 몇 개만 온다
+  detection_ids: number[];
+};
+
+export type AccessLogPage = {
+  items: AccessLogItem[];
+  page: number;
+  size: number;
+  total: number;
+  period: { from: string; to: string };
 };

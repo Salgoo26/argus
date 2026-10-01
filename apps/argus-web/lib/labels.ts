@@ -18,6 +18,17 @@ export function statusBadgeClass(status: Status): string {
 
 export const SEVERITY_LABELS: Record<string, string> = { HIGH: "상", MEDIUM: "중", LOW: "하" };
 
+export const DATA_CATEGORY_LABELS: Record<string, string> = {
+  MEMBER_BASIC: "회원 기본정보",
+  PAYMENT: "결제수단",
+  ORDER: "주문",
+  INQUIRY: "문의",
+  ACCESS_LOG: "접속기록",
+  NONE: "-",
+};
+
+export const SOURCE_LABELS: Record<string, string> = { PLATFORM: "플랫폼", ARGUS: "Argus" };
+
 export const ACTION_LABELS: Record<string, string> = {
   LOGIN: "로그인",
   READ: "조회",
@@ -25,6 +36,8 @@ export const ACTION_LABELS: Record<string, string> = {
   UPDATE: "수정",
   DELETE: "삭제",
   DOWNLOAD: "다운로드",
+  EXPORT: "보고서 출력",
+  UNMASK: "마스킹 해제",
 };
 
 export type CaseAction = "request" | "dismiss" | "submit" | "approve" | "reject" | "escalate";
