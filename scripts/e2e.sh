@@ -39,7 +39,10 @@ trap cleanup EXIT
 
 echo "── 1/2 스택 기동 (argus-e2e, 이미지 빌드 포함) ──"
 dc --profile e2e down -v --remove-orphans >/dev/null 2>&1 || true # 지난 실행의 잔여물 제거
-dc up -d --build --wait
+# --wait는 쓰지 않는다: relay·worker는 웹 서버가 없어 healthcheck를 꺼 두었고, Compose 버전에 따라
+# "no healthcheck configured"로 실패한다(CI에서 확인). 화면 서버가 healthy해질 때까지의 대기는
+# e2e 서비스의 depends_on이 맡는다
+dc up -d --build
 
 echo "── 2/2 시나리오 실행 ──"
 dc --profile e2e run --rm --build e2e

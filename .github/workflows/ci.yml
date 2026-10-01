@@ -140,7 +140,9 @@ jobs:
           done < .env.example > .env
 
       - name: Run scenario
-        run: bash scripts/e2e.sh
+        run: |
+          docker compose version
+          bash scripts/e2e.sh
 
   gitleaks:
     name: secret scan (gitleaks)
