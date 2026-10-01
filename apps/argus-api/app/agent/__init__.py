@@ -8,7 +8,13 @@
 두 시스템은 별개 제품이라 플랫폼 Agent 코드를 공유하지 않는다.
 """
 
-from app.agent.context import record_actor, record_subject_count
+from app.agent.context import record_actor, record_query_keys, record_subject_count
 from app.agent.decorators import access_log, access_log_exempt
 
-__all__ = ["access_log", "access_log_exempt", "record_actor", "record_subject_count"]
+__all__ = [
+    "access_log",
+    "access_log_exempt",
+    "record_actor",
+    "record_query_keys",
+    "record_subject_count",
+]

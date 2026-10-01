@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useRouter } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
 
 import { ApiError, api, errorMessage, type Me } from "@/lib/api";
@@ -33,8 +33,16 @@ export function useMe(): { me: Me | null; handleError: (e: unknown) => string | 
   return { me, handleError };
 }
 
+// 담당자 메뉴 — 탐지건(결재함)과 접속기록(원장 검색)은 하는 일이 달라 화면을 나눈다.
+// 취급자는 자기 소명 건만 보므로 메뉴가 없다 (메뉴 숨김은 편의, 권한 판단은 서버)
+const OFFICER_MENU = [
+  { href: "/detections", label: "탐지건" },
+  { href: "/access-logs", label: "접속기록" },
+];
+
 export function AppHeader({ me }: { me: Me | null }) {
   const router = useRouter();
+  const pathname = usePathname();
 
   async function logout() {
     await api("/auth/logout", { method: "POST" }).catch(() => undefined);
@@ -50,6 +58,19 @@ export function AppHeader({ me }: { me: Me | null }) {
           접속기록 점검
         </span>
       </Link>
+      {me?.role === "OFFICER" && (
+        <nav className="header-nav">
+          {OFFICER_MENU.map((item) => (
+            <Link
+              key={item.href}
+              href={item.href}
+              className={pathname.startsWith(item.href) ? "nav-active" : undefined}
+            >
+              {item.label}
+            </Link>
+          ))}
+        </nav>
+      )}
       {me && (
         <div className="header-user">
           <span>

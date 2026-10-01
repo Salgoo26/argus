@@ -118,7 +118,7 @@ bash scripts/e2e.sh
 | 서비스 | 호스트 접속 | 비고 |
 |---|---|---|
 | platform-web | http://localhost:3000 | **플랫폼 관리자 화면** — 로그인·회원 목록·CSV 다운로드. `/api/*`는 Next.js가 platform-api로 전달(같은 출처라 세션 쿠키 그대로) |
-| argus-web | http://localhost:3001 | **Argus 화면** — 담당자·취급자 로그인, 탐지건 목록·상세(정보주체 마스킹), 소명 요청·제출·승인·반려·요청 취소 |
+| argus-web | http://localhost:3001 | **Argus 화면** — 담당자·취급자 로그인, 탐지건 목록·상세(정보주체 마스킹), 소명 요청·제출·승인·반려·요청 취소, **접속기록 검색**(담당자 전용 — 계정·기간·수행업무·회원번호·접근 경로·출처) |
 | platform-db | `127.0.0.1:15432` | 플랫폼 DB (PostgreSQL 16) |
 | argus-db | `127.0.0.1:15433` | Argus 접속기록 원장 (PostgreSQL 16) |
 | argus-migrate | — | 기동 시 1회 실행: Alembic 마이그레이션 + API용 DB 계정 발급 후 종료 |

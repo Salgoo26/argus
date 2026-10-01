@@ -13,6 +13,7 @@ from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 from sqlalchemy import create_engine, text
 
+from app.access_logs.router import router as access_logs_router
 from app.agent.client_ip import parse_trusted_proxies
 from app.agent.decorators import check_api_routes, is_api_path
 from app.agent.middleware import AccessLogMiddleware
@@ -37,6 +38,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(ingest_router)
     app.include_router(auth_router)
     app.include_router(detections_router)
+    app.include_router(access_logs_router)
 
     @app.middleware("http")
     async def api_response_headers(request: Request, call_next):
