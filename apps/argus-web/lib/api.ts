@@ -31,12 +31,15 @@ const MESSAGES: Record<string, string> = {
   ACCOUNT_LOCKED: "로그인 5회 실패로 계정이 잠겼습니다. 정보보호 담당자에게 해제를 요청하세요.",
   ACCOUNT_DISABLED: "사용할 수 없는 계정입니다.",
   UNAUTHENTICATED: "로그인이 필요합니다.",
-  NOT_FOUND: "탐지건을 찾을 수 없습니다.",
+  NOT_FOUND: "찾을 수 없습니다.",
   FORBIDDEN: "이 작업을 할 권한이 없습니다.",
   INVALID_TRANSITION: "현재 상태에서는 할 수 없는 작업입니다. 화면을 새로고침하세요.",
   ACCESS_LOG_UNAVAILABLE: "접속기록을 남길 수 없어 요청을 처리하지 않았습니다. 잠시 후 다시 시도하세요.",
   BAD_REQUEST: "입력값을 확인하세요.",
   PERIOD_TOO_LONG: "기간은 최대 1년(366일)까지 검색할 수 있습니다.",
+  INVALID_RULE: "룰 설정을 해석할 수 없습니다. 조건과 기준값을 확인하세요.",
+  DUPLICATE_NAME: "같은 이름의 룰이 이미 있습니다.",
+  VERSION_CONFLICT: "다른 담당자가 먼저 수정했습니다. 새로고침한 뒤 다시 시도하세요.",
 };
 
 export function errorMessage(error: unknown): string {
