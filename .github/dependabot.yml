@@ -1,7 +1,7 @@
 # 의존성 취약점 알림 + 업데이트 PR 자동 생성 (architecture 8-1 [상시])
 # 앱이 추가되면 해당 생태계를 여기에 추가한다:
-#   - npm: apps/platform-web (M5), apps/argus-web (M5 PR ②)
-#   - docker: 앱 Dockerfile (argus-api M1, platform-api M2, platform-web M5)
+#   - npm: apps/platform-web, apps/argus-web (M5)
+#   - docker: 앱 Dockerfile (argus-api M1, platform-api M2, platform-web·argus-web M5)
 version: 2
 updates:
   - package-ecosystem: github-actions
@@ -30,8 +30,14 @@ updates:
   - package-ecosystem: npm
     directories:
       - /apps/platform-web
+      - /apps/argus-web
     schedule:
       interval: weekly
+    # 메이저 업(TypeScript 7·ESLint 10·@types/node 26·Next 17 등)은 호환 확인이 필요한 별도 작업 —
+    # create-next-app이 고른 검증 조합을 유지하고 같은 메이저 안의 갱신만 받는다 (2026-10-01 #17 사유)
+    ignore:
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major"]
     groups:
       web:
         patterns: ["*"]
@@ -44,6 +50,7 @@ updates:
       - /apps/argus-api
       - /apps/platform-api
       - /apps/platform-web
+      - /apps/argus-web
     schedule:
       interval: weekly
     # Python은 3.12 고정(CLAUDE.md 5절, requires-python >=3.12,<3.13) — 3.12.x 패치만 받는다.

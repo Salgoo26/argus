@@ -205,7 +205,9 @@ services:
       ARGUS_INGEST_SECRET_PLATFORM: ${ARGUS_INGEST_SECRET_PLATFORM:?set ARGUS_INGEST_SECRET_PLATFORM in .env}
       # 담당자·취급자 로그인 토큰(JWT HS256) 서명 키 — 32자 이상, 짧으면 기동 거부
       ARGUS_AUTH_SECRET: ${ARGUS_AUTH_SECRET:?set ARGUS_AUTH_SECRET in .env}
-      # 접속 IP 헤더를 믿을 프록시 (운영: Caddy, M5부터 argus-web). 로컬은 비움 → 직접 연결 IP
+      # 접속 IP 헤더(X-Forwarded-For)를 믿을 프록시 — 운영은 Caddy. 로컬은 비움(아무도 믿지 않음).
+      # argus-web(Next.js)은 신뢰하지 않는다: 원래 요청자 IP를 붙이지 않으면서 클라이언트가 보낸
+      # X-Forwarded-For는 그대로 전달하므로, 믿으면 접속지 위조가 가능해진다 (M5 PR ① 발견)
       ARGUS_TRUSTED_PROXIES: ${ARGUS_TRUSTED_PROXIES:-}
     depends_on:
       argus-migrate:
@@ -236,6 +238,23 @@ services:
     depends_on:
       argus-migrate:
         condition: service_completed_successfully
+    networks:
+      - argus-net
+
+  # ── Argus 화면 (Next.js) — 정보보호 담당자·취급자 ─────────────
+  # /api/* 는 Next.js가 argus-api로 대신 전달(같은 출처 → 세션 쿠키 그대로, CORS 불필요).
+  # 로컬에서는 Argus 자체 접속기록의 접속지가 이 컨테이너 IP로 기록된다 — 운영은 Caddy 직접 라우팅
+  argus-web:
+    build:
+      context: ../apps/argus-web
+      target: runtime
+    image: argus-web:local
+    restart: unless-stopped
+    depends_on:
+      argus-api:
+        condition: service_healthy
+    ports:
+      - "127.0.0.1:${ARGUS_WEB_PORT:-3001}:3000"
     networks:
       - argus-net
 
