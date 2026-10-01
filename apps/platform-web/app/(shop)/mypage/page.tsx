@@ -3,6 +3,7 @@
 import { useRouter } from "next/navigation";
 import { type FormEvent, useCallback, useEffect, useState } from "react";
 
+import { RefundAccountCard } from "@/components/refund-account-card";
 import {
   ApiError,
   api,
@@ -188,6 +189,8 @@ export default function MyPage() {
         </div>
         <p className="hint">필수 동의는 서비스 이용의 전제라 철회 대신 회원 탈퇴로 처리합니다.</p>
       </section>
+
+      <RefundAccountCard />
 
       <section className="card">
         <h2 className="card-title">비밀번호 변경</h2>

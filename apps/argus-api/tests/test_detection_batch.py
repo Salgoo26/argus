@@ -703,3 +703,22 @@ def test_surge_needs_a_baseline(app_engine, admin_engine, seed_rules):
     add_reads(app_engine, weekday_reads(2026, 8, 5))  # 8월 105건
     run_batch(app_engine)
     assert aggregate_cases(app_engine, "전월 대비 급증") == []
+
+
+# ── 결제수단 조회 (기능 레이어 7 ①) ──────────────────────────
+
+
+def test_payment_full_view_is_detected_every_time(app_engine, admin_engine, seed_rules):
+    use_rules(admin_engine, seed_rules, "결제수단 조회")
+    when = kst(2026, 10, 1, 14, 0)
+    path = "/admin/members/{member_id}/refund-account"
+    add_log(app_engine, occurred_at=when, data_category="PAYMENT", request_path=path)
+    # 평소 회원 상세(끝 4자리만)·주문 목록은 결제수단 조회가 아니다
+    add_log(app_engine, occurred_at=when, data_category="MEMBER_BASIC")
+    add_log(app_engine, occurred_at=when, data_category="ORDER", request_path="/admin/orders")
+
+    run_batch(app_engine)
+
+    [case] = detections(app_engine)
+    assert case["rule_snapshot"]["name"] == "결제수단 조회"
+    assert case["severity"] == "HIGH" and case["log_count"] == 1

@@ -5,6 +5,7 @@ CHECK·인덱스 등 제약은 옮기지 않는다 (argus-api와 같은 방식).
 """
 
 from sqlalchemy import (
+    CHAR,
     BigInteger,
     Boolean,
     Column,
@@ -17,7 +18,7 @@ from sqlalchemy import (
     Text,
     Uuid,
 )
-from sqlalchemy.dialects.postgresql import INET, JSONB
+from sqlalchemy.dialects.postgresql import BYTEA, INET, JSONB
 
 metadata = MetaData()
 
@@ -91,4 +92,71 @@ member_consent = Table(
     Column("acted_at", DateTime(timezone=True), nullable=False),
     Column("client_ip", INET),
     Column("method", String(16), nullable=False),
+)
+
+product = Table(
+    "product",
+    metadata,
+    Column("id", BigInteger, primary_key=True),
+    Column("name", String(100), nullable=False),
+    Column("price", Integer, nullable=False),
+)
+
+orders = Table(
+    "orders",
+    metadata,
+    Column("id", BigInteger, primary_key=True),
+    Column("member_id", BigInteger, ForeignKey("member.id")),
+    Column("product_id", BigInteger, ForeignKey("product.id"), nullable=False),
+    Column("amount", Integer, nullable=False),
+    Column("status", String(16), nullable=False),
+    Column("ordered_at", DateTime(timezone=True), nullable=False),
+)
+
+payment = Table(
+    "payment",
+    metadata,
+    Column("id", BigInteger, primary_key=True),
+    Column("order_id", BigInteger, ForeignKey("orders.id"), nullable=False),
+    Column("method", String(16), nullable=False),
+    Column("card_company", String(30), nullable=False),
+    Column("pg_tid", String(64), nullable=False),
+    Column("amount", Integer, nullable=False),
+    Column("approved_at", DateTime(timezone=True), nullable=False),
+)
+
+refund_account = Table(
+    "refund_account",
+    metadata,
+    Column("id", BigInteger, primary_key=True),
+    Column("member_id", BigInteger, ForeignKey("member.id"), nullable=False),
+    Column("bank_name", String(50), nullable=False),
+    Column("account_holder", String(50), nullable=False),
+    Column("account_number_enc", BYTEA, nullable=False),
+    Column("account_last4", CHAR(4), nullable=False),
+    Column("created_at", DateTime(timezone=True), nullable=False),
+    Column("updated_at", DateTime(timezone=True), nullable=False),
+)
+
+retained_member_record = Table(
+    "retained_member_record",
+    metadata,
+    Column("id", BigInteger, primary_key=True),
+    Column("original_member_id", BigInteger, nullable=False),
+    Column("retain_reason", String(64), nullable=False),
+    Column("legal_basis", String(100), nullable=False),
+    Column("data", JSONB, nullable=False),
+    Column("retain_until", DateTime(timezone=True), nullable=False),
+    Column("created_at", DateTime(timezone=True), nullable=False),
+)
+
+destruction_history = Table(
+    "destruction_history",
+    metadata,
+    Column("id", BigInteger, primary_key=True),
+    Column("executed_at", DateTime(timezone=True), nullable=False),
+    Column("target_type", String(32), nullable=False),
+    Column("cutoff_at", DateTime(timezone=True), nullable=False),
+    Column("deleted_count", Integer, nullable=False),
+    Column("legal_basis", String(100), nullable=False),
 )

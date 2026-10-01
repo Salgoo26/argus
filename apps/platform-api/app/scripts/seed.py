@@ -25,8 +25,19 @@ from faker import Faker
 from sqlalchemy import Connection, create_engine, exists, func, insert, select, text
 
 from app.auth.passwords import hash_password, unusable_password_hash
+from app.commerce import BANKS, CARD_COMPANIES
 from app.config import Settings
-from app.models import consent_item, member, member_consent, operator
+from app.crypto import FieldCipher, refund_account_context
+from app.models import (
+    consent_item,
+    member,
+    member_consent,
+    operator,
+    orders,
+    payment,
+    product,
+    refund_account,
+)
 from app.outbox import enqueue, handler_event
 from app.scripts.baseline import baseline_events
 
@@ -145,6 +156,76 @@ def backfill_consents(conn: Connection) -> int:
     return len(targets)
 
 
+ORDER_COUNT = 300
+REFUND_ACCOUNT_COUNT = 60
+ORDER_HISTORY_DAYS = 180
+
+
+def seed_commerce(conn: Connection, cipher: FieldCipher) -> bool:
+    """가상 주문·결제(PG 목업)·환불계좌 (기능 레이어 7 ①) — 주문이 하나도 없을 때만
+
+    seed()와 따로 실행한다 — 주문 기능 이전에 시드된 개발 스택에도 들어가게.
+    카드번호는 어디에도 없다(PG 목업). 환불계좌 번호는 0000으로 시작하는 가상 번호를 앱에서
+    암호화해 넣는다 — 시드도 실제 저장 경로(암호화)와 같게.
+    """
+    if conn.execute(select(func.count()).select_from(orders)).scalar_one():
+        return False
+    # 시드 회원(user0001@example.com …)에게만 — 화면에서 가입한 계정에 가짜 주문이 붙지 않게
+    members = (
+        conn.execute(
+            select(member.c.id)
+            .where(member.c.email.like("user%@example.com"))
+            .order_by(member.c.id)
+        )
+        .scalars()
+        .all()
+    )
+    products = conn.execute(select(product.c.id, product.c.price)).all()
+    if not members or not products:
+        return False
+
+    rng = random.Random(SEED + 2)  # noqa: S311 — 가짜 주문 분포용, 보안 용도 아님
+    now = conn.execute(select(func.now())).scalar_one()
+    for _ in range(ORDER_COUNT):
+        product_id, price = rng.choice(products)
+        ordered_at = now - timedelta(seconds=rng.randint(3600, ORDER_HISTORY_DAYS * 24 * 3600))
+        order_id = conn.execute(
+            insert(orders)
+            .values(
+                member_id=rng.choice(members),
+                product_id=product_id,
+                amount=price,
+                status="PAID",
+                ordered_at=ordered_at,
+            )
+            .returning(orders.c.id)
+        ).scalar_one()
+        conn.execute(
+            insert(payment).values(
+                order_id=order_id,
+                method="CARD",
+                card_company=rng.choice(CARD_COMPANIES),
+                pg_tid=f"MOCKPG-SEED{order_id:010d}",
+                amount=price,
+                approved_at=ordered_at,
+            )
+        )
+
+    for member_id in rng.sample(list(members), min(REFUND_ACCOUNT_COUNT, len(members))):
+        number = f"0000{rng.randint(10**7, 10**8 - 1)}"
+        holder = conn.execute(select(member.c.name).where(member.c.id == member_id)).scalar_one()
+        conn.execute(
+            insert(refund_account).values(
+                member_id=member_id,
+                bank_name=rng.choice(BANKS),
+                account_holder=holder,
+                account_number_enc=cipher.encrypt(number, refund_account_context(member_id)),
+                account_last4=number[-4:],
+            )
+        )
+    return True
+
+
 def main() -> int:
     logging.basicConfig(level=logging.INFO, format="%(levelname)s [seed] %(message)s")
     settings = Settings()
@@ -161,6 +242,7 @@ def main() -> int:
         with engine.begin() as conn:
             created = seed(conn, password)
             backfilled = backfill_consents(conn)
+            commerce = seed_commerce(conn, FieldCipher(settings.require_payment_key()))
     finally:
         engine.dispose()
 
@@ -170,6 +252,8 @@ def main() -> int:
         logger.info("already seeded — skipped")
     if backfilled:
         logger.info("backfilled consent history for %d members", backfilled)
+    if commerce:
+        logger.info("seeded %d orders, %d refund accounts", ORDER_COUNT, REFUND_ACCOUNT_COUNT)
     return 0
 
 

@@ -34,6 +34,9 @@ export function ShopHeader() {
         {me ? (
           <>
             <span>{me.name}님</span>
+            <Link href="/orders" className="btn btn-secondary">
+              주문 내역
+            </Link>
             <Link href="/mypage" className="btn btn-secondary">
               마이페이지
             </Link>

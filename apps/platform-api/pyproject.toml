@@ -14,6 +14,7 @@ dependencies = [
     "argon2-cffi==25.1.0",
     "pyjwt==2.15.1",
     "faker==40.40.0",  # 시드 데이터 — 100% 가상 (CLAUDE.md 3절 #2)
+    "cryptography==50.0.2",  # 환불계좌 AES-256-GCM 암호화 (CLAUDE.md 3절 #11)
 ]
 
 [project.optional-dependencies]

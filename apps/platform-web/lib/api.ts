@@ -102,3 +102,29 @@ export function passwordProblem(value: string): string | null {
   }
   return null;
 }
+
+// ── 주문·결제(PG 목업)·환불계좌 ───────────────────────────
+
+export type Product = { id: number; name: string; price: number };
+
+export type Order = {
+  id: number;
+  product_name: string;
+  amount: number;
+  status: string;
+  ordered_at: string;
+  card_company: string | null;
+  pg_tid: string | null;
+  approved_at: string | null;
+};
+
+export type RefundAccountView = {
+  bank_name: string;
+  account_holder: string;
+  account_last4: string;
+  updated_at?: string;
+} | null;
+
+export function won(amount: number): string {
+  return `${amount.toLocaleString("ko-KR")}원`;
+}
