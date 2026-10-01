@@ -127,17 +127,10 @@ jobs:
           pipx run ruff==0.16.9 check --output-format=github e2e
           pipx run ruff==0.16.9 format --check e2e
 
-      # 실행마다 만들고 버리는 시크릿 — .env.example의 change-me 칸만 무작위 값으로 채운다
+      # 실행마다 만들고 버리는 시크릿 — README의 로컬 실행과 같은 스크립트
       # (값은 로그에 찍지 않는다. 레포·CI 설정에 저장된 시크릿을 쓰지 않음)
       - name: Create throwaway .env
-        run: |
-          while IFS= read -r line; do
-            if [[ "$line" =~ ^([A-Z0-9_]+)=change-me ]]; then
-              echo "${BASH_REMATCH[1]}=$(openssl rand -hex 32)"
-            else
-              echo "$line"
-            fi
-          done < .env.example > .env
+        run: bash scripts/init-env.sh
 
       - name: Run scenario
         run: |

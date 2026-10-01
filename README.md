@@ -20,82 +20,140 @@
 
 ## 로컬 실행 (Windows)
 
-Python·Node는 호스트에 설치하지 않고 모두 컨테이너 안에서 실행한다.
+Python·Node는 호스트에 설치하지 않고 모두 컨테이너 안에서 실행한다. 아래 명령은 모두 **Git Bash**, 레포 루트 기준이다.
 
 ### 준비물
 
-- Git for Windows
+- Git for Windows (Git Bash 포함)
 - Docker Desktop (WSL 2 엔진) — Windows 기능의 **가상 머신 플랫폼**, **Linux용 Windows 하위 시스템**이 켜져 있어야 한다
 
-### 실행
-
-Git Bash 기준, 레포 루트에서:
+### 1. 처음 실행
 
 ```bash
-# 1) 환경변수 파일 만들기 — change-me를 무작위 값으로 바꾼다 (.env는 커밋되지 않음)
-cp .env.example .env
-#    예: openssl rand -hex 24 로 생성한 값을 각 비밀번호·키 칸에 넣는다
+git clone https://github.com/Salgoo26/argus.git
+cd argus
 
-# 2) 기동 — 이미지 빌드 → DB → 마이그레이션·시드(일회성 컨테이너) → API 순으로 뜬다
-#    (.env의 COMPOSE_FILE이 infra/docker-compose.yml을 가리킨다)
-docker compose up -d --build --wait
+# 환경변수 파일(.env) 만들기 — DB 비밀번호·서명 키 등을 무작위 값으로 채운다 (.env는 커밋되지 않음)
+bash scripts/init-env.sh
 
-# 3) 상태 확인
+# 기동 — 이미지 빌드 → DB → 마이그레이션·시드(일회성 컨테이너) → API → 화면 순으로 뜬다
+# (.env의 COMPOSE_FILE이 infra/docker-compose.yml을 가리킨다. 첫 빌드는 몇 분 걸린다)
+docker compose up -d --build
+
+# 상태 확인 — platform-web·argus-web이 (healthy)가 되면 준비 완료
 docker compose ps
-curl http://127.0.0.1:18000/healthz     # argus-api    {"status":"ok","db":"ok"}
-curl http://127.0.0.1:18001/healthz     # platform-api {"status":"ok","db":"ok"}
 ```
 
-> 이미 `.env`가 있다면 `.env.example`과 비교해 새로 생긴 항목을 추가한다. M2: `PLATFORM_API_PORT`, `PLATFORM_AUTH_SECRET`(32자 이상), `PLATFORM_SEED_OPERATOR_PASSWORD`(12자 이상). 값이 없거나 짧으면 기동이 거부된다.
+> 이미 `.env`가 있으면 `init-env.sh`는 덮어쓰지 않는다. 버전을 올린 뒤 기동이 거부되면 `.env.example`과 비교해 새로 생긴 항목을 추가한다(값이 없거나 짧으면 기동 거부).
+
+### 2. 화면으로 시나리오 따라하기
+
+Walking Skeleton이 관통하는 시나리오(CLAUDE.md 6절)를 두 화면으로 직접 수행한다.
+
+```
+플랫폼 관리자 ops_park이 회원 120명 CSV 다운로드 → 접속기록이 Argus로 전송 → "대량 다운로드" 룰 탐지 + 자동 소명 요청
+→ 담당자 확인(마스킹) → 취급자 소명 제출 → 담당자 반려 → 재요청(2차) → 재제출 → 승인
+```
+
+**① Argus 계정 준비** — 담당자(A4) 계정은 직접 만들고, 취급자(A5) 계정은 플랫폼에서 자동 동기화되지만 비밀번호가 없어 설정해야 한다. 비밀번호는 실행 후 입력창에서 입력한다(12자 이상, 셸 기록에 남지 않게 명령줄에 쓰지 않음).
+
+```bash
+winpty docker compose exec argus-api python -m app.scripts.users create-officer officer   # 담당자
+winpty docker compose exec argus-api python -m app.scripts.users set-password ops_park    # 취급자
+```
+
+> `winpty`는 Git Bash에서 비밀번호 입력창을 띄우기 위해 붙인다("the input device is not a TTY" 방지).
+
+**② 플랫폼: 대량 다운로드** — http://localhost:3000
+
+- `ops_park`으로 로그인한다. 비밀번호는 시드 취급자 공용 비밀번호로, `.env`에서 확인한다:
+  ```bash
+  grep '^PLATFORM_SEED_OPERATOR_PASSWORD=' .env
+  ```
+- 회원 목록 → **CSV 다운로드**(최대 건수 기본값 120) → 이 다운로드가 접속기록이 되어 몇 초 안에 Argus로 전송된다
+
+**③ 탐지 배치** — 5분마다 자동으로 돌지만, 기다리지 않고 바로 한 번 실행할 수 있다:
+
+```bash
+docker compose exec argus-worker python -m app.worker --once   # detected=1 이면 탐지건 생성
+```
+
+**④ Argus: 결재 흐름** — http://localhost:3001
+
+> 담당자와 취급자는 **일반 창과 시크릿 창으로 나눠** 로그인한다. 같은 창에서 두 계정을 번갈아 쓰면 세션 쿠키가 덮어써진다.
+
+| 순서 | 창 | 계정 | 할 일 | 상태 |
+|---|---|---|---|---|
+| 1 | 일반 | `officer` | 탐지건 목록에서 ops_park의 "대량 다운로드" 건 열기 — 정보주체가 `member_10***`로 가려져 있고 1차 요청자가 시스템 | `REQUESTED` |
+| 2 | 시크릿 | `ops_park` | 내 소명 요청 → 소명 내용 입력 → **제출** | `SUBMITTED` |
+| 3 | 일반 | `officer` | 반려 사유 입력 → **반려** → **재요청** | `REJECTED` → `REQUESTED`(2차) |
+| 4 | 시크릿 | `ops_park` | 2차 소명 **제출** | `SUBMITTED` |
+| 5 | 일반 | `officer` | **승인** — 상세 하단에 차수별 소명과 상태 이력이 남는다 | `APPROVED`(종결) |
+
+- 갈림길: 1에서 오탐이라고 판단하면 사유를 적고 **요청 취소** → `DISMISSED`(종결)
+- 취급자는 자기 건만 볼 수 있다. 다른 취급자 계정(예: `cs_kim` — 비밀번호를 ①처럼 설정)으로 로그인하면 이 건은 목록에 없다
+
+**⑤ 원장 무결성 확인** — 지금까지 쌓인 접속기록(플랫폼 + Argus 자체)의 해시체인을 처음부터 다시 계산한다(§8③):
+
+```bash
+docker compose exec argus-api python -m app.scripts.verify_chain   # OK: 해시체인 정상 — N건 확인
+```
+
+### 3. 자동 검증 (E2E)
+
+위 시나리오 전체를 화면 대신 같은 API로 자동 재현하고, 마지막에 해시체인을 검증한다. CI가 PR마다 같은 스크립트를 실행한다.
+
+```bash
+bash scripts/e2e.sh
+```
+
+- 평소 스택과 별도인 프로젝트(`argus-e2e`)를 **빈 DB로 새로 띄우고, 끝나면 볼륨까지 지운다** — 위에서 직접 만든 데이터는 건드리지 않는다
+- 확인 항목: 시나리오의 각 상태 전이, 원본 식별값·개인정보(이름·이메일·전화) 미노출, 남의 건 404, 역할 위반 403, 허용되지 않은 전이 409, 해시체인
+- 실패 시 컨테이너 로그를 출력한다. `E2E_KEEP=1 bash scripts/e2e.sh`로 실행하면 스택을 남겨 두고 살펴볼 수 있다
+
+### 서비스 구성
 
 | 서비스 | 호스트 접속 | 비고 |
 |---|---|---|
+| platform-web | http://localhost:3000 | **플랫폼 관리자 화면** — 로그인·회원 목록·CSV 다운로드. `/api/*`는 Next.js가 platform-api로 전달(같은 출처라 세션 쿠키 그대로) |
+| argus-web | http://localhost:3001 | **Argus 화면** — 담당자·취급자 로그인, 탐지건 목록·상세(정보주체 마스킹), 소명 요청·제출·승인·반려·요청 취소 |
 | platform-db | `127.0.0.1:15432` | 플랫폼 DB (PostgreSQL 16) |
 | argus-db | `127.0.0.1:15433` | Argus 접속기록 원장 (PostgreSQL 16) |
 | argus-migrate | — | 기동 시 1회 실행: Alembic 마이그레이션 + API용 DB 계정 발급 후 종료 |
 | argus-api | `127.0.0.1:18000` | 수집 API `POST /ingest/v1/access-logs`, 취급자 동기화 `POST /ingest/v1/handler-events`, 로그인 `POST /api/auth/login`, `GET /healthz`, API 문서 `/docs`. `/api` 요청은 Argus 자체 접속기록(ARGUS 출처)으로 원장에 기록 |
-| argus-worker | — | 탐지 배치: `setting.detection_interval_min`(기본 5분)마다 원장을 순찰해 룰에 걸린 기록으로 탐지건 생성. 즉시 한 번: `docker compose exec argus-worker python -m app.worker --once` |
+| argus-worker | — | 탐지 배치: `setting.detection_interval_min`(기본 5분)마다 원장을 순찰해 룰에 걸린 기록으로 탐지건 생성 + 자동 소명 요청 |
 | platform-migrate | — | 기동 시 1회 실행: 플랫폼 Alembic 마이그레이션 후 종료 |
 | platform-seed | — | 기동 시 1회 실행: 가상 회원 500명·취급자 5명(비어 있을 때만) 후 종료 |
 | platform-api | `127.0.0.1:18001` | 관리자 로그인 `POST /admin/auth/login`, 회원 목록 `GET /admin/members`, CSV `GET /admin/members/export`, API 문서 `/docs`. 관리자 라우트 요청은 접속기록으로 outbox에 적재 |
 | platform-relay | — | outbox → Argus 전송(HMAC 서명). 2초 주기, 실패 시 1분→최대 1시간 백오프. 플랫폼 쪽에서 유일하게 Argus 네트워크에 붙는다 |
-| platform-web | `127.0.0.1:3000` | **플랫폼 관리자 화면** — 로그인·회원 목록·CSV 다운로드. `/api/*`는 Next.js가 platform-api로 전달(같은 출처라 세션 쿠키 그대로) |
-| argus-web | `127.0.0.1:3001` | **Argus 화면** — 담당자·취급자 로그인, 탐지건 목록·상세(정보주체 마스킹), 소명 요청·제출·승인·반려·요청 취소 |
 
 - 포트는 호스트 루프백(`127.0.0.1`)에만 열린다. 두 DB는 도커 네트워크도 분리되어 있어 플랫폼 쪽 컨테이너에서 argus-db에 접근할 수 없다.
 - argus-api는 DB 소유자가 아닌 **앱 계정**(`ARGUS_APP_DB_USER`)으로 접속한다. 이 계정은 접속기록(`access_log`)에 조회·추가만 할 수 있고 수정·삭제는 할 수 없다(§8③).
-- 플랫폼 관리자(취급자) 계정은 **로그인 5회 연속 실패 시 잠긴다.** 해제는 스크립트로 한다(관리 UI는 Skeleton 범위 밖):
+- API 헬스체크: `curl http://127.0.0.1:18000/healthz` (argus-api), `curl http://127.0.0.1:18001/healthz` (platform-api) → `{"status":"ok","db":"ok"}`
+- 로컬에서는 화면 경유 요청의 접속지(IP)가 화면 서버 컨테이너 IP로 기록된다. 화면 서버는 신뢰 프록시가 아니기 때문이다(architecture 3-2). 운영에서는 Caddy가 `/api`를 API로 직접 보내 실제 IP가 기록된다.
+
+### 계정 관리
+
+로그인 **5회 연속 실패 시 잠긴다**(플랫폼 관리자·Argus 사용자 모두). 관리 UI는 Skeleton 범위 밖이라 스크립트로 해제한다.
 
 ```bash
-docker compose run --rm platform-migrate python -m app.scripts.unlock_operator ops_park
+docker compose run --rm platform-migrate python -m app.scripts.unlock_operator ops_park   # 플랫폼 관리자
+docker compose exec argus-api python -m app.scripts.users unlock ops_park                # Argus 사용자
 ```
 
-### Argus 계정 준비 (담당자·취급자)
+### 단위·통합 테스트
 
-취급자(A5) 계정은 플랫폼 취급자 동기화로 자동으로 생기지만 **로그인할 수 없는 상태**(무작위 비밀번호)다. 담당자(A4) 계정은 없다. 관리 스크립트로 만든다 — 비밀번호는 명령줄에 쓰지 않고 실행 후 입력창에서 입력한다(셸 기록에 남지 않게, 12자 이상).
-
-```bash
-docker compose exec argus-api python -m app.scripts.users create-officer officer   # 담당자 계정 생성
-docker compose exec argus-api python -m app.scripts.users set-password ops_park    # 취급자 비밀번호 설정
-docker compose exec argus-api python -m app.scripts.users unlock ops_park          # 5회 실패로 잠긴 계정 해제
-```
-
-> Git Bash에서 "the input device is not a TTY"가 나오면 명령 앞에 `winpty`를 붙인다.
-
-### 테스트
-
-Python을 호스트에 설치하지 않고 컨테이너 안에서 실행한다. 테스트는 argus-db에 임시 DB를 만들어 마이그레이션을 적용하고, 끝나면 지운다.
+테스트는 argus-db·platform-db에 임시 DB를 만들어 마이그레이션을 적용하고, 끝나면 지운다.
 
 ```bash
-docker compose run --rm argus-api-test                       # pytest
+docker compose run --rm argus-api-test                           # pytest
 docker compose run --rm argus-api-test ruff check --no-cache .   # lint
-docker compose run --rm platform-api-test                    # 플랫폼도 같은 방식
+docker compose run --rm platform-api-test                        # 플랫폼도 같은 방식
 ```
 
 ### 중지
 
 ```bash
-# 중지 / 데이터까지 삭제
-docker compose down
-docker compose down -v
+docker compose down      # 중지 (데이터 유지)
+docker compose down -v   # 데이터까지 삭제 — 다음 기동 때 시드부터 새로 시작
 ```
