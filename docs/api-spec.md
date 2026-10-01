@@ -375,7 +375,7 @@ POST /ingest/v1/handler-events
   - 초기 비밀번호는 **무작위 argon2id 해시**(사실상 로그인 불가) — 해시가 아닌 표식값을 넣으면 로그인 코드가 특수 처리해야 하므로 정상 형식을 쓴다. 실제 비밀번호는 **M4에서 관리 스크립트로 설정**한다.
   - 같은 `login_id`를 다른 Argus 계정(예: 정보보호 담당자)이 이미 쓰고 있으면 **생성하지 않고 경고 로그** — 남의 계정을 취급자 계정으로 바꿔치기하지 않는다.
   - 퇴직 상태로 처음 들어온 취급자는 계정을 만들지 않는다.
-- `HANDLER_TERMINATED` 수신 시 해당 A5 계정을 `DISABLED`로 전환한다. 진행 중인 소명 건은 담당자가 판단한다(DISMISS 또는 ESCALATE).
+- `HANDLER_TERMINATED` 수신 시 해당 A5 계정을 `DISABLED`로 전환한다. 진행 중인 소명 건은 담당자가 판단한다 — `DETECTED`·`REQUESTED`면 DISMISS(요청 취소), `REJECTED`면 ESCALATE 가능 (2026-10-01 정합화: 정책정의서 3-2 상태도에 `REQUESTED → DISMISSED` 추가로 "요청 후 제출 전 퇴직 시 건이 멈추는" 모순 해소).
 - **재입사(`TERMINATED` → `ACTIVE`) 이벤트가 와도 `DISABLED` 계정을 자동 복구하지 않는다** (v0.4) — 권한 복구는 사람이 판단한다.
 - **수신 검증** (v0.4): `occurred_at`은 ①과 같이 **미래 5분 초과 거부**(미래 시각이 들어오면 `last_event_at`이 미래로 밀려 그 시각까지의 정상 변경이 전부 `duplicates`로 무시됨) / `terminated_at`은 **미래 허용**(퇴직 예정 시각), 오프셋 필수 / 재직(`ACTIVE`)인데 `terminated_at`이 오거나, `HANDLER_TERMINATED`인데 재직 상태면 `INVALID_FIELD`(발신 측 버그를 조용히 적용하지 않음)
 - **동시성**: 비교와 쓰기를 한 문장으로 처리한다(`INSERT ... ON CONFLICT ... DO UPDATE ... WHERE last_event_at < EXCLUDED.last_event_at`) — 조회 후 저장 방식은 사이에 동시 요청이 끼어들 수 있다.
