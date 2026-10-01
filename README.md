@@ -64,7 +64,7 @@ winpty docker compose exec argus-api python -m app.scripts.users set-password op
 
 > `winpty`는 Git Bash에서 비밀번호 입력창을 띄우기 위해 붙인다("the input device is not a TTY" 방지).
 
-**② 플랫폼: 대량 다운로드** — http://localhost:3000
+**② 플랫폼: 대량 다운로드** — http://localhost:3000/admin/login
 
 - `ops_park`으로 로그인한다. 비밀번호는 시드 취급자 공용 비밀번호로, `.env`에서 확인한다:
   ```bash
@@ -119,7 +119,7 @@ bash scripts/e2e.sh
 
 | 서비스 | 호스트 접속 | 비고 |
 |---|---|---|
-| platform-web | http://localhost:3000 | **플랫폼 관리자 화면** — 로그인·회원 목록·CSV 다운로드. `/api/*`는 Next.js가 platform-api로 전달(같은 출처라 세션 쿠키 그대로) |
+| platform-web | http://localhost:3000 | **플랫폼 화면** — 관리자는 `/admin` 아래(로그인·회원 목록·CSV 다운로드). 운영에서는 Caddy가 `/admin` 경로를 허용 IP로 제한(architecture 7-2). `/api/*`는 Next.js가 platform-api로 전달(같은 출처라 세션 쿠키 그대로) |
 | argus-web | http://localhost:3001 | **Argus 화면** — 담당자·취급자 로그인, 탐지건 목록·상세(정보주체 마스킹), 소명 요청·제출·승인·반려·요청 취소, **접속기록 검색**(담당자 전용 — 계정·기간·수행업무·회원번호·접근 경로·출처), **룰 관리**(담당자 전용 — 생성·수정·켜기/끄기, 변경 이력) |
 | platform-db | `127.0.0.1:15432` | 플랫폼 DB (PostgreSQL 16) |
 | argus-db | `127.0.0.1:15433` | Argus 접속기록 원장 (PostgreSQL 16) |

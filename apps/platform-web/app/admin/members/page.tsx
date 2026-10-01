@@ -32,7 +32,7 @@ export default function MembersPage() {
 
   const handleError = useCallback(
     (e: unknown) => {
-      if (e instanceof ApiError && e.status === 401) router.replace("/login");
+      if (e instanceof ApiError && e.status === 401) router.replace("/admin/login");
       else setError(errorMessage(e));
     },
     [router],
