@@ -29,6 +29,42 @@
 
 ---
 
+## 2026-10-01 — 마일스톤 M5 PR ② (argus-web: Argus 화면) — M5 완료
+
+**한 일**
+- PR #16(M5 PR ①) 머지 확인, main 최신화
+- `apps/argus-web`: platform-web 뼈대를 복사해 같은 구조·버전·디자인 체계, 강조색만 남색(Argus)
+  - `next.config.ts`: rewrite `/api/*` → argus-api `/api/*`(화면용 API만, `/ingest`는 화면에서 부르지 않음)
+  - 화면: `/login`, `/detections`(상태 탭 필터·페이지, 담당자 "탐지건" / 취급자 "내 소명 요청"), `/detections/[id]`(요약·처리 버튼·하위 접속기록·차수별 소명·상태 이력), 상단 바(이름·역할·로그아웃)
+  - 처리 버튼은 서버 상태 전이 표를 화면용으로 옮긴 `lib/labels.ts`의 `actionsFor(역할, 상태)`로 표시 — 담당자: 소명 요청·불요 / 요청 취소(오탐) / 승인·반려 / 재요청·에스컬레이션, 취급자: 소명 제출. **숨김은 편의, 허용 판단은 서버**
+  - 하위 기록의 정보주체는 서버가 마스킹한 값 앞 5개 + "외 N명", 고유 정보주체가 잘림 하한값이면 "이상" 표시
+  - 소명 내용·사유는 텍스트로만 표시(`white-space: pre-wrap`, HTML 해석 없음 — XSS 방지)
+- compose `argus-web`(127.0.0.1:3001, argus-api healthy 후 기동), argus-api의 `ARGUS_TRUSTED_PROXIES` 설명 갱신(화면 서버 비신뢰), `.env.example`(`ARGUS_WEB_PORT`), README 서비스 표
+- CI `web` matrix·docker-build에 argus-web, Dependabot npm·docker에 argus-web
+- 검증
+  - eslint·typecheck·build 통과(컨테이너)
+  - 화면 서버 경유 실제 요청(점검용 임시 담당자, 무작위 비밀번호): 목록 4건 → 상세 #4(120명 모두 `member_10***`, 원본 미노출, 1차 요청자 시스템) → 대리 제출 403 → Argus 원장 LOGIN·READ(0)·READ(120, ids 없음). 모든 요청에 `X-Forwarded-For: 8.8.8.8`을 붙였으나 원장에는 argus-web 실제 IP(`172.18.0.6`) 기록(위조 무시). 점검 계정 DISABLED
+
+**M5 완료 기준 대조** (CLAUDE.md 6절): platform-web 관리자 로그인·회원 목록·다운로드 버튼 ✅(PR ①, 사용자 브라우저 확인) / argus-web 로그인·탐지 목록·상세·요청/제출/승인 버튼 ✅(+ 반려·재요청·불요·요청 취소·에스컬레이션) — 사용자의 브라우저 시나리오 확인은 이 PR 리뷰 중 진행
+
+**결정사항**
+- argus-web은 platform-web과 같은 구조·버전·디자인 체계를 복사해 쓰고 공유 패키지로 묶지 않음 — 두 시스템은 별개 제품(API 쪽과 같은 원칙)
+- 화면의 버튼 표시 규칙은 서버 전이 표를 그대로 옮긴 사본 — 둘이 어긋나도 서버가 거부하므로 안전하지만, 어긋나면 버튼이 눌러도 409가 나므로 전이 표를 바꿀 때 함께 수정
+- 같은 브라우저에서 담당자·취급자를 동시에 쓰면 `argus_session` 쿠키가 덮어써짐 — 시연 시 일반 창과 시크릿 창을 나눠 쓰도록 안내(README 반영은 M6 실행 안내와 함께)
+
+**설계 변경**
+- 없음 (M5 PR ①의 "화면 서버는 신뢰 프록시가 아님"을 argus-web에도 동일 적용)
+
+**미결·이슈**
+- **v0.2 후보** — 화면용 버튼 규칙과 서버 전이 표의 이중 관리: 서버가 상세 응답에 "지금 가능한 행동" 목록을 내려주면 화면 사본이 필요 없어짐
+- 로컬 한계(PR ①과 동일): 쿠키가 포트를 구분하지 않음, Argus 자체 접속기록의 접속지가 로컬에선 argus-web IP
+
+**다음 할 일**
+- PR ② 머지 → **M5 완료 → Cowork 동기화**(v0.1 기본 디자인 포함 = CLAUDE.md 5·6절 개정, 화면 서버 비신뢰)
+- M6: 시나리오 자동 테스트 스크립트(E2E), 해시체인 검증 스크립트, README 로컬 실행법(Windows) — Skeleton 완료 기준 "새로 clone → README대로 `docker compose up` → 시나리오를 화면으로 끝까지 + M6 테스트 CI 통과"
+
+---
+
 ## 2026-10-01 — 마일스톤 M5 PR ① (platform-web: 플랫폼 관리자 화면)
 
 **한 일**

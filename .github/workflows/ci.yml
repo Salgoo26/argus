@@ -80,7 +80,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        app: [platform-web]
+        app: [platform-web, argus-web]
     defaults:
       run:
         working-directory: apps/${{ matrix.app }}
@@ -154,6 +154,7 @@ jobs:
           - { app: platform-api, target: runtime }
           - { app: platform-api, target: dev }
           - { app: platform-web, target: runtime }
+          - { app: argus-web, target: runtime }
     steps:
       - uses: actions/checkout@v7
         with:
