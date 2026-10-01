@@ -17,6 +17,11 @@
   없거나 종결(APPROVED·DISMISSED·ESCALATED)됐으면 새 탐지건
   — 승인은 "그때까지의 행위"에 대한 판단이므로
 - 진행 중 건은 그룹당 1개 — DB의 부분 유니크 인덱스(ux_detection_open_group)가 함께 보장한다
+
+자동 소명 요청 (2026-10-01 사용자 확정):
+새 탐지건은 룰의 auto_request가 켜져 있고 행위자에게 비활성이 아닌 A5 계정이 있으면
+같은 트랜잭션에서 바로 REQUESTED(1차, 요청자 = 시스템). 아니면 DETECTED로 남아 담당자가 처리.
+자동 요청은 탐지건을 "새로 만들 때"만 — 이미 진행 중인 건에 기록이 보태질 때는 보내지 않는다
 """
 
 import logging
@@ -31,11 +36,14 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 from app.detection.rules import RuleError, applies_to_path, matches, validate_rule
 from app.models import (
     access_log,
+    argus_user,
     detection,
     detection_batch_run,
     detection_log,
     detection_rule,
     detection_status_history,
+    explanation,
+    handler,
 )
 
 logger = logging.getLogger(__name__)
@@ -259,6 +267,8 @@ def _attach(conn: Connection, run_id: int, rule: Any, key: tuple, logs: list[Any
                 comment=f"탐지 배치 #{run_id}",
             )
         )
+        if rule["auto_request"] and _can_receive_request(conn, source_system_id, actor):
+            _auto_request(conn, run_id, rule, detection_id)
 
     conn.execute(
         pg_insert(detection_log)
@@ -269,6 +279,58 @@ def _attach(conn: Connection, run_id: int, rule: Any, key: tuple, logs: list[Any
     return 1 if created else 0
 
 
+def _can_receive_request(conn: Connection, source_system_id: int, actor: str) -> bool:
+    """소명을 받을 사람이 있는가 — 재직 중인 취급자이고 A5 계정이 비활성(DISABLED)이 아님
+
+    동기화 전이거나 퇴직으로 계정이 막혔으면 자동 요청을 보내지 않고 DETECTED로 남겨
+    담당자가 처리한다(퇴직자 접속 등은 원래 담당자 사안). 잠김(LOCKED)·비밀번호 미설정은
+    풀면 되는 일시 상태라 요청은 보낸다.
+    """
+    return (
+        conn.execute(
+            select(argus_user.c.id)
+            .join(handler, handler.c.id == argus_user.c.handler_id)
+            .where(
+                handler.c.source_system_id == source_system_id,
+                handler.c.login_id == actor,
+                handler.c.employment_status == "ACTIVE",
+                argus_user.c.role == "HANDLER",
+                argus_user.c.status != "DISABLED",
+            )
+        ).first()
+        is not None
+    )
+
+
+def _auto_request(conn: Connection, run_id: int, rule: Any, detection_id: int) -> None:
+    """자동 소명 요청 (2026-10-01 사용자 확정) — 탐지 즉시 1차 요청, 요청자 = 시스템(NULL)
+
+    담당자는 목록을 보고 오탐이면 요청을 취소(REQUESTED → DISMISSED)한다.
+    하루에 같은 룰로 여러 번 걸려도 그룹핑(취급자·룰·KST 날짜)으로 탐지건·요청은 1개다.
+    """
+    conn.execute(
+        update(detection).where(detection.c.id == detection_id).values(status="REQUESTED", round=1)
+    )
+    conn.execute(
+        insert(explanation).values(
+            detection_id=detection_id,
+            round=1,
+            requested_by=None,
+            request_message=f"자동 소명 요청 — {rule['name']}",
+        )
+    )
+    conn.execute(
+        insert(detection_status_history).values(
+            detection_id=detection_id,
+            from_status="DETECTED",
+            to_status="REQUESTED",
+            round=1,
+            actor_user_id=None,
+            comment=f"자동 소명 요청 (탐지 배치 #{run_id})",
+        )
+    )
+
+
 def _rule_snapshot(rule: Any) -> dict:
     keys = ("id", "name", "description", "rule_type", "access_path", "severity")
     snapshot = {k: rule[k] for k in keys}
@@ -276,6 +338,7 @@ def _rule_snapshot(rule: Any) -> dict:
         "condition": rule["condition"],
         "aggregate": rule["aggregate"],
         "group_by": rule["group_by"],
+        "auto_request": rule["auto_request"],
         "version": rule["version"],
     }
     return snapshot

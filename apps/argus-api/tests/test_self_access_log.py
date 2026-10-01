@@ -86,22 +86,22 @@ def test_read_records_count_only_not_member_ids(settings, app_engine):
     # 조회 API는 PR ②에서 만든다 — 여기선 테스트 라우트로 확인
     app = create_app(settings)
 
-    @app.get("/api/detections/{detection_id}")
+    @app.get("/api/test-only/items/{item_id}")
     @access_log(action="READ", data_category="ACCESS_LOG")
-    def detail(detection_id: int, _user: CurrentUser):
+    def detail(item_id: int, _user: CurrentUser):
         record_subject_count(120)
         return {"masked": ["member_10***"]}
 
     with TestClient(app, client=TEST_CLIENT_ADDR) as client:
         login(client)
-        client.get("/api/detections/3?status=OPEN")
+        client.get("/api/test-only/items/3?status=OPEN")
     app.state.engine.dispose()
 
     row = argus_logs(app_engine)[-1]
     assert row["action"] == "READ" and row["data_category"] == "ACCESS_LOG"
     assert row["subject_type"] == "MEMBER" and row["subject_count"] == 120
     assert row["subject_ids"] is None  # 회원 PK는 원장에 다시 적재되지 않는다
-    assert row["request_path"] == "/api/detections/{detection_id}"  # 경로 변수 값 대신 템플릿
+    assert row["request_path"] == "/api/test-only/items/{item_id}"  # 경로 변수 값 대신 템플릿
     assert row["request_query_keys"] == ["status"]
 
 

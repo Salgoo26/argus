@@ -69,6 +69,7 @@ detection_rule = Table(
     Column("access_path", String(8), nullable=False),
     Column("severity", String(8), nullable=False),
     Column("enabled", Boolean, nullable=False),
+    Column("auto_request", Boolean, nullable=False),
     Column("condition", JSONB, nullable=False),
     Column("aggregate", JSONB),
     Column("group_by", String(32), nullable=False),
@@ -130,6 +131,24 @@ detection_batch_run = Table(
     Column("detected_count", Integer, nullable=False),
     Column("status", String(16), nullable=False),
     Column("error", Text),
+)
+
+explanation = Table(
+    "explanation",
+    metadata,
+    Column("id", BigInteger, primary_key=True),
+    Column("detection_id", BigInteger, nullable=False),
+    Column("round", Integer, nullable=False),
+    Column("requested_by", BigInteger),  # NULL = 시스템 자동 요청
+    Column("requested_at", DateTime(timezone=True), nullable=False),
+    Column("request_message", Text),
+    Column("submitted_by", BigInteger),
+    Column("submitted_at", DateTime(timezone=True)),
+    Column("content", Text),
+    Column("reviewed_by", BigInteger),
+    Column("reviewed_at", DateTime(timezone=True)),
+    Column("review_result", String(16)),
+    Column("review_comment", Text),
 )
 
 setting = Table(

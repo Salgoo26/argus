@@ -19,6 +19,7 @@ from app.agent.middleware import AccessLogMiddleware
 from app.auth.router import router as auth_router
 from app.auth.tokens import set_session_cookie
 from app.config import Settings
+from app.detections.router import router as detections_router
 from app.errors import install_error_handlers
 from app.ingest.router import router as ingest_router
 
@@ -35,6 +36,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     install_error_handlers(app)
     app.include_router(ingest_router)
     app.include_router(auth_router)
+    app.include_router(detections_router)
 
     @app.middleware("http")
     async def api_response_headers(request: Request, call_next):
