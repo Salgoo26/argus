@@ -3,6 +3,7 @@
 # - 프론트엔드 lint(eslint)·타입 검사(tsc)·빌드 — M5부터
 # - 시크릿 스캔(gitleaks) — 전체 커밋 이력 대상
 # - 설정 파일 스캔(Trivy config, report-only) + 도커 빌드 가능 여부(push 안 함) — M1부터 (architecture 8-5)
+# - Walking Skeleton 시나리오 E2E(전체 스택 + 해시체인 검증) — M6부터
 # CodeQL은 GitHub 기본 설정(default setup)으로 별도 실행된다.
 # Trivy 이미지 스캔은 main 빌드 단계(②)에서 "Skeleton 로컬 동작 후" 추가.
 name: CI
@@ -108,6 +109,38 @@ jobs:
 
       - name: Build
         run: npm run build
+
+  # Walking Skeleton 시나리오 E2E (M6) — 전체 스택을 띄워 플랫폼 다운로드 → 수집 → 탐지 → 소명 → 승인,
+  # 마지막에 해시체인 검증. 로컬과 같은 스크립트(scripts/e2e.sh)를 그대로 실행한다
+  e2e:
+    name: e2e scenario
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      # e2e/는 앱 matrix 밖이라 여기서 린트 — 버전은 apps/argus-api/pyproject.toml의 ruff와 맞춘다
+      - name: Lint e2e (ruff)
+        run: |
+          pipx run ruff==0.16.9 check --output-format=github e2e
+          pipx run ruff==0.16.9 format --check e2e
+
+      # 실행마다 만들고 버리는 시크릿 — .env.example의 change-me 칸만 무작위 값으로 채운다
+      # (값은 로그에 찍지 않는다. 레포·CI 설정에 저장된 시크릿을 쓰지 않음)
+      - name: Create throwaway .env
+        run: |
+          while IFS= read -r line; do
+            if [[ "$line" =~ ^([A-Z0-9_]+)=change-me ]]; then
+              echo "${BASH_REMATCH[1]}=$(openssl rand -hex 32)"
+            else
+              echo "$line"
+            fi
+          done < .env.example > .env
+
+      - name: Run scenario
+        run: bash scripts/e2e.sh
 
   gitleaks:
     name: secret scan (gitleaks)

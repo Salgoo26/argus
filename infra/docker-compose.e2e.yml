@@ -1,0 +1,47 @@
+# E2E 시나리오 테스트용 덧붙임 파일 (M6) — 단독으로 쓰지 않고 scripts/e2e.sh가 기본 파일 뒤에 겹쳐 쓴다:
+#   docker compose -p argus-e2e -f infra/docker-compose.yml -f infra/docker-compose.e2e.yml ...
+#
+# - 별도 프로젝트(argus-e2e)로 매번 새로 띄우고 끝나면 볼륨까지 지운다 — 평소 개발 스택의 데이터와 섞이지 않는다
+# - 호스트 포트는 모두 닫는다(!reset) — 개발 스택과 포트가 겹치지 않고, 테스트는 내부 네트워크로만 접근한다
+
+services:
+  platform-db: { ports: !reset [] }
+  platform-api: { ports: !reset [] }
+  platform-web: { ports: !reset [] }
+  argus-db: { ports: !reset [] }
+  argus-api: { ports: !reset [] }
+  argus-web: { ports: !reset [] }
+
+  # ── 시나리오 실행기 ─────────────────────────────────────────
+  # 사람이 하는 일(로그인·다운로드·소명)은 브라우저처럼 화면 서버(Next.js) 경유 HTTP로만 한다.
+  # 운영자가 하는 일(담당자 계정 발급, 탐지 배치 즉시 1회, 해시체인 검증)은 README에 안내한 것과
+  # 같은 관리 명령을 실행한다 — 그래서 argus-api 이미지(dev: pytest 포함)를 쓰고 argus-api와 같은 앱 계정을 받는다
+  e2e:
+    profiles: ["e2e"]
+    build:
+      context: ../apps/argus-api
+      target: dev
+    image: argus-api:dev
+    working_dir: /e2e
+    command: ["pytest", "-p", "no:cacheprovider", "-v"]
+    environment:
+      E2E_PLATFORM_URL: http://platform-web:3000
+      E2E_ARGUS_URL: http://argus-web:3000
+      # 시드 취급자(ops_park 등)의 플랫폼 로그인 비밀번호
+      E2E_OPERATOR_PASSWORD: ${PLATFORM_SEED_OPERATOR_PASSWORD}
+      # 관리 명령용 — argus-api와 같은 앱 계정 (원장은 SELECT·INSERT만)
+      ARGUS_DB_HOST: argus-db
+      ARGUS_DB_NAME: ${ARGUS_DB_NAME}
+      ARGUS_DB_USER: ${ARGUS_APP_DB_USER}
+      ARGUS_DB_PASSWORD: ${ARGUS_APP_DB_PASSWORD}
+    volumes:
+      - ../e2e:/e2e:ro
+    depends_on:
+      platform-web:
+        condition: service_healthy
+      argus-web:
+        condition: service_healthy
+    # 사람 역할(두 화면)과 운영자 역할(Argus DB)을 모두 하므로 두 네트워크에 붙는다 — 테스트 전용
+    networks:
+      - platform-net
+      - argus-net
