@@ -196,6 +196,7 @@ def _logs(conn: Connection, detection_id: int) -> list[dict]:
             a.c.subject_ids,
             a.c.subject_count,
             a.c.subject_truncated,
+            a.c.context,
         )
         .join(detection_log, detection_log.c.access_log_id == a.c.id)
         .where(detection_log.c.detection_id == detection_id)
@@ -216,6 +217,8 @@ def _logs(conn: Connection, detection_id: int) -> list[dict]:
             "subject_truncated": r["subject_truncated"],
             # 원본 식별값은 응답에 싣지 않는다 — 마스킹된 표시값만 (LOG-10)
             "subjects": [mask_subject(r["subject_type"], s) for s in r["subject_ids"] or []],
+            # 업무 근거 티켓(1:1 문의 등) — 소명과 대조할 단서. 다른 context 키는 싣지 않음
+            "ticket_id": (r["context"] or {}).get("ticket_id"),
         }
         for r in rows
     ]

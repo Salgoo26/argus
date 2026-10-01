@@ -20,6 +20,7 @@ def test_skeleton_tables_created(engine):
         "refund_account",
         "retained_member_record",
         "destruction_history",
+        "inquiry",  # 1:1 문의 (0004)
     }
 
 

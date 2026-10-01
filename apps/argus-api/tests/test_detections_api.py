@@ -70,7 +70,7 @@ def accounts(admin_engine, password_hash, seed_rules):
             conn.execute(text(f"DELETE FROM {table}"))  # noqa: S608 — 고정된 테이블 이름
 
 
-def detect(app_engine, actor="ops_park", count=120) -> int:
+def detect(app_engine, actor="ops_park", count=120, context=None) -> int:
     """actor가 count건을 다운로드 → 순찰 → (계정이 있으니) 자동 소명 요청된 탐지건 id"""
     with app_engine.begin() as conn:
         append_access_logs(
@@ -82,6 +82,7 @@ def detect(app_engine, actor="ops_park", count=120) -> int:
                     subject_ids=[str(n) for n in range(10001, 10001 + count)],
                     subject_count=count,
                     request_path="/admin/members/export",
+                    context=context,
                 )
             ],
             received_at=datetime.now(UTC),
@@ -354,3 +355,14 @@ def test_reads_are_logged_with_counts_only_transitions_are_not(app_engine, as_us
 
 def test_unauthenticated_is_401(client):
     assert client.get("/api/detections").status_code == 401
+
+
+def test_detail_shows_business_ticket_but_not_other_context(app_engine, as_user):
+    # 1:1 문의 처리 중의 조회 — 플랫폼이 context.ticket_id를 실어 보낸다 (기능 레이어 7 ②)
+    case = detect(app_engine, context={"ticket_id": "INQ-12"})
+    [log] = as_user("officer").get(f"/api/detections/{case}").json()["logs"]
+    assert log["ticket_id"] == "INQ-12" and "context" not in log
+
+    other = detect(app_engine, actor="cs_kim")  # 티켓 없는 기록
+    [log] = as_user("officer").get(f"/api/detections/{other}").json()["logs"]
+    assert log["ticket_id"] is None

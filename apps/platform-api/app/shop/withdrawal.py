@@ -9,17 +9,21 @@ db-schema 4-1은 "상태 변경 → 파기 배치"였지만 파기 배치는 v0.
    - 대금결제·재화 공급 기록 5년 (전자상거래법 시행령 §6①3호) — 주문이 있을 때만
    - data에는 보존 목적에 필요한 최소 항목만: 주문번호·상품·금액·일시·PG 거래번호·카드사와
      분쟁 시 본인 확인용 이름·연락처. 비밀번호·주소·환불계좌는 담지 않는다
+   - 소비자 불만·분쟁 처리 기록 3년 (같은 조 4호) — 1:1 문의가 있을 때만. 문의 제목·본문·답변을
+     분리보관 테이블로 **옮기고** 운영 테이블(inquiry)의 내용은 지운다 — 본문에 개인정보가 있을 수
+     있어, 회원과의 연결만 끊고 남겨 두면 분리보관이 아니라 방치가 된다
 2. 회원을 참조하는 개인정보 삭제(환불계좌·동의 이력) → 회원 행 삭제.
-   orders.member_id는 FK ON DELETE SET NULL로 끊겨 개인과 연결되지 않는 기록이 된다
+   orders·inquiry의 member_id는 FK ON DELETE SET NULL로 끊겨 개인과 연결되지 않는 기록이 된다
 3. destruction_history에 파기 이력 (개인정보 자체는 기록하지 않음)
 """
 
 from datetime import timedelta
 
-from sqlalchemy import Connection, delete, func, insert, select
+from sqlalchemy import Connection, case, delete, func, insert, select, update
 
 from app.models import (
     destruction_history,
+    inquiry,
     member,
     member_consent,
     orders,
@@ -83,6 +87,63 @@ def _retain_orders(conn: Connection, profile, now) -> None:
     )
 
 
+DISPUTE_RETENTION = timedelta(days=365 * 3)
+DISPUTE_LEGAL_BASIS = "전자상거래법 시행령 §6①4호"
+MOVED = "(탈퇴 회원 문의 — 분리보관됨)"
+
+
+def _retain_inquiries(conn: Connection, profile, now) -> None:
+    rows = (
+        conn.execute(
+            select(inquiry)
+            .where(inquiry.c.member_id == profile["id"])
+            .order_by(inquiry.c.id)
+            .with_for_update()
+        )
+        .mappings()
+        .all()
+    )
+    if not rows:
+        return
+    conn.execute(
+        insert(retained_member_record).values(
+            original_member_id=profile["id"],
+            retain_reason="DISPUTE_3Y",
+            legal_basis=DISPUTE_LEGAL_BASIS,
+            data={
+                "contact": {
+                    "name": profile["name"],
+                    "email": profile["email"],
+                    "phone": profile["phone"],
+                },
+                "inquiries": [
+                    {
+                        "inquiry_id": r["id"],
+                        "title": r["title"],
+                        "body": r["body"],
+                        "answer": r["answer"],
+                        "created_at": r["created_at"].isoformat(),
+                        "answered_at": r["answered_at"].isoformat() if r["answered_at"] else None,
+                    }
+                    for r in rows
+                ],
+            },
+            retain_until=now + DISPUTE_RETENTION,
+            created_at=now,
+        )
+    )
+    # 운영 테이블에는 처리 이력(번호·상태·시각·답변자)만 남기고 내용은 지운다
+    conn.execute(
+        update(inquiry)
+        .where(inquiry.c.member_id == profile["id"])
+        .values(
+            title=MOVED,
+            body=MOVED,
+            answer=case((inquiry.c.answer.is_(None), None), else_=MOVED),
+        )
+    )
+
+
 def destroy_member(conn: Connection, member_id: int) -> None:
     now = conn.execute(select(func.now())).scalar_one()
     profile = (
@@ -95,6 +156,7 @@ def destroy_member(conn: Connection, member_id: int) -> None:
         .one()
     )
     _retain_orders(conn, profile, now)
+    _retain_inquiries(conn, profile, now)
 
     conn.execute(delete(refund_account).where(refund_account.c.member_id == member_id))
     # 동의 이력도 함께 파기 — 탈퇴로 동의 자체가 실효된다 (db-schema 4-1 "동의 이력" 주석)

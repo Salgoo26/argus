@@ -50,6 +50,11 @@ export default function PrivacyPage() {
             <td>마이페이지에서 등록 시</td>
           </tr>
           <tr>
+            <td>문의 시</td>
+            <td>문의 제목·내용, 답변</td>
+            <td>1:1 문의</td>
+          </tr>
+          <tr>
             <td>자동 수집</td>
             <td>동의·철회 시 접속 IP와 일시 (동의 증적)</td>
             <td>동의·철회 시</td>

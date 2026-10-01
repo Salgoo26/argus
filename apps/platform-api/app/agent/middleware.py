@@ -68,7 +68,7 @@ def build_event(spec: AccessLogSpec, record: AccessRecord, route_path: str, resu
         # 경로 변수에 실린 값(검색어·이름 등)이 기록으로 새지 않게
         "request": {"method": record.method, "path": route_path, "query_keys": record.query_keys},
         "result": result,
-        "context": {},
+        "context": record.context or {},
     }
     if spec.action != "LOGIN":
         # 정보주체를 기록하기 전에 실패했으면 건수 0 (2026-09-30 결정)

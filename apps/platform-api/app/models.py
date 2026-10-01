@@ -160,3 +160,17 @@ destruction_history = Table(
     Column("deleted_count", Integer, nullable=False),
     Column("legal_basis", String(100), nullable=False),
 )
+
+inquiry = Table(
+    "inquiry",
+    metadata,
+    Column("id", BigInteger, primary_key=True),
+    Column("member_id", BigInteger, ForeignKey("member.id")),
+    Column("title", String(200), nullable=False),
+    Column("body", Text, nullable=False),
+    Column("status", String(16), nullable=False),
+    Column("answer", Text),
+    Column("answered_by", BigInteger, ForeignKey("operator.id")),
+    Column("created_at", DateTime(timezone=True), nullable=False),
+    Column("answered_at", DateTime(timezone=True)),
+)

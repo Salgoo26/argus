@@ -28,6 +28,8 @@ class AccessRecord:
     # 핸들러가 채움 — §2 3호 처리한 정보주체 (회원 내부 PK만)
     subject_ids: list[str] | None = None
     subject_count: int | None = None
+    # 핸들러가 채움 — api-spec 2-3 context (정의된 키만, 예: 문의 처리의 ticket_id)
+    context: dict | None = None
 
 
 _current: ContextVar[AccessRecord | None] = ContextVar("access_record", default=None)
@@ -61,3 +63,21 @@ def record_subjects(ids: Iterable[int | str], count: int | None = None) -> None:
         return
     record.subject_ids = [str(i) for i in ids]
     record.subject_count = len(record.subject_ids) if count is None else count
+
+
+CONTEXT_KEYS = frozenset({"ticket_id"})  # 플랫폼이 쓰는 api-spec 2-3 context 키
+
+
+def record_context(**values: str) -> None:
+    """부가 정보 — 업무 근거(티켓 ID 등). 개인정보(이름·문의 내용 등)는 넣지 않는다
+    (CLAUDE.md 3절 #3).
+
+    Argus는 정의되지 않은 키를 이벤트째 거부한다(UNKNOWN_CONTEXT_KEY) — 여기서 먼저 막는다.
+    """
+    unknown = set(values) - CONTEXT_KEYS
+    if unknown:
+        raise ValueError(f"unknown access log context key: {sorted(unknown)}")
+    record = _current.get()
+    if record is None:
+        return
+    record.context = {**(record.context or {}), **values}

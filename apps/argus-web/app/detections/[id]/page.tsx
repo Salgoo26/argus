@@ -194,6 +194,7 @@ export default function DetectionDetailPage() {
                       <th>기능</th>
                       <th className="num">처리 건수</th>
                       <th>정보주체</th>
+                      <th>연계 티켓</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -216,6 +217,7 @@ export default function DetectionDetailPage() {
                           {log.subjects.length > SUBJECT_PREVIEW &&
                             ` 외 ${log.subject_count - SUBJECT_PREVIEW}명`}
                         </td>
+                        <td>{log.ticket_id ?? "-"}</td>
                       </tr>
                     ))}
                   </tbody>
