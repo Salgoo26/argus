@@ -20,7 +20,7 @@ from alembic import command
 from alembic.config import Config
 from fastapi.testclient import TestClient
 from psycopg import sql
-from sqlalchemy import create_engine, delete, select, update
+from sqlalchemy import create_engine, delete, null, select, update
 from sqlalchemy.engine import URL, Engine, make_url
 
 from app.config import Settings
@@ -166,6 +166,8 @@ def reset_rules(admin_engine, seed_rules: list[dict], enabled: tuple[str, ...]) 
                 .where(detection_rule.c.id == seed["id"])
                 .values(
                     condition=seed["condition"],
+                    # None은 JSON null로 저장돼 CHECK(EVENT ↔ aggregate IS NULL)에 걸린다
+                    aggregate=seed["aggregate"] if seed["aggregate"] is not None else null(),
                     access_path=seed["access_path"],
                     auto_request=seed["auto_request"],
                     enabled=seed["name"] in enabled,

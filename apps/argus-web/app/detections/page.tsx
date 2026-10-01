@@ -90,7 +90,7 @@ export default function DetectionsPage() {
                     <td>
                       {c.actor_name ?? "-"} <span className="muted">({c.actor_login_id})</span>
                     </td>
-                    <td>{c.group_bucket}</td>
+                    <td>{c.group_bucket.replace("T", " ").replace("+09:00", "")}</td>
                     <td className="num">{c.log_count}</td>
                     <td className="num">{c.subject_count_sum ?? "-"}</td>
                     <td>

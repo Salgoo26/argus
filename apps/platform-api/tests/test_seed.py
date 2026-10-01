@@ -65,7 +65,11 @@ def test_seed_operators_can_log_in(engine, client):
 def test_seed_enqueues_handler_created_per_operator(engine):
     _seed(engine)
     with engine.connect() as conn:
-        rows = conn.execute(select(outbox).order_by(outbox.c.id)).mappings().all()
+        rows = (
+            conn.execute(select(outbox).where(outbox.c.topic == "HANDLER").order_by(outbox.c.id))
+            .mappings()
+            .all()
+        )
         ops = {
             r["login_id"]: r
             for r in conn.execute(select(operator)).mappings()  # 생성 시각 대조용
@@ -87,3 +91,15 @@ def test_seed_enqueues_handler_created_per_operator(engine):
     assert payload["occurred_at"] == ops["ops_park"]["created_at"].isoformat(
         timespec="microseconds"
     )
+
+
+# ── 기준선용 과거 접속기록 (기능 레이어 4) ─────────────────
+
+
+def test_seed_enqueues_baseline_access_logs_after_handlers(engine):
+    _seed(engine)
+    with engine.connect() as conn:
+        topics = conn.execute(select(outbox.c.topic).order_by(outbox.c.id)).scalars().all()
+    # 취급자 동기화가 먼저 — Argus 명부가 기록보다 앞서 있게
+    assert topics[: len(SEED_OPERATORS)] == ["HANDLER"] * len(SEED_OPERATORS)
+    assert set(topics[len(SEED_OPERATORS) :]) == {"ACCESS_LOG"}

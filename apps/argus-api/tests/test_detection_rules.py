@@ -221,3 +221,79 @@ def test_uses_fields_sees_nested_conditions():
 def test_unevaluable_time_and_actor_conditions(bad):
     with pytest.raises(RuleError):
         validate_rule(bad)
+
+
+# ── AGGREGATE 집계 스펙 (기능 레이어 4) ────────────────────
+
+READS = {"all": [{"field": "action", "op": "eq", "value": "READ"}]}
+BULK_READ = {"window": "1h", "measure": "LOG_COUNT", "compare": "ABSOLUTE", "threshold": 100}
+SURGE = {
+    "window": "1mo",
+    "measure": "LOG_COUNT",
+    "compare": "RATIO_TO_BASELINE",
+    "baseline": "PREV_MONTH_SAME_PERIOD",
+    "threshold": 2.0,
+    "min_baseline": 20,
+}
+
+
+def aggregate_rule(spec) -> dict:
+    return rule(READS, rule_type="AGGREGATE", aggregate=spec)
+
+
+@pytest.mark.parametrize(
+    "spec",
+    [
+        BULK_READ,
+        SURGE,
+        {k: v for k, v in SURGE.items() if k != "min_baseline"},  # min_baseline은 선택
+        BULK_READ | {"window": "1d", "measure": "DISTINCT_SUBJECT"},
+        SURGE | {"threshold": 3, "measure": "SUBJECT_COUNT"},
+    ],
+    ids=["bulk-read", "surge", "surge-no-min", "daily-distinct", "surge-int-threshold"],
+)
+def test_valid_aggregate_specs(spec):
+    validate_rule(aggregate_rule(spec))
+
+
+@pytest.mark.parametrize(
+    "spec",
+    [
+        None,  # AGGREGATE인데 집계 스펙 없음
+        BULK_READ | {"window": "15m"},
+        BULK_READ | {"measure": "AVG"},
+        BULK_READ | {"compare": "TOP_N"},
+        BULK_READ | {"threshold": 0},
+        BULK_READ | {"threshold": 99.5},  # 절대 기준은 정수
+        BULK_READ | {"threshold": True},
+        BULK_READ | {"baseline": "PREV_MONTH_SAME_PERIOD"},  # 절대 기준엔 기준선 없음
+        SURGE | {"window": "1h"},  # 전월 동기는 월 윈도우에서만
+        SURGE | {"baseline": "LAST_YEAR"},
+        SURGE | {"threshold": -1},
+        SURGE | {"min_baseline": 0},
+        SURGE | {"extra": 1},
+    ],
+    ids=[
+        "missing",
+        "window",
+        "measure",
+        "compare",
+        "zero",
+        "float-absolute",
+        "bool",
+        "baseline-on-absolute",
+        "ratio-hourly",
+        "baseline-kind",
+        "negative-ratio",
+        "min-baseline-zero",
+        "extra-key",
+    ],
+)
+def test_unevaluable_aggregate_specs(spec):
+    with pytest.raises(RuleError):
+        validate_rule(aggregate_rule(spec))
+
+
+def test_event_rule_must_not_carry_aggregate():
+    with pytest.raises(RuleError):
+        validate_rule(rule(aggregate=BULK_READ))

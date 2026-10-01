@@ -18,6 +18,16 @@ import {
 
 const SUBJECT_PREVIEW = 5;
 
+// 집계값 표시 — 절대 기준이면 건수, 전월 대비면 배율 (기준은 탐지 당시 룰 사본에서)
+function aggregateLabel(detail: CaseDetail): string {
+  const spec = detail.rule.aggregate;
+  if (detail.aggregate_value === null || !spec) return "-";
+  if (spec.compare === "RATIO_TO_BASELINE") {
+    return `전월 같은 기간의 ${detail.aggregate_value.toFixed(2)}배 (기준 ${spec.threshold}배)`;
+  }
+  return `${detail.aggregate_value}건 (기준 ${spec.threshold}건)`;
+}
+
 export default function DetectionDetailPage() {
   const { id } = useParams<{ id: string }>();
   const { me, handleError } = useMe();
@@ -59,6 +69,7 @@ export default function DetectionDetailPage() {
 
   const buttons = me && detail ? actionsFor(me.role, detail.status) : [];
   const needsText = buttons.length > 0;
+  const isAggregate = detail?.rule.rule_type === "AGGREGATE";
 
   return (
     <>
@@ -85,9 +96,16 @@ export default function DetectionDetailPage() {
                   </dd>
                 </div>
                 <div>
-                  <dt>발생일 (KST)</dt>
-                  <dd>{detail.group_bucket}</dd>
+                  {/* EVENT는 발생 날짜, AGGREGATE는 집계 구간(윈도우)의 시작 시각이 그룹 키다 */}
+                  <dt>{isAggregate ? "집계 구간 시작 (KST)" : "발생일 (KST)"}</dt>
+                  <dd>{detail.group_bucket.replace("T", " ").replace("+09:00", "")}</dd>
                 </div>
+                {isAggregate && (
+                  <div>
+                    <dt>집계값</dt>
+                    <dd>{aggregateLabel(detail)}</dd>
+                  </div>
+                )}
                 <div>
                   <dt>심각도</dt>
                   <dd>{SEVERITY_LABELS[detail.severity]}</dd>

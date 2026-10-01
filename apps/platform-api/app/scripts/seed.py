@@ -9,6 +9,8 @@
 재현성: Faker·난수 시드를 고정해 누가 몇 번 실행해도 같은 회원이 같은 id로 생긴다
 (M6 자동 시나리오 테스트의 전제). 테이블이 비어 있을 때만 넣으므로 재실행해도 늘어나지 않는다.
 
+기준선용 과거 접속기록(baseline.py)은 outbox에 넣어 relay → Argus 수집 API로 보낸다.
+
 플랫폼 DB에는 직접 INSERT한다. "시드도 수집 API로"(CLAUDE.md 3절 #5)는 Argus 원장
 (access_log)의 해시체인 때문에 생긴 규칙이다. 취급자는 outbox를 거쳐 Argus에 동기화된다.
 """
@@ -25,6 +27,7 @@ from app.auth.passwords import hash_password, unusable_password_hash
 from app.config import Settings
 from app.models import member, operator
 from app.outbox import enqueue, handler_event
+from app.scripts.baseline import baseline_events
 
 logger = logging.getLogger("seed")
 
@@ -95,6 +98,12 @@ def seed(conn: Connection, operator_password: str, member_count: int = MEMBER_CO
         ).one()
         # 취급자 생성과 동기화 통지를 같은 트랜잭션으로 — 둘 다 커밋되거나 둘 다 취소
         enqueue(conn, "HANDLER", handler_event("HANDLER_CREATED", row, row.created_at))
+
+    # 기준선용 과거 접속기록 (기능 레이어 4) — Argus 원장에는 relay → 수집 API로만 들어간다.
+    # 취급자 동기화(HANDLER)가 먼저 나가도록 relay가 topic 순서를 지킨다
+    actors = [login_id for login_id, *_ in SEED_OPERATORS]
+    for event in baseline_events(actors, FIRST_MEMBER_ID, member_count, now, rng):
+        enqueue(conn, "ACCESS_LOG", event)
     return True
 
 
