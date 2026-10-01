@@ -20,12 +20,13 @@ from alembic import command
 from alembic.config import Config
 from fastapi.testclient import TestClient
 from psycopg import sql
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, delete, select, update
 from sqlalchemy.engine import URL, Engine, make_url
 
 from app.config import Settings
 from app.ingest.auth import sign
 from app.main import create_app
+from app.models import detection_rule
 from app.scripts.provision_db_roles import provision_app_login
 
 APP_ROOT = Path(__file__).resolve().parent.parent
@@ -137,6 +138,39 @@ def clean_ledger(request):
     with engine.begin() as conn:
         conn.exec_driver_sql("TRUNCATE access_log RESTART IDENTITY CASCADE")
     yield
+
+
+# ── 탐지 룰 ───────────────────────────────────────────────
+
+
+@pytest.fixture(scope="session")
+def seed_rules(admin_engine) -> list[dict]:
+    """마이그레이션이 넣은 기본 룰 — 테스트가 바꾼 룰을 되돌릴 기준"""
+    with admin_engine.connect() as conn:
+        return [dict(r) for r in conn.execute(select(detection_rule)).mappings()]
+
+
+def reset_rules(admin_engine, seed_rules: list[dict], enabled: tuple[str, ...]) -> None:
+    """룰을 시드 상태로 되돌리고 enabled에 든 룰만 켠다 (탐지건을 먼저 지운 뒤 호출)
+
+    야간·주말 룰은 테스트를 **실행하는 시각**에 따라 결과가 달라진다 — 그 룰을 다루지 않는
+    테스트는 꺼 두고, 다루는 테스트는 켜고 고정된 시각의 기록으로 검증한다.
+    """
+    with admin_engine.begin() as conn:
+        conn.execute(
+            delete(detection_rule).where(detection_rule.c.id.not_in([r["id"] for r in seed_rules]))
+        )
+        for seed in seed_rules:
+            conn.execute(
+                update(detection_rule)
+                .where(detection_rule.c.id == seed["id"])
+                .values(
+                    condition=seed["condition"],
+                    access_path=seed["access_path"],
+                    auto_request=seed["auto_request"],
+                    enabled=seed["name"] in enabled,
+                )
+            )
 
 
 # ── 원장 헬퍼 ─────────────────────────────────────────────

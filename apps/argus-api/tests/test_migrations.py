@@ -3,6 +3,8 @@
 from alembic import command
 from sqlalchemy import create_engine, inspect, text
 
+from app.detection.rules import validate_rule
+
 from conftest import alembic_config, create_database, drop_database, requires_db
 
 SKELETON_TABLES = {
@@ -25,14 +27,27 @@ def test_skeleton_tables_created(admin_engine):
     assert tables == SKELETON_TABLES
 
 
-def test_bulk_download_rule_seeded(admin_engine):
-    # M3 — Walking Skeleton의 유일한 룰 (db-schema 3-6 [S])
-    with admin_engine.connect() as conn:
-        row = conn.execute(
-            text("SELECT rule_type, access_path, severity, enabled, condition FROM detection_rule")
-        ).one()
-    assert row[:4] == ("EVENT", "APP", "HIGH", True)
-    assert row[4]["all"][0] == {"field": "action", "op": "eq", "value": "DOWNLOAD"}
+def test_default_rules_seeded(admin_engine, seed_rules):
+    # 대량 다운로드(M3, [S]) + 야간·주말·퇴직자 계정 접속(기능 레이어 1) — db-schema 3-6
+    # 다른 테스트가 켜고 끈 상태가 아니라 마이그레이션 직후 상태(seed_rules)를 본다
+    rows = {
+        r["name"]: (r["rule_type"], r["access_path"], r["severity"], r["enabled"])
+        for r in seed_rules
+    }
+    assert rows == {
+        "대량 다운로드": ("EVENT", "APP", "HIGH", True),
+        "야간 접속": ("EVENT", "APP", "MEDIUM", True),
+        "주말 접속": ("EVENT", "APP", "LOW", True),
+        "퇴직자 계정 접속": ("EVENT", "APP", "HIGH", True),
+    }
+    bulk = next(r for r in seed_rules if r["name"] == "대량 다운로드")
+    assert bulk["condition"]["all"][0] == {"field": "action", "op": "eq", "value": "DOWNLOAD"}
+
+
+def test_seeded_rules_are_evaluable(seed_rules):
+    # 시드 룰이 해석 불가면 순찰 전체가 멈춘다(db-schema 3-7 #2) — 배포 전에 여기서 잡는다
+    for rule in seed_rules:
+        validate_rule(rule)
 
 
 def test_reference_data_seeded(admin_engine):

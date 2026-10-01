@@ -12,7 +12,7 @@ from app.detection.batch import run_batch
 from app.ledger.append import append_access_logs
 from app.models import access_log, argus_user, detection, handler, source_system
 
-from conftest import TEST_CLIENT_ADDR, make_entry
+from conftest import TEST_CLIENT_ADDR, make_entry, reset_rules
 
 PASSWORD = "test-password-1234"  # 테스트 전용 더미 값
 
@@ -23,8 +23,12 @@ def password_hash() -> str:
 
 
 @pytest.fixture(autouse=True)
-def accounts(admin_engine, password_hash):
-    """담당자 officer, 취급자 ops_park·mkt_lee (가상 인물)"""
+def accounts(admin_engine, password_hash, seed_rules):
+    """담당자 officer, 취급자 ops_park·mkt_lee (가상 인물)
+
+    룰은 대량 다운로드만 켠다 — 야간·주말 룰은 테스트 실행 시각에 따라 탐지건을 더 만든다
+    """
+    reset_rules(admin_engine, seed_rules, enabled=("대량 다운로드",))
     with admin_engine.begin() as conn:
         conn.execute(
             insert(argus_user).values(

@@ -18,6 +18,13 @@
   — 승인은 "그때까지의 행위"에 대한 판단이므로
 - 진행 중 건은 그룹당 1개 — DB의 부분 유니크 인덱스(ux_detection_open_group)가 함께 보장한다
 
+평가 대상 (2026-10-01 사용자 결정, EVENT 룰 3개 추가 때):
+- 룰은 **감시 대상 시스템(플랫폼)의 기록에만** 적용한다. Argus 자체 접속기록(출처 ARGUS)은 원장에
+  남기되(LOG-17) 룰로 평가하지 않는다 — 담당자가 밤에 검토하면 담당자 본인 건이 생기고(자기 점검),
+  취급자의 소명 제출이 다시 탐지되는 문제. 자체 기록은 접속기록 조회 화면·점검 보고서에서 본다
+- 취급자 명부가 필요한 조건(퇴직 여부)은 순찰마다 명부를 한 번 읽어 판정 — 명부에 없는 계정은
+  판정 불가로 탐지하고 상태 이력에 사유를 남긴다 (rules.evaluation_facts)
+
 자동 소명 요청 (2026-10-01 사용자 확정):
 새 탐지건은 룰의 auto_request가 켜져 있고 행위자에게 비활성이 아닌 A5 계정이 있으면
 같은 트랜잭션에서 바로 REQUESTED(1차, 요청자 = 시스템). 아니면 DETECTED로 남아 담당자가 처리.
@@ -27,13 +34,22 @@
 import logging
 from collections import defaultdict
 from dataclasses import dataclass
-from datetime import UTC, datetime, timedelta, timezone
+from datetime import UTC, datetime
 from typing import Any
 
-from sqlalchemy import Connection, Engine, func, insert, select, text, update
+from sqlalchemy import Connection, Engine, func, insert, select, text, tuple_, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 
-from app.detection.rules import RuleError, applies_to_path, matches, validate_rule
+from app.detection.rules import (
+    KST,
+    ROSTER_FIELDS,
+    RuleError,
+    applies_to_path,
+    evaluation_facts,
+    matches,
+    uses_fields,
+    validate_rule,
+)
 from app.models import (
     access_log,
     argus_user,
@@ -44,11 +60,13 @@ from app.models import (
     detection_status_history,
     explanation,
     handler,
+    source_system,
 )
 
 logger = logging.getLogger(__name__)
 
-KST = timezone(timedelta(hours=9))  # 판정 기준 시간대 — 한국은 서머타임이 없어 고정 오프셋
+SELF_SOURCE = "ARGUS"  # Argus 자체 접속기록 — 룰 평가 대상 아님 (모듈 설명)
+UNREGISTERED_NOTE = "취급자 명부에 없는 계정 — 퇴직 여부를 판정할 수 없어 탐지"
 MAX_LOGS = 10_000  # 한 번에 처리할 최대 기록 수 — 밀려 있으면 쉬지 않고 다음 순찰 (2026-10-01 결정)
 OPEN_STATUSES = ("DETECTED", "REQUESTED", "SUBMITTED", "REJECTED")
 # 순찰은 한 번에 하나만 — worker가 여러 개 떠도 이 잠금을 잡은 쪽만 돈다
@@ -65,6 +83,7 @@ _LOG_COLUMNS = (
     access_log.c.data_category,
     access_log.c.result,
     access_log.c.subject_count,
+    source_system.c.code.label("source_code"),
 )
 
 
@@ -183,29 +202,47 @@ def _evaluate(conn: Connection, run_id: int, from_id: int, to_id: int) -> tuple[
     logs = (
         conn.execute(
             select(*_LOG_COLUMNS)
+            .join(source_system, source_system.c.id == access_log.c.source_system_id)
             .where(access_log.c.id > from_id, access_log.c.id <= to_id)
             .order_by(access_log.c.id)
         )
         .mappings()
         .all()
     )
+    # 순찰한 건수는 범위 전체(밀림 판단·실행 이력), 룰 평가는 감시 대상 시스템의 기록만
+    targets = [log for log in logs if log["source_code"] != SELF_SOURCE]
+    roster = _load_roster(conn, targets)
+    facts = [evaluation_facts(log, roster) for log in targets]
 
     detected = 0
     for rule in rules:
         groups: dict[tuple[int, str, str], list[Any]] = defaultdict(list)
-        for log in logs:
-            if applies_to_path(rule["access_path"], log["access_path"]) and matches(
-                rule["condition"], log
+        for fact in facts:
+            if applies_to_path(rule["access_path"], fact["access_path"]) and matches(
+                rule["condition"], fact
             ):
                 key = (
-                    log["source_system_id"],
-                    log["actor_login_id"],
-                    group_bucket(log["occurred_at"]),
+                    fact["source_system_id"],
+                    fact["actor_login_id"],
+                    group_bucket(fact["occurred_at"]),
                 )
-                groups[key].append(log)
+                groups[key].append(fact)
         for key, matched in groups.items():
             detected += _attach(conn, run_id, rule, key, matched)
     return len(logs), detected
+
+
+def _load_roster(conn: Connection, logs: list[Any]) -> dict[tuple[int, str], datetime | None]:
+    """이번 범위의 행위자들에 대한 명부 — (출처, 계정) → 퇴직 시각(재직 중이면 None)"""
+    actors = {(log["source_system_id"], log["actor_login_id"]) for log in logs}
+    if not actors:
+        return {}
+    rows = conn.execute(
+        select(handler.c.source_system_id, handler.c.login_id, handler.c.terminated_at).where(
+            tuple_(handler.c.source_system_id, handler.c.login_id).in_(actors)
+        )
+    )
+    return {(r.source_system_id, r.login_id): r.terminated_at for r in rows}
 
 
 def _attach(conn: Connection, run_id: int, rule: Any, key: tuple, logs: list[Any]) -> int:
@@ -264,7 +301,7 @@ def _attach(conn: Connection, run_id: int, rule: Any, key: tuple, logs: list[Any
                 to_status="DETECTED",
                 round=0,
                 actor_user_id=None,  # 시스템(탐지 배치)
-                comment=f"탐지 배치 #{run_id}",
+                comment=_detected_comment(run_id, rule, logs),
             )
         )
         if rule["auto_request"] and _can_receive_request(conn, source_system_id, actor):
@@ -277,6 +314,14 @@ def _attach(conn: Connection, run_id: int, rule: Any, key: tuple, logs: list[Any
     )
     _refresh_summary(conn, detection_id)
     return 1 if created else 0
+
+
+def _detected_comment(run_id: int, rule: Any, logs: list[Any]) -> str:
+    comment = f"탐지 배치 #{run_id}"
+    # 그룹의 행위자는 하나라 명부 등록 여부도 같다 — 판정 불가로 탐지했다면 담당자가 알 수 있게
+    if uses_fields(rule["condition"], ROSTER_FIELDS) and not logs[0]["actor_registered"]:
+        comment += f" — {UNREGISTERED_NOTE}"
+    return comment
 
 
 def _can_receive_request(conn: Connection, source_system_id: int, actor: str) -> bool:

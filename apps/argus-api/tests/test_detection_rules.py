@@ -1,8 +1,17 @@
 """탐지 룰 형식 검사·조건식 판정 (db-schema 3-6)"""
 
+from datetime import UTC, datetime, timedelta, timezone
+
 import pytest
 
-from app.detection.rules import RuleError, applies_to_path, matches, validate_rule
+from app.detection.rules import (
+    RuleError,
+    applies_to_path,
+    evaluation_facts,
+    matches,
+    uses_fields,
+    validate_rule,
+)
 
 BULK_DOWNLOAD = {
     "all": [
@@ -119,3 +128,96 @@ def test_unevaluable_rules_are_rejected(bad):
 
 def test_seed_rule_shape_is_valid():
     validate_rule(rule())  # 마이그레이션 0004의 대량 다운로드 룰과 같은 조건식
+
+
+# ── 시각·요일·퇴직 여부 (기능 레이어 1) ────────────────────
+
+KST = timezone(timedelta(hours=9))
+NIGHT = {"all": [{"field": "occurred_time", "op": "between", "value": ["22:00", "06:00"]}]}
+OFFICE_HOURS = {"all": [{"field": "occurred_time", "op": "between", "value": ["09:00", "18:00"]}]}
+WEEKEND = {"all": [{"field": "occurred_weekday", "op": "in", "value": ["SAT", "SUN"]}]}
+TERMINATED = {"all": [{"field": "actor_terminated_at_or_before", "op": "eq", "value": True}]}
+
+
+def facts_at(occurred_at: datetime, roster=None, actor="ops_park") -> dict:
+    entry = log(occurred_at=occurred_at, source_system_id=1, actor_login_id=actor)
+    return evaluation_facts(entry, {(1, "ops_park"): None} if roster is None else roster)
+
+
+def test_facts_use_korean_time():
+    facts = facts_at(datetime(2026, 10, 2, 15, 30, tzinfo=UTC))  # 금 15:30 UTC = 토 00:30 KST
+    assert facts["occurred_time"] == "00:30" and facts["occurred_weekday"] == "SAT"
+
+
+@pytest.mark.parametrize(
+    ("hhmm", "night", "office"),
+    [
+        ((21, 59), False, False),
+        ((22, 0), True, False),
+        ((0, 0), True, False),
+        ((5, 59), True, False),
+        ((6, 0), False, False),
+        ((9, 0), False, True),  # 시작 포함
+        ((17, 59), False, True),
+        ((18, 0), False, False),  # 끝 미포함
+    ],
+)
+def test_time_range_includes_start_excludes_end(hhmm, night, office):
+    facts = facts_at(datetime(2026, 9, 29, *hhmm, tzinfo=KST))
+    assert matches(NIGHT, facts) is night
+    assert matches(OFFICE_HOURS, facts) is office
+
+
+def test_weekday_condition():
+    assert matches(WEEKEND, facts_at(datetime(2026, 10, 4, 12, 0, tzinfo=KST)))  # 일
+    assert not matches(WEEKEND, facts_at(datetime(2026, 10, 5, 12, 0, tzinfo=KST)))  # 월
+
+
+def test_terminated_is_judged_at_the_time_of_access():
+    terminated_at = datetime(2026, 9, 30, 18, 0, tzinfo=KST)
+    roster = {(1, "ops_park"): terminated_at}
+    assert not matches(TERMINATED, facts_at(terminated_at - timedelta(seconds=1), roster))
+    assert matches(TERMINATED, facts_at(terminated_at, roster))  # 퇴직 시각 포함
+    assert not matches(TERMINATED, facts_at(terminated_at, {(1, "ops_park"): None}))  # 재직 중
+
+
+def test_actor_missing_from_roster_counts_as_terminated():
+    facts = facts_at(datetime(2026, 9, 30, 10, 0, tzinfo=KST), roster={}, actor="ghost_kim")
+    assert facts["actor_registered"] is False
+    assert matches(TERMINATED, facts)  # 판정 불가 → 탐지 (2026-10-01 사용자 결정)
+
+
+def test_uses_fields_sees_nested_conditions():
+    nested = {"any": [{"all": TERMINATED["all"]}, BULK_DOWNLOAD["all"][0]]}
+    assert uses_fields(nested, frozenset({"actor_terminated_at_or_before"}))
+    assert not uses_fields(BULK_DOWNLOAD, frozenset({"actor_terminated_at_or_before"}))
+
+
+@pytest.mark.parametrize(
+    "bad",
+    [
+        rule({"all": [{"field": "occurred_time", "op": "between", "value": ["22:00"]}]}),
+        rule({"all": [{"field": "occurred_time", "op": "between", "value": ["24:00", "06:00"]}]}),
+        rule({"all": [{"field": "occurred_time", "op": "between", "value": ["9:00", "18:00"]}]}),
+        rule({"all": [{"field": "occurred_time", "op": "between", "value": ["06:00", "06:00"]}]}),
+        rule({"all": [{"field": "occurred_time", "op": "eq", "value": "22:00"}]}),
+        rule({"all": [{"field": "occurred_weekday", "op": "in", "value": ["SATURDAY"]}]}),
+        rule({"all": [{"field": "occurred_weekday", "op": "in", "value": []}]}),
+        rule({"all": [{"field": "actor_terminated_at_or_before", "op": "eq", "value": False}]}),
+        rule({"all": [{"field": "actor_terminated_at_or_before", "op": "eq", "value": 1}]}),
+    ],
+    ids=[
+        "one-bound",
+        "24h",
+        "no-zero-pad",
+        "same-bounds",
+        "time-eq",
+        "weekday-name",
+        "no-weekday",
+        "terminated-false",
+        "terminated-int",
+    ],
+)
+def test_unevaluable_time_and_actor_conditions(bad):
+    with pytest.raises(RuleError):
+        validate_rule(bad)
