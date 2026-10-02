@@ -46,9 +46,35 @@ def read_password(env_name: str | None) -> str:
     return password
 
 
-def create_officer(conn, login_id: str, password: str) -> None:
+def create_officer(conn, login_id: str, password: str) -> str:
+    """담당자 계정 생성. 돌려주는 값: "created" 또는 "promoted"
+
+    플랫폼 백오피스 아이디 = Argus 아이디 원칙(2026-10-02 사용자 결정): 담당자도 플랫폼 계정을
+    같은 아이디로 가진다. 플랫폼 시드 → 취급자 동기화가 먼저 돌면 그 아이디로 **로그인할 수 없는
+    A5(취급자) 계정**이 이미 생겨 있다 → 한 번도 로그인한 적 없는 그 계정만 담당자로 전환한다.
+    명부 연결(handler_id)은 남긴다 — 플랫폼에서 퇴직 처리되면 Argus 담당자 계정도 함께 막힌다.
+    실제로 쓰던 취급자 계정(로그인 이력 있음)은 바꾸지 않는다 — 권한 변경은 사람이 따로 판단.
+    """
     if not _LOGIN_ID.fullmatch(login_id):
         raise UsageError("login_id는 공백 없는 출력 가능 ASCII 1~64자")
+    existing = (
+        conn.execute(
+            select(argus_user.c.role, argus_user.c.last_login_at).where(
+                argus_user.c.login_id == login_id
+            )
+        )
+        .mappings()
+        .first()
+    )
+    if existing is not None:
+        if existing["role"] != "HANDLER" or existing["last_login_at"] is not None:
+            raise UsageError(f"이미 있는 계정: {login_id}")
+        conn.execute(
+            update(argus_user)
+            .where(argus_user.c.login_id == login_id)
+            .values(role="OFFICER", password_hash=hash_password(password), failed_login_count=0)
+        )
+        return "promoted"
     try:
         conn.execute(
             insert(argus_user).values(
@@ -57,6 +83,7 @@ def create_officer(conn, login_id: str, password: str) -> None:
         )
     except IntegrityError:
         raise UsageError(f"이미 있는 계정: {login_id}") from None
+    return "created"
 
 
 def set_password(conn, login_id: str, password: str) -> None:
@@ -98,7 +125,10 @@ def main(argv: list[str]) -> int:
         password = None if args.command == "unlock" else read_password(args.password_env)
         with engine.begin() as conn:
             if args.command == "create-officer":
-                create_officer(conn, args.login_id, password)
+                if create_officer(conn, args.login_id, password) == "promoted":
+                    print(
+                        "동기화로 생긴(로그인 이력 없는) 취급자 계정을 담당자 계정으로 전환합니다"
+                    )
             elif args.command == "set-password":
                 set_password(conn, args.login_id, password)
             else:

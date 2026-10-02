@@ -3,7 +3,7 @@
 import { useRouter } from "next/navigation";
 import { type FormEvent, useState } from "react";
 
-import { api, errorMessage } from "@/lib/api";
+import { api, errorMessage, safeAdminPath } from "@/lib/api";
 
 export default function LoginPage() {
   const router = useRouter();
@@ -21,7 +21,8 @@ export default function LoginPage() {
         method: "POST",
         body: JSON.stringify({ login_id: form.get("login_id"), password: form.get("password") }),
       });
-      router.replace("/admin/members");
+      // 로그인 전에 보려던 관리자 화면으로 (예: Argus 소명의 관련 티켓 링크) — 내부 경로만
+      router.replace(safeAdminPath(new URLSearchParams(window.location.search).get("next")));
     } catch (e) {
       setError(errorMessage(e));
     } finally {

@@ -55,7 +55,7 @@ Walking Skeleton이 관통하는 시나리오(CLAUDE.md 6절)를 두 화면으�
 → 담당자 확인(마스킹) → 취급자 소명 제출 → 담당자 반려 → 재요청(2차) → 재제출 → 승인
 ```
 
-**① Argus 계정 준비** — 담당자(A4) 계정은 직접 만들고, 취급자(A5) 계정은 플랫폼에서 자동 동기화되지만 비밀번호가 없어 설정해야 한다. 비밀번호는 실행 후 입력창에서 입력한다(12자 이상, 셸 기록에 남지 않게 명령줄에 쓰지 않음).
+**① Argus 계정 준비** — 담당자(A4) 계정은 직접 만들고, 취급자(A5) 계정은 플랫폼에서 자동 동기화되지만 비밀번호가 없어 설정해야 한다. 비밀번호는 실행 후 입력창에서 입력한다(12자 이상, 셸 기록에 남지 않게 명령줄에 쓰지 않음). **플랫폼 백오피스 아이디 = Argus 아이디** 원칙에 따라 담당자도 플랫폼에 같은 아이디(`officer`, 시드 취급자와 같은 비밀번호)의 계정이 있다 — 동기화로 Argus에 먼저 생긴 `officer` 취급자 계정(로그인 불가)은 아래 `create-officer`가 담당자 계정으로 전환한다.
 
 ```bash
 winpty docker compose exec argus-api python -m app.scripts.users create-officer officer   # 담당자
@@ -89,10 +89,10 @@ docker compose exec argus-worker python -m app.worker --once   # detected=1 이�
 | 순서 | 창 | 계정 | 할 일 | 상태 |
 |---|---|---|---|---|
 | 1 | 일반 | `officer` | 탐지건 목록에서 ops_park의 "대량 다운로드" 건 열기 — 정보주체가 `member_10***`로 가려져 있고 1차 요청자가 시스템 | `REQUESTED` |
-| 2 | 시크릿 | `ops_park` | 내 소명 요청 → 소명 내용 입력 → (선택) **근거자료 첨부**(PNG·JPG·PDF, 5MB, 최대 3개 — 결재 문서·요청 메일 캡처 등) → **제출** | `SUBMITTED` |
+| 2 | 시크릿 | `ops_park` | 내 소명 요청 → 소명 내용 입력 → (선택) **관련 업무 티켓** 입력(플랫폼 1:1 문의 번호, 예: `INQ-12`, 최대 3개) → (선택) **근거자료 첨부**(PNG·JPG·PDF, 5MB, 최대 3개 — 결재 문서·요청 메일 캡처 등) → **제출** | `SUBMITTED` |
 | 3 | 일반 | `officer` | 반려 사유 입력 → **반려** → **재요청** | `REJECTED` → `REQUESTED`(2차) |
 | 4 | 시크릿 | `ops_park` | 2차 소명 **제출** | `SUBMITTED` |
-| 5 | 일반 | `officer` | **승인** — 상세 하단에 차수별 소명(첨부 포함 — 이름을 누르면 내려받기, 다운로드도 Argus 자체 접속기록)과 상태 이력이 남는다 | `APPROVED`(종결) |
+| 5 | 일반 | `officer` | **승인** — 상세 하단에 차수별 소명(첨부 포함 — 이름을 누르면 내려받기, 다운로드도 Argus 자체 접속기록)과 상태 이력이 남는다. 관련 티켓의 **플랫폼에서 보기**를 누르면 플랫폼 문의 상세가 새 탭으로 열린다(플랫폼에 `officer`로 로그인돼 있지 않으면 로그인 후 바로 그 문의로 이동 — 그 열람도 플랫폼 접속기록으로 Argus에 남는다) | `APPROVED`(종결) |
 
 - 갈림길: 1에서 오탐이라고 판단하면 사유를 적고 **요청 취소** → `DISMISSED`(종결)
 - 취급자는 자기 건만 볼 수 있다. 다른 취급자 계정(예: `cs_kim` — 비밀번호를 ①처럼 설정)으로 로그인하면 이 건은 목록에 없다
@@ -144,7 +144,7 @@ bash scripts/e2e.sh
 | argus-api | `127.0.0.1:18000` | 수집 API `POST /ingest/v1/access-logs`, 취급자 동기화 `POST /ingest/v1/handler-events`, 로그인 `POST /api/auth/login`, `GET /healthz`, API 문서 `/docs`. `/api` 요청은 Argus 자체 접속기록(ARGUS 출처)으로 원장에 기록 |
 | argus-worker | — | 탐지 배치: `setting.detection_interval_min`(기본 5분)마다 원장을 순찰해 룰에 걸린 기록으로 탐지건 생성 + 자동 소명 요청 |
 | platform-migrate | — | 기동 시 1회 실행: 플랫폼 Alembic 마이그레이션 후 종료 |
-| platform-seed | — | 기동 시 1회 실행: 가상 회원 500명·취급자 5명(비어 있을 때만), 동의 이력이 없는 회원에게 가입 시점 동의 이력, 주문이 없으면 가상 주문 300건·환불계좌 60개(암호화), 문의가 없으면 가상 문의 40건(⅔ 답변 완료) 후 종료 |
+| platform-seed | — | 기동 시 1회 실행: 가상 회원 500명·취급자 5명(비어 있을 때만), 동의 이력이 없는 회원에게 가입 시점 동의 이력, 주문이 없으면 가상 주문 300건·환불계좌 60개(암호화), 문의가 없으면 가상 문의 40건(⅔ 답변 완료), 담당자 플랫폼 계정 `officer`가 없으면 생성 후 종료 |
 | platform-api | `127.0.0.1:18001` | 고객 API `/shop/*`(접속기록 대상 아님), 관리자 로그인 `POST /admin/auth/login`, 회원 목록 `GET /admin/members`, CSV `GET /admin/members/export`, API 문서 `/docs`. 관리자 라우트 요청은 접속기록으로 outbox에 적재 |
 | platform-relay | — | outbox → Argus 전송(HMAC 서명). 2초 주기, 실패 시 1분→최대 1시간 백오프. 플랫폼 쪽에서 유일하게 Argus 네트워크에 붙는다 |
 

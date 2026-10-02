@@ -29,7 +29,7 @@
 from typing import Annotated
 
 from fastapi import APIRouter, Query, Request
-from pydantic import BaseModel, StringConstraints
+from pydantic import BaseModel, BeforeValidator, Field, StringConstraints
 from sqlalchemy import Connection, and_, func, insert, select, update
 
 from app.agent import access_log, access_log_exempt, record_subject_count
@@ -57,6 +57,15 @@ RequiredText = Annotated[
     str, StringConstraints(strip_whitespace=True, min_length=1, max_length=1000)
 ]
 OptionalText = Annotated[str, StringConstraints(strip_whitespace=True, max_length=1000)] | None
+
+MAX_TICKETS = 3
+# 플랫폼 1:1 문의 티켓 번호 — INQ-{문의 번호}. 링크 주소에 그대로 들어가므로 형식을 엄격히
+TicketId = Annotated[
+    str,
+    # 공백·대소문자는 정리해 준 뒤 형식 검사 (inq-7 → INQ-7)
+    BeforeValidator(lambda v: v.strip().upper() if isinstance(v, str) else v),
+    StringConstraints(pattern=r"^INQ-[1-9][0-9]{0,9}$"),
+]
 
 
 def _not_found() -> ApiError:
@@ -157,7 +166,7 @@ def get_detection(detection_id: int, request: Request, user: CurrentUser) -> dic
         if row is None:
             raise _not_found()
         logs = _logs(conn, detection_id)
-        explanations = _explanations(conn, detection_id, user)
+        explanations = _explanations(conn, detection_id, user, request.app.state.platform_admin_url)
         history = _history(conn, detection_id)
 
     record_subject_count(sum(len(log["subjects"]) for log in logs))
@@ -249,7 +258,9 @@ def _attachments_by_explanation(conn: Connection, explanation_ids: list[int]) ->
     return grouped
 
 
-def _explanations(conn: Connection, detection_id: int, user: AuthenticatedUser) -> list[dict]:
+def _explanations(
+    conn: Connection, detection_id: int, user: AuthenticatedUser, platform_url: str
+) -> list[dict]:
     requester, submitter, reviewer = (
         argus_user.alias(n) for n in ("requester", "submitter", "reviewer")
     )
@@ -284,6 +295,11 @@ def _explanations(conn: Connection, detection_id: int, user: AuthenticatedUser) 
             "reviewed_at": r["reviewed_at"],
             "review_result": r["review_result"],
             "review_comment": r["review_comment"],
+            # 관련 업무 티켓 — 내용은 Argus에 없고, 링크로 플랫폼 관리자 화면에서 확인한다
+            "tickets": [
+                {"ticket_id": t, "url": f"{platform_url}/inquiries/{t.removeprefix('INQ-')}"}
+                for t in r["ticket_ids"] or []
+            ],
             # 담당자에게는 제출된 차수의 첨부만 — 취급자가 고치는 중인 초안은 숨긴다
             "attachments": (
                 attachments.get(r["id"], [])
@@ -329,6 +345,9 @@ class DismissBody(BaseModel):
 
 class SubmitBody(BaseModel):
     content: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=5000)]
+    # 관련 업무 티켓(1:1 문의) — 소명 내용과 별도 칸, 최대 3개. 형식만 검사하고 내용 검증은
+    # 취급자·담당자가 한다(Argus는 티켓 내용을 갖지 않음 — 절대 규칙 #3)
+    ticket_ids: Annotated[list[TicketId], Field(max_length=MAX_TICKETS)] = []
 
 
 class ReviewBody(BaseModel):
@@ -340,7 +359,12 @@ class RejectBody(BaseModel):
 
 
 def _transition(
-    request: Request, user: AuthenticatedUser, detection_id: int, action: str, text: str | None
+    request: Request,
+    user: AuthenticatedUser,
+    detection_id: int,
+    action: str,
+    text: str | None,
+    ticket_ids: list[str] | None = None,
 ) -> dict:
     with request.app.state.engine.begin() as conn:
         # 행을 잠그고 확인 — 탐지 배치가 같은 건에 기록을 보태는 순간과 겹치지 않게
@@ -368,7 +392,9 @@ def _transition(
         if action == "dismiss":
             values["close_reason"] = text
         conn.execute(update(detection).where(detection.c.id == detection_id).values(**values))
-        _record_explanation(conn, user, detection_id, action, row["round"], new_round, text)
+        _record_explanation(
+            conn, user, detection_id, action, row["round"], new_round, text, ticket_ids
+        )
         conn.execute(
             insert(detection_status_history).values(
                 detection_id=detection_id,
@@ -382,7 +408,9 @@ def _transition(
     return {"id": detection_id, "status": transition.to_status, "round": new_round}
 
 
-def _record_explanation(conn, user, detection_id, action, round_, new_round, text) -> None:
+def _record_explanation(
+    conn, user, detection_id, action, round_, new_round, text, ticket_ids=None
+) -> None:
     """소명은 차수별 한 줄 — 요청 시 생성, 제출 시 채움, 검토 시 채움 (db-schema 3-4)"""
     current = (explanation.c.detection_id == detection_id) & (explanation.c.round == round_)
     if action == "request":
@@ -398,7 +426,13 @@ def _record_explanation(conn, user, detection_id, action, round_, new_round, tex
         conn.execute(
             update(explanation)
             .where(current)
-            .values(submitted_by=user.id, submitted_at=func.now(), content=text)
+            .values(
+                submitted_by=user.id,
+                submitted_at=func.now(),
+                content=text,
+                # 같은 번호를 두 번 적어도 한 번만 (입력 순서 유지)
+                ticket_ids=list(dict.fromkeys(ticket_ids or [])),
+            )
         )
     elif action in ("approve", "reject"):
         conn.execute(
@@ -430,7 +464,7 @@ def dismiss(detection_id: int, body: DismissBody, request: Request, user: Curren
 @router.post("/{detection_id}/submit")
 @access_log_exempt(_EXEMPT_TRANSITION)
 def submit(detection_id: int, body: SubmitBody, request: Request, user: CurrentUser) -> dict:
-    return _transition(request, user, detection_id, "submit", body.content)
+    return _transition(request, user, detection_id, "submit", body.content, body.ticket_ids)
 
 
 @router.post("/{detection_id}/approve")

@@ -286,6 +286,35 @@ def seed_inquiries(conn: Connection) -> bool:
     return True
 
 
+# 정보보호 담당자의 플랫폼 계정 — Argus 담당자와 **같은 아이디** (2026-10-02 사용자 결정:
+# 플랫폼 백오피스 아이디 = Argus 아이디). 소명의 관련 티켓 링크로 플랫폼 문의를 열어 볼 때 쓴다.
+# 이 계정의 플랫폼 열람도 접속기록으로 Argus에 남는다 — 감시자도 감시된다.
+# 기준선 시드(평소 조회 패턴)에는 넣지 않는다 — 담당자는 일상적으로 회원을 조회하지 않는다
+OFFICER_OPERATOR = ("officer", "윤서진", "OPS", "ADMIN")
+
+
+def ensure_officer_operator(conn: Connection, operator_password: str) -> bool:
+    """담당자 플랫폼 계정이 없으면 만든다 — seed()와 따로 매번(이미 시드된 개발 스택에도 생기게)"""
+    login_id, name, team, role = OFFICER_OPERATOR
+    exists_ = conn.execute(select(operator.c.id).where(operator.c.login_id == login_id)).first()
+    if exists_ is not None:
+        return False
+    row = conn.execute(
+        insert(operator)
+        .values(
+            login_id=login_id,
+            password_hash=hash_password(operator_password),
+            name=name,
+            team=team,
+            role=role,
+        )
+        .returning(operator)
+    ).one()
+    # 다른 취급자와 같이 Argus 명부로 동기화 — 같은 아이디의 Argus 담당자 계정과 이어진다
+    enqueue(conn, "HANDLER", handler_event("HANDLER_CREATED", row, row.created_at))
+    return True
+
+
 def main() -> int:
     logging.basicConfig(level=logging.INFO, format="%(levelname)s [seed] %(message)s")
     settings = Settings()
@@ -304,6 +333,7 @@ def main() -> int:
             backfilled = backfill_consents(conn)
             commerce = seed_commerce(conn, FieldCipher(settings.require_payment_key()))
             inquiries = seed_inquiries(conn)
+            officer = ensure_officer_operator(conn, password)
     finally:
         engine.dispose()
 
@@ -317,6 +347,8 @@ def main() -> int:
         logger.info("seeded %d orders, %d refund accounts", ORDER_COUNT, REFUND_ACCOUNT_COUNT)
     if inquiries:
         logger.info("seeded %d inquiries", INQUIRY_COUNT)
+    if officer:
+        logger.info("created privacy officer operator: %s", OFFICER_OPERATOR[0])
     return 0
 
 

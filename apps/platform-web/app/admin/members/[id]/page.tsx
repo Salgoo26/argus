@@ -6,6 +6,7 @@ import { useCallback, useEffect, useState } from "react";
 import { AppHeader } from "@/components/app-header";
 import {
   ApiError,
+  adminLoginPath,
   api,
   errorMessage,
   formatDate,
@@ -49,7 +50,7 @@ export default function MemberDetailPage() {
 
   const handleError = useCallback(
     (e: unknown) => {
-      if (e instanceof ApiError && e.status === 401) router.replace("/admin/login");
+      if (e instanceof ApiError && e.status === 401) router.replace(adminLoginPath());
       else setError(errorMessage(e));
     },
     [router],

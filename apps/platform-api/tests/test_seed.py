@@ -183,3 +183,19 @@ def test_inquiry_seed_mixes_open_and_answered(engine):
     statuses = {s for s, _ in rows}
     assert statuses == {"OPEN", "ANSWERED"}
     assert all((s == "ANSWERED") == (by is not None) for s, by in rows)
+
+
+def test_officer_operator_has_same_id_as_argus_officer_and_is_synced(engine, client):
+    from app.scripts.seed import OFFICER_OPERATOR, ensure_officer_operator
+
+    from conftest import login, outbox_payloads
+
+    _seed(engine)
+    with engine.begin() as conn:
+        assert ensure_officer_operator(conn, TEST_PASSWORD) is True
+        assert ensure_officer_operator(conn, TEST_PASSWORD) is False  # 있으면 그대로
+
+    assert OFFICER_OPERATOR[0] == "officer"  # README의 Argus 담당자 아이디와 같다
+    assert login(client, "officer").status_code == 200
+    synced = [p["handler"]["login_id"] for p in outbox_payloads(engine, "HANDLER")]
+    assert synced.count("officer") == 1
