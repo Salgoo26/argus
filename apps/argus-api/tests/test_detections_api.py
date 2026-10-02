@@ -366,3 +366,50 @@ def test_detail_shows_business_ticket_but_not_other_context(app_engine, as_user)
     other = detect(app_engine, actor="cs_kim")  # 티켓 없는 기록
     [log] = as_user("officer").get(f"/api/detections/{other}").json()["logs"]
     assert log["ticket_id"] is None
+
+
+# ── 관련 업무 티켓 (소명과 별도 칸, 2026-10-02) ─────────────────
+
+
+def test_submit_with_related_tickets_and_officer_sees_platform_links(app_engine, as_user):
+    case = detect(app_engine)
+    handler_client = as_user("ops_park")
+    res = act(
+        handler_client,
+        case,
+        "submit",
+        content="CS 요청으로 확인",
+        ticket_ids=["INQ-12", " inq-7 ", "INQ-12"],  # 공백·소문자 정리, 중복은 한 번만
+    )
+    assert res.status_code == 200
+
+    [round1] = as_user("officer").get(f"/api/detections/{case}").json()["explanations"]
+    assert round1["tickets"] == [
+        {"ticket_id": "INQ-12", "url": "http://localhost:3000/admin/inquiries/12"},
+        {"ticket_id": "INQ-7", "url": "http://localhost:3000/admin/inquiries/7"},
+    ]
+
+
+@pytest.mark.parametrize(
+    "tickets",
+    [
+        ["12"],
+        ["INQ-0"],
+        ["INQ-12/../../members"],
+        ["javascript:alert(1)"],
+        ["INQ-1", "INQ-2", "INQ-3", "INQ-4"],
+    ],
+    ids=["no-prefix", "zero", "path", "scheme", "too-many"],
+)
+def test_invalid_tickets_are_rejected(app_engine, as_user, tickets):
+    case = detect(app_engine)
+    res = act(as_user("ops_park"), case, "submit", content="소명", ticket_ids=tickets)
+    assert res.status_code == 400
+    assert status_of(app_engine, case)[0] == "REQUESTED"  # 제출되지 않음
+
+
+def test_tickets_are_optional(app_engine, as_user):
+    case = detect(app_engine)
+    assert act(as_user("ops_park"), case, "submit", content="소명").status_code == 200
+    [round1] = as_user("officer").get(f"/api/detections/{case}").json()["explanations"]
+    assert round1["tickets"] == []

@@ -142,3 +142,28 @@ export type Inquiry = {
 };
 
 export const INQUIRY_STATUS: Record<string, string> = { OPEN: "답변 대기", ANSWERED: "답변 완료" };
+
+// ── 관리자 로그인 후 돌아갈 주소 ─────────────────────────
+// Argus 소명의 관련 티켓 링크로 /admin/inquiries/12에 왔는데 로그인이 안 돼 있으면,
+// 로그인한 뒤 그 문의로 바로 돌아간다. 돌아갈 주소는 **같은 출처의 /admin/ 경로만** —
+// next=https://evil.example 같은 값으로 외부 사이트에 튕기는 오픈 리다이렉트를 막는다.
+const ADMIN_HOME = "/admin/members";
+
+export function safeAdminPath(raw: string | null): string {
+  if (!raw || !raw.startsWith("/") || raw.startsWith("//") || raw.includes("\\")) return ADMIN_HOME;
+  try {
+    const url = new URL(raw, window.location.origin);
+    if (url.origin !== window.location.origin) return ADMIN_HOME;
+    if (!url.pathname.startsWith("/admin/") || url.pathname.startsWith("/admin/login")) {
+      return ADMIN_HOME;
+    }
+    return url.pathname + url.search;
+  } catch {
+    return ADMIN_HOME;
+  }
+}
+
+export function adminLoginPath(): string {
+  const here = window.location.pathname + window.location.search;
+  return `/admin/login?next=${encodeURIComponent(here)}`;
+}

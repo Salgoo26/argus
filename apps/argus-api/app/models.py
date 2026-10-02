@@ -166,6 +166,7 @@ explanation = Table(
     Column("reviewed_at", DateTime(timezone=True)),
     Column("review_result", String(16)),
     Column("review_comment", Text),
+    Column("ticket_ids", ARRAY(String(32)), nullable=False),
 )
 
 setting = Table(

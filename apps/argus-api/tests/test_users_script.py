@@ -116,3 +116,39 @@ def test_short_password_is_refused(admin_engine, monkeypatch, password):
 def test_unknown_account(admin_engine):
     assert run("set-password", "nobody") == 1
     assert users.main(["unlock", "nobody"]) == 1
+
+
+# ── 플랫폼 아이디 = Argus 아이디 원칙 (2026-10-02) ─────────────────
+
+
+def test_create_officer_promotes_unused_synced_handler_account(admin_engine):
+    # 플랫폼 시드 → 동기화로 담당자 아이디의 A5 계정(로그인 불가)이 먼저 생긴 경우
+    add_synced_handler(admin_engine, login_id="officer")
+    synced = row(admin_engine, "officer")
+
+    assert run("create-officer", "officer") == 0
+
+    promoted = row(admin_engine, "officer")
+    assert promoted["role"] == "OFFICER" and promoted["id"] == synced["id"]
+    assert verify_password(promoted["password_hash"], NEW_PASSWORD)
+    # 명부 연결은 남긴다 — 플랫폼 퇴직 동기화가 담당자 계정도 막도록
+    assert promoted["handler_id"] == synced["handler_id"]
+
+
+def test_handler_account_in_use_is_not_promoted(admin_engine):
+    add_synced_handler(admin_engine, login_id="ops_park")
+    with admin_engine.begin() as conn:
+        conn.execute(
+            update(argus_user)
+            .where(argus_user.c.login_id == "ops_park")
+            .values(last_login_at=datetime.now(UTC))
+        )
+
+    assert run("create-officer", "ops_park") == 1
+    assert row(admin_engine, "ops_park")["role"] == "HANDLER"
+
+
+def test_promotion_does_not_revive_disabled_account(admin_engine):
+    add_synced_handler(admin_engine, login_id="officer", status="DISABLED")
+    assert run("create-officer", "officer") == 0
+    assert row(admin_engine, "officer")["status"] == "DISABLED"

@@ -6,6 +6,7 @@ import { useCallback, useEffect, useState } from "react";
 
 import { AppHeader, useMe } from "@/components/app-header";
 import { AttachmentList, AttachmentUploader } from "@/components/attachments";
+import { TicketInput } from "@/components/ticket-input";
 import { api, type CaseDetail } from "@/lib/api";
 import {
   ACTION_LABELS,
@@ -35,6 +36,7 @@ export default function DetectionDetailPage() {
   const [detail, setDetail] = useState<CaseDetail | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [text, setText] = useState("");
+  const [tickets, setTickets] = useState<string[]>([]);
   const [pending, setPending] = useState(false);
 
   const load = useCallback(() => {
@@ -57,9 +59,14 @@ export default function DetectionDetailPage() {
     try {
       await api(`/detections/${id}/${button.action}`, {
         method: "POST",
-        body: JSON.stringify(value ? { [button.field]: value } : {}),
+        body: JSON.stringify({
+          ...(value ? { [button.field]: value } : {}),
+          // 제출할 때만 관련 티켓을 함께 보낸다 (소명 내용과 별도 칸)
+          ...(button.action === "submit" ? { ticket_ids: tickets } : {}),
+        }),
       });
       setText("");
+      setTickets([]);
       load();
     } catch (e) {
       setError(handleError(e));
@@ -167,6 +174,7 @@ export default function DetectionDetailPage() {
                       : "요청 메시지 또는 사유·의견 (불요·요청 취소·반려는 필수)"
                   }
                 />
+                {canAttach && <TicketInput value={tickets} onChange={setTickets} />}
                 {canAttach && detail && currentRound && (
                   <AttachmentUploader
                     detectionId={detail.id}
@@ -266,6 +274,19 @@ export default function DetectionDetailPage() {
                         attachments={e.attachments}
                         onError={setError}
                       />
+                      {e.tickets.length > 0 && (
+                        <ul className="tickets">
+                          {e.tickets.map((t) => (
+                            <li key={t.ticket_id}>
+                              <span className="mono">{t.ticket_id}</span>{" "}
+                              {/* 내용은 플랫폼에서 — 새 탭, 원래 창을 조작할 수 없게(noopener) */}
+                              <a href={t.url} target="_blank" rel="noopener noreferrer">
+                                플랫폼에서 보기 ↗
+                              </a>
+                            </li>
+                          ))}
+                        </ul>
+                      )}
                     </>
                   ) : (
                     <p className="muted">제출 대기 중</p>

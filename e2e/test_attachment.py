@@ -8,8 +8,9 @@ admin_han가 회원 60명 다운로드 → 대량 다운로드 탐지 + 자동 �
 """
 
 import hashlib
+import secrets
 
-from conftest import argus_login, platform_login, run_detection_batch, wait_until
+from conftest import admin_command, argus_login, platform_login, run_detection_batch, wait_until
 
 PDF = b"%PDF-1.4\n% E2E virtual approval document\n" + b"0" * 256
 
@@ -53,7 +54,9 @@ def test_attachment_upload_submit_and_download(officer, handler_password):
     assert uploaded.status_code == 201, uploaded.text
     assert uploaded.json()["sha256"] == hashlib.sha256(PDF).hexdigest()
     submitted = handler.post(
-        f"/api/detections/{case_id}/submit", json={"content": "이벤트 발송 대상 추출 — 결재 첨부"}
+        f"/api/detections/{case_id}/submit",
+        # 관련 업무 티켓은 소명 내용과 별도 칸 — 시드 문의 1번
+        json={"content": "고객 문의 처리 중 확인 — 결재 첨부", "ticket_ids": ["INQ-1"]},
     )
     assert submitted.status_code == 200
 
@@ -78,3 +81,49 @@ def test_attachment_upload_submit_and_download(officer, handler_password):
     ).json()["items"]
     paths = [i["request_path"] for i in found]
     assert "/api/detections/{detection_id}/attachments/{attachment_id}" in paths
+
+    # ── 관련 티켓: 담당자는 링크로 플랫폼 문의를 연다 (같은 아이디 원칙) ─────
+    [ticket] = detail["explanations"][0]["tickets"]
+    assert ticket == {"ticket_id": "INQ-1", "url": "http://localhost:3000/admin/inquiries/1"}
+
+
+def test_officer_uses_same_id_on_platform():
+    """플랫폼 백오피스 아이디 = Argus 아이디 (2026-10-02 사용자 결정)
+
+    플랫폼 시드의 담당자 계정 officer가 동기화되어 Argus에 로그인할 수 없는 취급자 계정이 먼저
+    생긴다 → README대로 create-officer officer를 실행하면 담당자 계정으로 전환된다 → 같은 아이디로
+    Argus(담당자)와 플랫폼(문의 열람) 양쪽에 로그인된다.
+    """
+    password = secrets.token_urlsafe(18)
+    wait_until(
+        "플랫폼 담당자 계정 officer의 Argus 동기화",
+        lambda: True if _synced("officer") else None,
+    )
+    result = admin_command(
+        "app.scripts.users",
+        "create-officer",
+        "officer",
+        "--password-env",
+        "E2E_NEW_PASSWORD",
+        env={"E2E_NEW_PASSWORD": password},
+    )
+    assert result.returncode == 0, result.stderr
+    assert "전환" in result.stdout  # 동기화로 생긴 계정을 담당자로
+
+    argus = argus_login("officer", password)
+    assert argus.get("/api/auth/me").json()["role"] == "OFFICER"
+
+    # 소명의 티켓 링크(/admin/inquiries/1)가 여는 화면의 데이터 — 같은 아이디의 플랫폼 계정으로
+    platform = platform_login("officer")
+    inquiry = platform.get("/api/admin/inquiries/1")
+    assert inquiry.status_code == 200 and inquiry.json()["ticket_id"] == "INQ-1"
+
+
+def _synced(login_id: str) -> bool:
+    # 동기화로 생긴 A5 계정이 있으면 unlock이 "잠긴 계정이 아님"으로, 없으면 "없는 계정"으로 답한다
+    result = admin_command(
+        "app.scripts.users",
+        "unlock",
+        login_id,
+    )
+    return "없는 계정" not in result.stderr

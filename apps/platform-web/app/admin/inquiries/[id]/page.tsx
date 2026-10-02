@@ -5,7 +5,7 @@ import { useParams, useRouter } from "next/navigation";
 import { type FormEvent, useCallback, useEffect, useState } from "react";
 
 import { AppHeader } from "@/components/app-header";
-import { ApiError, api, errorMessage, formatDateTime, INQUIRY_STATUS, type Operator } from "@/lib/api";
+import { ApiError, adminLoginPath, api, errorMessage, formatDateTime, INQUIRY_STATUS, type Operator } from "@/lib/api";
 
 type InquiryDetail = {
   id: number;
@@ -33,7 +33,7 @@ export default function AdminInquiryDetailPage() {
 
   const handleError = useCallback(
     (e: unknown) => {
-      if (e instanceof ApiError && e.status === 401) router.replace("/admin/login");
+      if (e instanceof ApiError && e.status === 401) router.replace(adminLoginPath());
       else if (e instanceof ApiError && MESSAGES[e.code]) setError(MESSAGES[e.code]);
       else setError(errorMessage(e));
     },

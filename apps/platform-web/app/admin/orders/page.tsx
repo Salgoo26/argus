@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
 
 import { AppHeader } from "@/components/app-header";
-import { ApiError, api, errorMessage, formatDateTime, type Operator, won } from "@/lib/api";
+import { ApiError, adminLoginPath, api, errorMessage, formatDateTime, type Operator, won } from "@/lib/api";
 
 type AdminOrder = {
   id: number;
@@ -33,7 +33,7 @@ export default function AdminOrdersPage() {
 
   const handleError = useCallback(
     (e: unknown) => {
-      if (e instanceof ApiError && e.status === 401) router.replace("/admin/login");
+      if (e instanceof ApiError && e.status === 401) router.replace(adminLoginPath());
       else setError(errorMessage(e));
     },
     [router],

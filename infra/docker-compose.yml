@@ -214,6 +214,8 @@ services:
       # argus-web(Next.js)은 신뢰하지 않는다: 원래 요청자 IP를 붙이지 않으면서 클라이언트가 보낸
       # X-Forwarded-For는 그대로 전달하므로, 믿으면 접속지 위조가 가능해진다 (M5 PR ① 발견)
       ARGUS_TRUSTED_PROXIES: ${ARGUS_TRUSTED_PROXIES:-}
+      # 소명의 관련 티켓 → 플랫폼 문의 상세 링크의 앞부분 (브라우저가 이동, 서버 간 통신 없음)
+      ARGUS_PLATFORM_ADMIN_URL: ${ARGUS_PLATFORM_ADMIN_URL:-http://localhost:3000/admin}
     depends_on:
       argus-migrate:
         condition: service_completed_successfully

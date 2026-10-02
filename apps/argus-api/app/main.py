@@ -35,6 +35,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.state.auth_secret = settings.require_auth_secret()
     # pool_pre_ping: DB 재기동 뒤 끊긴 커넥션을 조용히 교체
     app.state.engine = create_engine(settings.database_url(), pool_pre_ping=True)
+    app.state.platform_admin_url = settings.require_platform_admin_url()
 
     install_error_handlers(app)
     app.include_router(ingest_router)

@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import { type FormEvent, useCallback, useEffect, useState } from "react";
 
 import { AppHeader } from "@/components/app-header";
-import { ApiError, api, errorMessage, type Operator } from "@/lib/api";
+import { ApiError, adminLoginPath, api, errorMessage, type Operator } from "@/lib/api";
 
 type Member = {
   id: number;
@@ -33,7 +33,7 @@ export default function MembersPage() {
 
   const handleError = useCallback(
     (e: unknown) => {
-      if (e instanceof ApiError && e.status === 401) router.replace("/admin/login");
+      if (e instanceof ApiError && e.status === 401) router.replace(adminLoginPath());
       else setError(errorMessage(e));
     },
     [router],

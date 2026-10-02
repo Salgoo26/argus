@@ -31,6 +31,10 @@ class Settings(BaseSettings):
     # 소명 첨부 파일을 두는 디렉터리 — Argus 전용 볼륨 (기능 레이어 7 ③)
     attachment_dir: str = "/data/attachments"
 
+    # 플랫폼 관리자 화면 주소 — 소명의 관련 티켓에서 플랫폼 문의 상세로 넘어가는 링크용.
+    # 서버끼리 통신하지 않는다(브라우저가 이동). 운영에서는 실제 도메인으로
+    platform_admin_url: str = "http://localhost:3000/admin"
+
     def database_url(self) -> URL:
         # URL.create는 비밀번호의 특수문자를 알아서 이스케이프한다
         return URL.create(
@@ -55,3 +59,10 @@ class Settings(BaseSettings):
         if secret is None or not secret.get_secret_value():
             return None
         return secret.get_secret_value().encode()
+
+    def require_platform_admin_url(self) -> str:
+        url = self.platform_admin_url.rstrip("/")
+        if not url.startswith(("http://", "https://")):
+            # 화면에 링크로 나간다 — javascript: 같은 스킴이 설정 실수로 들어가지 않게
+            raise ValueError("ARGUS_PLATFORM_ADMIN_URL must be an http(s) URL")
+        return url

@@ -45,6 +45,7 @@ const MESSAGES: Record<string, string> = {
   UNSUPPORTED_FILE_TYPE: "PNG·JPG·PDF 파일만 첨부할 수 있습니다.",
   TOO_MANY_ATTACHMENTS: "소명 한 차수에 최대 3개까지 첨부할 수 있습니다.",
   NOT_EDITABLE: "소명 요청 중에만 첨부를 바꿀 수 있습니다.",
+  // 관련 티켓 형식 오류는 서버가 BAD_REQUEST로 답한다 — 입력칸에서 먼저 형식을 검사한다
   ATTACHMENT_TAMPERED: "첨부 파일이 저장 뒤에 바뀌어(해시 불일치) 내려받을 수 없습니다. 관리자에게 알리세요.",
   ATTACHMENT_UNAVAILABLE: "첨부 파일을 찾을 수 없습니다.",
 };
@@ -114,6 +115,8 @@ export type Explanation = {
   review_result: "APPROVED" | "REJECTED" | null;
   review_comment: string | null;
   attachments: Attachment[]; // 담당자에게는 제출된 차수의 첨부만 온다
+  // 관련 업무 티켓 — 내용은 Argus에 없고 url로 플랫폼 관리자 화면에서 확인
+  tickets: { ticket_id: string; url: string }[];
 };
 
 export type Attachment = {
