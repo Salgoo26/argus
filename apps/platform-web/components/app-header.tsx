@@ -11,7 +11,7 @@ export function AppHeader({ me }: { me: Operator | null }) {
 
   async function logout() {
     await api("/admin/auth/logout", { method: "POST" }).catch(() => undefined);
-    router.replace("/login");
+    router.replace("/admin/login");
   }
 
   return (

@@ -21,7 +21,7 @@ export default function LoginPage() {
         method: "POST",
         body: JSON.stringify({ login_id: form.get("login_id"), password: form.get("password") }),
       });
-      router.replace("/members");
+      router.replace("/admin/members");
     } catch (e) {
       setError(errorMessage(e));
     } finally {
