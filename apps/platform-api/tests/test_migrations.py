@@ -8,7 +8,19 @@ from conftest import alembic_config, create_database, drop_database, requires_db
 
 def test_skeleton_tables_created(engine):
     tables = set(inspect(engine).get_table_names()) - {"alembic_version"}
-    assert tables == {"operator", "member", "outbox", "consent_item", "member_consent"}
+    assert tables == {
+        "operator",
+        "member",
+        "outbox",
+        "consent_item",  # 고객 화면 (0002)
+        "member_consent",
+        "product",  # 주문·결제 (0003)
+        "orders",
+        "payment",
+        "refund_account",
+        "retained_member_record",
+        "destruction_history",
+    }
 
 
 def test_outbox_pending_partial_index_exists(engine):

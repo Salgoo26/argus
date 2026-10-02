@@ -1,13 +1,20 @@
 "use client";
 
-import { useRouter } from "next/navigation";
+import Link from "next/link";
+import { usePathname, useRouter } from "next/navigation";
 
 import { api, type Operator } from "@/lib/api";
 
 const TEAMS: Record<string, string> = { CS: "CS팀", MARKETING: "마케팅팀", OPS: "운영팀" };
 
+const MENU = [
+  { href: "/admin/members", label: "회원" },
+  { href: "/admin/orders", label: "주문" },
+];
+
 export function AppHeader({ me }: { me: Operator | null }) {
   const router = useRouter();
+  const pathname = usePathname();
 
   async function logout() {
     await api("/admin/auth/logout", { method: "POST" }).catch(() => undefined);
@@ -16,9 +23,22 @@ export function AppHeader({ me }: { me: Operator | null }) {
 
   return (
     <header className="app-header">
-      <div className="brand">
-        <span className="brand-mark" />
-        커머스 관리자
+      <div className="header-left">
+        <div className="brand">
+          <span className="brand-mark" />
+          커머스 관리자
+        </div>
+        <nav className="menu">
+          {MENU.map((m) => (
+            <Link
+              key={m.href}
+              href={m.href}
+              className={pathname.startsWith(m.href) ? "menu-item active" : "menu-item"}
+            >
+              {m.label}
+            </Link>
+          ))}
+        </nav>
       </div>
       {me && (
         <div className="header-user">

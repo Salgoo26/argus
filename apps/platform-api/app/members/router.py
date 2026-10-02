@@ -1,4 +1,4 @@
-"""회원 목록·다운로드 (PLT-11, PLT-13) — 감시 대상 관리자 기능
+"""회원 목록·상세·다운로드·결제수단 조회 (PLT-11, PLT-13, PLT-16) — 감시 대상 관리자 기능
 
 접속기록: 각 라우트의 @access_log 문패 + record_subjects(조회·다운로드한 회원 PK).
 """
@@ -13,7 +13,10 @@ from sqlalchemy import func, select
 
 from app.agent import access_log, record_subjects
 from app.auth.deps import CurrentOperator
-from app.models import member
+from app.crypto import refund_account_context
+from app.errors import ApiError
+from app.models import member, orders, payment, product, refund_account
+from app.shop.refund import masked_view
 
 router = APIRouter(prefix="/admin/members")
 
@@ -105,3 +108,90 @@ def export_members(
         media_type="text/csv; charset=utf-8",
         headers={"Content-Disposition": f'attachment; filename="{filename}"'},
     )
+
+
+def _member_or_404(conn, member_id: int):
+    row = (
+        conn.execute(
+            select(
+                member.c.id,
+                member.c.name,
+                member.c.email,
+                member.c.phone,
+                member.c.address,
+                member.c.status,
+                member.c.created_at,
+            ).where(member.c.id == member_id)
+        )
+        .mappings()
+        .first()
+    )
+    if row is None:
+        raise ApiError(404, "NOT_FOUND", "member not found")
+    return row
+
+
+@router.get("/{member_id}")
+@access_log(action="READ", data_category="MEMBER_BASIC")
+def get_member(member_id: int, request: Request, _operator: CurrentOperator) -> dict:
+    """회원 상세 (PLT-11) — 환불계좌는 끝 4자리만. 전체 번호는 아래 별도 조회(결제수단)"""
+    # 대상이 정해진 조회는 업무 로직보다 먼저 기록 — 없는 회원이어도 "누구를 보려 했는지"가 남는다
+    record_subjects([member_id])
+    with request.app.state.engine.connect() as conn:
+        profile = _member_or_404(conn, member_id)
+        account = (
+            conn.execute(select(refund_account).where(refund_account.c.member_id == member_id))
+            .mappings()
+            .first()
+        )
+        order_rows = conn.execute(
+            select(
+                orders.c.id,
+                product.c.name.label("product_name"),
+                orders.c.amount,
+                orders.c.status,
+                orders.c.ordered_at,
+                payment.c.card_company,
+            )
+            .select_from(
+                orders.join(product, product.c.id == orders.c.product_id).outerjoin(
+                    payment, payment.c.order_id == orders.c.id
+                )
+            )
+            .where(orders.c.member_id == member_id)
+            .order_by(orders.c.ordered_at.desc())
+            .limit(20)
+        ).mappings()
+        recent_orders = [dict(r) for r in order_rows]
+    return {
+        **dict(profile),
+        "refund_account": masked_view(account),
+        "orders": recent_orders,
+    }
+
+
+@router.get("/{member_id}/refund-account")
+@access_log(action="READ", data_category="PAYMENT")
+def reveal_refund_account(member_id: int, request: Request, _operator: CurrentOperator) -> dict:
+    """환불계좌 전체 번호 — 데이터 유형 "결제수단"으로 기록 → Argus 결제수단 조회 룰(상)로 항상 탐지
+
+    화면의 "전체 보기"를 눌렀을 때만 부른다(기능 레이어 7 결정 7). 복호화는 이 요청 안에서만 하고
+    응답 외에는 어디에도(로그 포함) 남기지 않는다.
+    """
+    record_subjects([member_id])
+    with request.app.state.engine.connect() as conn:
+        account = (
+            conn.execute(select(refund_account).where(refund_account.c.member_id == member_id))
+            .mappings()
+            .first()
+        )
+    if account is None:
+        raise ApiError(404, "NOT_FOUND", "refund account not found")
+    number = request.app.state.cipher.decrypt(
+        account["account_number_enc"], refund_account_context(member_id)
+    )
+    return {
+        "bank_name": account["bank_name"],
+        "account_holder": account["account_holder"],
+        "account_number": number,
+    }

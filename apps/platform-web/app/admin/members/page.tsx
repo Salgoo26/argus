@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { type FormEvent, useCallback, useEffect, useState } from "react";
 
@@ -135,7 +136,9 @@ export default function MembersPage() {
                 {data?.items.map((m) => (
                   <tr key={m.id}>
                     <td className="num">{m.id}</td>
-                    <td>{m.name}</td>
+                    <td>
+                      <Link href={`/admin/members/${m.id}`}>{m.name}</Link>
+                    </td>
                     <td>{m.email}</td>
                     <td>{m.phone ?? "-"}</td>
                     <td>

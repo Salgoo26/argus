@@ -36,7 +36,10 @@ def test_seed_is_reproducible(engine):
     with engine.connect() as conn:
         first = conn.execute(select(member.c.id, member.c.name, member.c.address)).all()
     with engine.begin() as conn:
-        conn.exec_driver_sql("TRUNCATE operator, member, member_consent, outbox RESTART IDENTITY")
+        conn.exec_driver_sql(
+            "TRUNCATE operator, member, member_consent, outbox, orders, payment, refund_account"
+            " RESTART IDENTITY"
+        )
     _seed(engine)
     with engine.connect() as conn:
         second = conn.execute(select(member.c.id, member.c.name, member.c.address)).all()
@@ -120,3 +123,47 @@ def test_backfill_gives_seeded_members_consent_history_once(engine):
     marketing = [agreed for code, agreed, _ in rows if code == "MARKETING"]
     assert 0 < sum(marketing) < MEMBERS  # 선택은 일부만
     assert all(ip is None for *_, ip in rows)  # 알 수 없는 IP는 지어내지 않는다
+
+
+def test_commerce_seed_has_no_card_numbers_and_encrypted_accounts(engine):
+    from app.crypto import FieldCipher, refund_account_context
+    from app.models import orders, payment, refund_account
+    from app.scripts.seed import seed_commerce
+
+    from conftest import TEST_PAYMENT_KEY
+
+    cipher = FieldCipher(bytes.fromhex(TEST_PAYMENT_KEY))
+    _seed(engine)
+    with engine.begin() as conn:
+        assert seed_commerce(conn, cipher) is True
+    with engine.begin() as conn:
+        assert seed_commerce(conn, cipher) is False  # 주문이 있으면 다시 넣지 않는다
+        order_count = conn.execute(select(func.count()).select_from(orders)).scalar_one()
+        paid = conn.execute(select(func.count()).select_from(payment)).scalar_one()
+        accounts = conn.execute(select(refund_account)).mappings().all()
+
+    assert order_count == paid > 0
+    assert "card_number" not in payment.c  # PG 목업 — 카드번호 컬럼 자체가 없다
+    for acc in accounts:
+        number = cipher.decrypt(acc["account_number_enc"], refund_account_context(acc["member_id"]))
+        assert number.startswith("0000") and number.endswith(acc["account_last4"])
+        assert number.encode() not in acc["account_number_enc"]
+
+
+def test_commerce_seed_skips_members_who_signed_up_on_screen(engine, client):
+    from app.crypto import FieldCipher
+    from app.models import orders, refund_account
+    from app.scripts.seed import seed_commerce
+
+    from conftest import TEST_PAYMENT_KEY, signup
+
+    _seed(engine)
+    signup(client, email="real-signup@example.com")
+    with engine.begin() as conn:
+        seed_commerce(conn, FieldCipher(bytes.fromhex(TEST_PAYMENT_KEY)))
+        signed_up = conn.execute(
+            select(member.c.id).where(member.c.email == "real-signup@example.com")
+        ).scalar_one()
+        owners = set(conn.execute(select(orders.c.member_id)).scalars())
+        owners |= set(conn.execute(select(refund_account.c.member_id)).scalars())
+    assert signed_up not in owners

@@ -35,6 +35,11 @@ class Settings(BaseSettings):
     # 시드 취급자 계정의 비밀번호 — platform-seed에만
     seed_operator_password: SecretStr | None = None
 
+    # 결제수단(환불계좌) 암호화 키 — AES-256 키 32바이트를 16진수 64자로
+    # (§7②5·6호, CLAUDE.md 3절 #11).
+    # DB와 분리해 .env에만 둔다. platform-api·platform-seed에만
+    payment_encryption_key: SecretStr | None = None
+
     # relay → Argus 수집 API (api-spec 1-2) — platform-relay에만.
     # HMAC 키는 argus-api의 ARGUS_INGEST_SECRET_PLATFORM과 같은 값
     argus_ingest_url: str = "http://argus-api:8000"
@@ -56,6 +61,19 @@ class Settings(BaseSettings):
             # 짧은 HMAC 키는 오프라인 대입으로 토큰 위조가 가능해진다
             raise ValueError(f"PLATFORM_AUTH_SECRET must be at least {MIN_SECRET_LENGTH} chars")
         return secret.encode()
+
+    def require_payment_key(self) -> bytes:
+        value = (
+            self.payment_encryption_key.get_secret_value() if self.payment_encryption_key else ""
+        )
+        try:
+            key = bytes.fromhex(value)
+        except ValueError:
+            key = b""
+        if len(key) != 32:
+            # 키가 없거나 형식이 틀리면 기동 거부 — 암호화 없이 결제수단을 받는 일이 없게
+            raise ValueError("PLATFORM_PAYMENT_ENCRYPTION_KEY must be 64 hex chars (32 bytes)")
+        return key
 
     def require_argus_ingest(self) -> tuple[str, bytes]:
         if not self.argus_ingest_url.startswith(("http://", "https://")):

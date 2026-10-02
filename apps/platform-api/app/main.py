@@ -14,10 +14,14 @@ from app.agent.middleware import AccessLogMiddleware
 from app.auth.router import router as auth_router
 from app.auth.tokens import set_session_cookie
 from app.config import Settings
+from app.crypto import FieldCipher
 from app.errors import install_error_handlers
 from app.members.router import router as members_router
+from app.orders.router import router as orders_router
 from app.shop.auth import router as shop_auth_router
 from app.shop.me import router as shop_me_router
+from app.shop.orders import router as shop_orders_router
+from app.shop.refund import router as shop_refund_router
 
 
 def create_app(settings: Settings | None = None) -> FastAPI:
@@ -28,13 +32,18 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.state.auth_secret = settings.require_auth_secret()
     app.state.engine = create_engine(settings.database_url(), pool_pre_ping=True)
     app.state.trusted_proxies = parse_trusted_proxies(settings.trusted_proxies)
+    # 결제수단 암호화 키 — 없거나 형식이 틀리면 기동 거부 (CLAUDE.md 3절 #11)
+    app.state.cipher = FieldCipher(settings.require_payment_key())
 
     install_error_handlers(app)
     app.include_router(auth_router)
     app.include_router(members_router)
+    app.include_router(orders_router)
     # 고객 화면 API — /admin이 아니라 Agent가 기록하지 않는다 (CLAUDE.md 3절 #4)
     app.include_router(shop_auth_router)
     app.include_router(shop_me_router)
+    app.include_router(shop_orders_router)
+    app.include_router(shop_refund_router)
 
     @app.middleware("http")
     async def admin_response_headers(request: Request, call_next):
