@@ -29,6 +29,8 @@ FROM base AS runtime
 RUN pip install .
 COPY alembic.ini ./
 COPY migrations ./migrations
+# 소명 첨부 저장소 — 앱 계정 소유로 만들어 둔다. 이름 있는 볼륨을 처음 붙이면 이 소유권이 복사된다
+RUN mkdir -p /data/attachments && chown argus /data/attachments && chmod 700 /data/attachments
 USER argus
 EXPOSE 8000
 HEALTHCHECK --interval=10s --timeout=3s --retries=5 \

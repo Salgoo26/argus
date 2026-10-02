@@ -28,6 +28,9 @@ class Settings(BaseSettings):
     # 접속 IP 헤더(X-Forwarded-For)를 믿을 프록시 — 쉼표 구분 IP·CIDR, 비우면 아무도 믿지 않는다
     trusted_proxies: str = ""
 
+    # 소명 첨부 파일을 두는 디렉터리 — Argus 전용 볼륨 (기능 레이어 7 ③)
+    attachment_dir: str = "/data/attachments"
+
     def database_url(self) -> URL:
         # URL.create는 비밀번호의 특수문자를 알아서 이스케이프한다
         return URL.create(

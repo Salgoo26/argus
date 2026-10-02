@@ -200,3 +200,16 @@ access_log = Table(
     Column("prev_hash", CHAR(64)),
     Column("hash", CHAR(64), nullable=False),
 )
+
+explanation_attachment = Table(
+    "explanation_attachment",
+    metadata,
+    Column("id", BigInteger, primary_key=True),
+    Column("explanation_id", BigInteger, nullable=False),
+    Column("original_name", String(255), nullable=False),
+    Column("stored_path", String(500), nullable=False),
+    Column("content_type", String(100), nullable=False),
+    Column("size_bytes", BigInteger, nullable=False),
+    Column("sha256", CHAR(64), nullable=False),
+    Column("uploaded_at", DateTime(timezone=True), nullable=False),
+)

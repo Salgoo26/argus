@@ -63,7 +63,7 @@ def build_event(spec: AccessLogSpec, record: AccessRecord, route_path: str, resu
         # 라우트 템플릿(/api/detections/{detection_id}) — 경로 변수 값이 원장에 남지 않게
         "request": {"method": record.method, "path": route_path, "query_keys": record.query_keys},
         "result": result,
-        "context": {},
+        "context": record.context or {},
     }
     if spec.action != "LOGIN":
         # 건수만, ids 없음 — 회원 PK를 Argus 원장에 다시 쌓지 않는다 (api-spec 2-7, policy 6-3)

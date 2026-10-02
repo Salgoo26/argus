@@ -88,7 +88,7 @@ def test_db():
 
 
 @pytest.fixture(scope="session")
-def settings(test_db: TestDatabase) -> Settings:
+def settings(test_db: TestDatabase, tmp_path_factory) -> Settings:
     return Settings(
         db_host=test_db.admin_url.host,
         db_port=test_db.admin_url.port or 5432,
@@ -99,6 +99,8 @@ def settings(test_db: TestDatabase) -> Settings:
         auth_secret=TEST_AUTH_SECRET,
         # TestClient는 http://testserver — Secure 쿠키면 다음 요청에 실리지 않는다
         cookie_secure=False,
+        # 소명 첨부 저장소 — 세션마다 임시 디렉터리 (기능 레이어 7 ③)
+        attachment_dir=str(tmp_path_factory.mktemp("attachments")),
     )
 
 

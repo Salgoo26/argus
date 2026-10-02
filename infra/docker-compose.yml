@@ -220,6 +220,9 @@ services:
     ports:
       # 로컬 확인용. 운영에서는 외부 비노출, Caddy만 접근 (architecture 7-2)
       - "127.0.0.1:${ARGUS_API_PORT:-18000}:8000"
+    volumes:
+      # 소명 첨부 파일 (기능 레이어 7 ③) — Argus 전용 볼륨. 플랫폼 컨테이너·worker는 붙지 않는다
+      - argus-attachments:/data/attachments
     networks:
       - argus-net
 
@@ -292,3 +295,4 @@ networks:
 volumes:
   platform-db-data:
   argus-db-data:
+  argus-attachments:
