@@ -3,8 +3,8 @@
 from sqlalchemy import func, select
 
 from app.auth.passwords import verify_password
-from app.models import member, operator, outbox
-from app.scripts.seed import FIRST_MEMBER_ID, SEED_OPERATORS, seed
+from app.models import member, member_consent, operator, outbox
+from app.scripts.seed import FIRST_MEMBER_ID, SEED_OPERATORS, backfill_consents, seed
 
 from conftest import TEST_PASSWORD
 
@@ -36,7 +36,7 @@ def test_seed_is_reproducible(engine):
     with engine.connect() as conn:
         first = conn.execute(select(member.c.id, member.c.name, member.c.address)).all()
     with engine.begin() as conn:
-        conn.exec_driver_sql("TRUNCATE operator, member, outbox RESTART IDENTITY")
+        conn.exec_driver_sql("TRUNCATE operator, member, member_consent, outbox RESTART IDENTITY")
     _seed(engine)
     with engine.connect() as conn:
         second = conn.execute(select(member.c.id, member.c.name, member.c.address)).all()
@@ -103,3 +103,20 @@ def test_seed_enqueues_baseline_access_logs_after_handlers(engine):
     # 취급자 동기화가 먼저 — Argus 명부가 기록보다 앞서 있게
     assert topics[: len(SEED_OPERATORS)] == ["HANDLER"] * len(SEED_OPERATORS)
     assert set(topics[len(SEED_OPERATORS) :]) == {"ACCESS_LOG"}
+
+
+def test_backfill_gives_seeded_members_consent_history_once(engine):
+    _seed(engine)
+    with engine.begin() as conn:
+        assert backfill_consents(conn) == MEMBERS
+    with engine.begin() as conn:
+        assert backfill_consents(conn) == 0  # 이미 이력이 있으면 건드리지 않는다
+        rows = conn.execute(
+            select(member_consent.c.item_code, member_consent.c.agreed, member_consent.c.client_ip)
+        ).all()
+
+    assert len(rows) == MEMBERS * 4
+    assert all(agreed for code, agreed, _ in rows if code != "MARKETING")  # 필수는 모두 동의
+    marketing = [agreed for code, agreed, _ in rows if code == "MARKETING"]
+    assert 0 < sum(marketing) < MEMBERS  # 선택은 일부만
+    assert all(ip is None for *_, ip in rows)  # 알 수 없는 IP는 지어내지 않는다

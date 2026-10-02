@@ -305,3 +305,146 @@ textarea {
   flex-direction: column;
   gap: 14px;
 }
+
+/* ── 고객 화면 ───────────────────────────── */
+
+.shop {
+  min-height: calc(100vh - 36px);
+  display: flex;
+  flex-direction: column;
+}
+
+.shop-main {
+  flex: 1;
+  width: 100%;
+}
+
+.app-header a.brand {
+  color: var(--text);
+  text-decoration: none;
+}
+
+.shop-footer {
+  border-top: 1px solid var(--border);
+  background: var(--surface);
+}
+
+.shop-footer-inner {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px;
+  padding-top: 14px;
+  padding-bottom: 14px;
+  font-size: 13px;
+}
+
+.shop-footer a {
+  color: var(--text);
+}
+
+/* 처리방침 링크는 다른 고지와 구분되게 굵게 */
+.privacy-link {
+  font-weight: 700;
+}
+
+.narrow {
+  max-width: 520px;
+  margin: 0 auto;
+}
+
+.stack {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.hint {
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.alert-info {
+  padding: 10px 12px;
+  border-radius: var(--radius);
+  background: var(--accent-soft);
+  color: var(--accent-strong);
+  margin-bottom: 12px;
+}
+
+.consents {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 12px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.consents legend {
+  font-weight: 600;
+  padding: 0 4px;
+}
+
+.consent {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.check {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.consent-detail {
+  display: grid;
+  grid-template-columns: 64px 1fr;
+  gap: 2px 8px;
+  margin: 0 0 0 26px;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.consent-detail dt {
+  font-weight: 600;
+}
+
+.consent-detail dd {
+  margin: 0;
+}
+
+.danger-zone {
+  border-color: #f4b4ad;
+}
+
+.doc h2 {
+  font-size: 15px;
+  margin: 20px 0 6px;
+}
+
+.doc table.data td {
+  white-space: normal;
+}
+
+.hero {
+  padding: 28px;
+}
+
+.grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 12px;
+}
+
+@media (max-width: 640px) {
+  .app-header {
+    padding: 10px 16px;
+    flex-wrap: wrap;
+  }
+  .container {
+    padding: 16px;
+  }
+}

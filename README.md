@@ -103,6 +103,15 @@ docker compose exec argus-worker python -m app.worker --once   # detected=1 이�
 docker compose exec argus-api python -m app.scripts.verify_chain   # OK: 해시체인 정상 — N건 확인
 ```
 
+### 2-1. 고객 화면 (개인정보 처리 단계 실습 무대)
+
+http://localhost:3000 — 가상 쇼핑몰의 고객 화면. Argus 시연용이 아니라 **수집·동의·열람·정정·철회·파기** 흐름을 보여 주기 위한 최소 구현이다. 고객(정보주체)의 행위는 접속기록 대상이 아니다(§8① 단서).
+
+- **회원가입** — 필수(이용약관·개인정보 수집이용·만 14세 이상)와 선택(마케팅) 동의를 따로 받고, 항목마다 목적·항목·보유 기간을 보여 준다. 동의·미동의 모두 항목·버전·시각·IP로 이력에 남는다. 시드 회원 500명은 로그인할 수 없으니 새로 가입해서 쓴다(실제 개인정보 입력 금지 — `@example.com` 등 가상 값 사용)
+- **로그인** — 5회 실패 시 15분 잠금(자동 해제). 고객 계정과 관리자 계정은 쿠키·토큰 용도가 달라 서로 바꿔 쓸 수 없다
+- **마이페이지** — 내 정보 열람·정정, 비밀번호 변경, 마케팅 동의 철회·재동의(이력이 쌓임), **탈퇴 = 즉시 파기**(회원 행·동의 이력 실제 삭제)
+- **개인정보 처리방침·이용약관** — 자리표시 문안(정식 문안은 기획 단계에서 교체)
+
 ### 3. 자동 검증 (E2E)
 
 위 시나리오 전체를 화면 대신 같은 API로 자동 재현하고, 마지막에 해시체인을 검증한다. CI가 PR마다 같은 스크립트를 실행한다.
@@ -112,14 +121,14 @@ bash scripts/e2e.sh
 ```
 
 - 평소 스택과 별도인 프로젝트(`argus-e2e`)를 **빈 DB로 새로 띄우고, 끝나면 볼륨까지 지운다** — 위에서 직접 만든 데이터는 건드리지 않는다
-- 확인 항목: 시나리오의 각 상태 전이, 원본 식별값·개인정보(이름·이메일·전화) 미노출, 남의 건 404, 역할 위반 403, 허용되지 않은 전이 409, 해시체인
+- 확인 항목: 고객 가입(필수 동의)·동의 철회·탈퇴 즉시 파기, 고객 토큰으로 관리자 API 불가, 시나리오의 각 상태 전이, 원본 식별값·개인정보(이름·이메일·전화) 미노출, 남의 건 404, 역할 위반 403, 허용되지 않은 전이 409, 해시체인
 - 실패 시 컨테이너 로그를 출력한다. `E2E_KEEP=1 bash scripts/e2e.sh`로 실행하면 스택을 남겨 두고 살펴볼 수 있다
 
 ### 서비스 구성
 
 | 서비스 | 호스트 접속 | 비고 |
 |---|---|---|
-| platform-web | http://localhost:3000 | **플랫폼 화면** — 관리자는 `/admin` 아래(로그인·회원 목록·CSV 다운로드). 운영에서는 Caddy가 `/admin` 경로를 허용 IP로 제한(architecture 7-2). `/api/*`는 Next.js가 platform-api로 전달(같은 출처라 세션 쿠키 그대로) |
+| platform-web | http://localhost:3000 | **플랫폼 화면** — 고객은 `/`(회원가입·로그인·마이페이지·처리방침), 관리자는 `/admin` 아래(로그인·회원 목록·CSV 다운로드). 운영에서는 Caddy가 `/admin` 경로를 허용 IP로 제한(architecture 7-2). `/api/*`는 Next.js가 platform-api로 전달(같은 출처라 세션 쿠키 그대로) |
 | argus-web | http://localhost:3001 | **Argus 화면** — 담당자·취급자 로그인, 탐지건 목록·상세(정보주체 마스킹), 소명 요청·제출·승인·반려·요청 취소, **접속기록 검색**(담당자 전용 — 계정·기간·수행업무·회원번호·접근 경로·출처), **룰 관리**(담당자 전용 — 생성·수정·켜기/끄기, 변경 이력) |
 | platform-db | `127.0.0.1:15432` | 플랫폼 DB (PostgreSQL 16) |
 | argus-db | `127.0.0.1:15433` | Argus 접속기록 원장 (PostgreSQL 16) |
@@ -127,8 +136,8 @@ bash scripts/e2e.sh
 | argus-api | `127.0.0.1:18000` | 수집 API `POST /ingest/v1/access-logs`, 취급자 동기화 `POST /ingest/v1/handler-events`, 로그인 `POST /api/auth/login`, `GET /healthz`, API 문서 `/docs`. `/api` 요청은 Argus 자체 접속기록(ARGUS 출처)으로 원장에 기록 |
 | argus-worker | — | 탐지 배치: `setting.detection_interval_min`(기본 5분)마다 원장을 순찰해 룰에 걸린 기록으로 탐지건 생성 + 자동 소명 요청 |
 | platform-migrate | — | 기동 시 1회 실행: 플랫폼 Alembic 마이그레이션 후 종료 |
-| platform-seed | — | 기동 시 1회 실행: 가상 회원 500명·취급자 5명(비어 있을 때만) 후 종료 |
-| platform-api | `127.0.0.1:18001` | 관리자 로그인 `POST /admin/auth/login`, 회원 목록 `GET /admin/members`, CSV `GET /admin/members/export`, API 문서 `/docs`. 관리자 라우트 요청은 접속기록으로 outbox에 적재 |
+| platform-seed | — | 기동 시 1회 실행: 가상 회원 500명·취급자 5명(비어 있을 때만), 동의 이력이 없는 회원에게 가입 시점 동의 이력 후 종료 |
+| platform-api | `127.0.0.1:18001` | 고객 API `/shop/*`(접속기록 대상 아님), 관리자 로그인 `POST /admin/auth/login`, 회원 목록 `GET /admin/members`, CSV `GET /admin/members/export`, API 문서 `/docs`. 관리자 라우트 요청은 접속기록으로 outbox에 적재 |
 | platform-relay | — | outbox → Argus 전송(HMAC 서명). 2초 주기, 실패 시 1분→최대 1시간 백오프. 플랫폼 쪽에서 유일하게 Argus 네트워크에 붙는다 |
 
 - 포트는 호스트 루프백(`127.0.0.1`)에만 열린다. 두 DB는 도커 네트워크도 분리되어 있어 플랫폼 쪽 컨테이너에서 argus-db에 접근할 수 없다.
@@ -138,7 +147,7 @@ bash scripts/e2e.sh
 
 ### 계정 관리
 
-로그인 **5회 연속 실패 시 잠긴다**(플랫폼 관리자·Argus 사용자 모두). 관리 UI는 Skeleton 범위 밖이라 스크립트로 해제한다.
+로그인 **5회 연속 실패 시 잠긴다**(플랫폼 관리자·Argus 사용자 모두). 관리 UI는 Skeleton 범위 밖이라 스크립트로 해제한다. (고객 계정은 15분 뒤 자동 해제)
 
 ```bash
 docker compose run --rm platform-migrate python -m app.scripts.unlock_operator ops_park   # 플랫폼 관리자

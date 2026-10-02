@@ -4,7 +4,8 @@
 - 이름·주소: Faker ko_KR의 무작위 조합
 - 이메일: example.com — 인터넷 표준(RFC 2606)이 예시용으로 예약한 도메인이라 실존 주소가 될 수 없다
 - 전화번호: 010-0000-XXXX — 가운데를 0000으로 고정해 실존 번호와 겹치지 않게
-- 회원 비밀번호: 고객 로그인은 Skeleton 범위 밖 → 아무도 모르는 무작위 해시 하나를 공유
+- 회원 비밀번호: 아무도 모르는 무작위 해시 하나를 공유 — 시드 회원으로는 로그인할 수 없다
+  (고객 화면은 회원가입으로 새 계정을 만들어 쓴다)
 
 재현성: Faker·난수 시드를 고정해 누가 몇 번 실행해도 같은 회원이 같은 id로 생긴다
 (M6 자동 시나리오 테스트의 전제). 테이블이 비어 있을 때만 넣으므로 재실행해도 늘어나지 않는다.
@@ -21,11 +22,11 @@ import sys
 from datetime import timedelta
 
 from faker import Faker
-from sqlalchemy import Connection, create_engine, func, insert, select, text
+from sqlalchemy import Connection, create_engine, exists, func, insert, select, text
 
 from app.auth.passwords import hash_password, unusable_password_hash
 from app.config import Settings
-from app.models import member, operator
+from app.models import consent_item, member, member_consent, operator
 from app.outbox import enqueue, handler_event
 from app.scripts.baseline import baseline_events
 
@@ -107,6 +108,43 @@ def seed(conn: Connection, operator_password: str, member_count: int = MEMBER_CO
     return True
 
 
+MARKETING_AGREE_RATIO = 0.4  # 시드 회원 중 마케팅 수신 동의 비율 (가상)
+
+
+def backfill_consents(conn: Connection) -> int:
+    """동의 이력이 없는 회원에게 가입 시점의 동의 이력을 만든다 (기능 레이어 7 결정 2)
+
+    seed()와 따로 매번 실행한다 — 고객 화면 이전에 시드된 개발 스택의 회원 500명에게도
+    동의 이력이 생기게. 이미 이력이 있는 회원은 건드리지 않으므로 재실행해도 늘지 않는다.
+    필수 동의는 모두, 마케팅은 일부만 동의. 접속 IP는 알 수 없어 비운다(지어내지 않는다).
+    """
+    items = conn.execute(select(consent_item.c.code, consent_item.c.version)).all()
+    targets = conn.execute(
+        select(member.c.id, member.c.created_at)
+        .where(~exists().where(member_consent.c.member_id == member.c.id))
+        .order_by(member.c.id)
+    ).all()
+    rng = random.Random(SEED + 1)  # noqa: S311 — 가짜 동의 분포용, 보안 용도 아님
+    rows = []
+    for member_id, created_at in targets:
+        marketing = rng.random() < MARKETING_AGREE_RATIO
+        for code, version in items:
+            rows.append(
+                {
+                    "member_id": member_id,
+                    "item_code": code,
+                    "item_version": version,
+                    "agreed": marketing if code == "MARKETING" else True,
+                    "acted_at": created_at,
+                    "client_ip": None,
+                    "method": "WEB_FORM",
+                }
+            )
+    if rows:
+        conn.execute(insert(member_consent), rows)
+    return len(targets)
+
+
 def main() -> int:
     logging.basicConfig(level=logging.INFO, format="%(levelname)s [seed] %(message)s")
     settings = Settings()
@@ -122,6 +160,7 @@ def main() -> int:
     try:
         with engine.begin() as conn:
             created = seed(conn, password)
+            backfilled = backfill_consents(conn)
     finally:
         engine.dispose()
 
@@ -129,6 +168,8 @@ def main() -> int:
         logger.info("seeded %d members, %d operators", MEMBER_COUNT, len(SEED_OPERATORS))
     else:
         logger.info("already seeded — skipped")
+    if backfilled:
+        logger.info("backfilled consent history for %d members", backfilled)
     return 0
 
 

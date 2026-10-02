@@ -11,7 +11,7 @@ from fastapi import Depends, Request
 from sqlalchemy import select
 
 from app.agent import record_actor
-from app.auth.tokens import COOKIE_NAME, issue_token, read_token
+from app.auth.tokens import ADMIN, issue_token, read_token
 from app.config import Settings
 from app.errors import ApiError
 from app.models import operator
@@ -40,7 +40,7 @@ def current_operator(request: Request) -> AuthenticatedOperator:
     settings: Settings = request.app.state.settings
     secret: bytes = request.app.state.auth_secret
 
-    operator_id = read_token(request.cookies.get(COOKIE_NAME), secret)
+    operator_id = read_token(request.cookies.get(ADMIN.cookie_name), secret, ADMIN)
     if operator_id is None:
         raise _unauthenticated()
 
@@ -56,9 +56,11 @@ def current_operator(request: Request) -> AuthenticatedOperator:
     request.state.operator = authenticated
     record_actor(authenticated.login_id)  # 접속기록 식별자 (§2 3호)
     # 30분 미사용 만료를 요청마다 연장 — 쿠키는 main.py의 미들웨어가 응답에 싣는다
+    # (토큰 용도(aud)를 관리자용으로 — 고객 토큰과 바꿔 쓸 수 없게)
     # (핸들러가 Response를 직접 돌려주는 CSV 다운로드에도 빠짐없이 붙이기 위해)
-    request.state.session_token = issue_token(
-        authenticated.id, secret, settings.session_idle_minutes
+    request.state.session_cookie = (
+        ADMIN,
+        issue_token(authenticated.id, secret, settings.session_idle_minutes, ADMIN),
     )
     return authenticated
 
