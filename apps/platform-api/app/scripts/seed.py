@@ -30,6 +30,7 @@ from app.config import Settings
 from app.crypto import FieldCipher, refund_account_context
 from app.models import (
     consent_item,
+    inquiry,
     member,
     member_consent,
     operator,
@@ -226,6 +227,65 @@ def seed_commerce(conn: Connection, cipher: FieldCipher) -> bool:
     return True
 
 
+INQUIRY_COUNT = 40
+INQUIRY_TEMPLATES = (
+    ("배송 문의", "주문한 상품이 언제 도착하는지 궁금합니다."),
+    (
+        "환불 요청",
+        "상품이 마음에 들지 않아 환불을 요청드립니다. 환불계좌는 마이페이지에 등록했습니다.",
+    ),
+    ("상품 불량", "받은 상품에 흠집이 있습니다. 교환이 가능할까요?"),
+    ("회원정보 변경", "주소가 바뀌었는데 마이페이지에서 수정하면 이미 주문한 건에도 반영되나요?"),
+    ("결제 오류", "결제 중 오류가 났는데 카드 승인 문자는 왔습니다. 확인 부탁드립니다."),
+)
+INQUIRY_ANSWER = "문의 주셔서 감사합니다. 확인 후 처리해 드렸습니다. (가상 답변)"
+
+
+def seed_inquiries(conn: Connection) -> bool:
+    """가상 1:1 문의 (기능 레이어 7 ②) — 문의가 하나도 없을 때만. 절반 남짓은 CS가 답변한 상태
+
+    문의 내용은 고정 문구라 개인정보가 없다. 답변자는 시드 CS 취급자(cs_kim·cs_choi).
+    """
+    if conn.execute(select(func.count()).select_from(inquiry)).scalar_one():
+        return False
+    members = (
+        conn.execute(
+            select(member.c.id)
+            .where(member.c.email.like("user%@example.com"))
+            .order_by(member.c.id)
+        )
+        .scalars()
+        .all()
+    )
+    cs = (
+        conn.execute(select(operator.c.id).where(operator.c.team == "CS").order_by(operator.c.id))
+        .scalars()
+        .all()
+    )
+    if not members or not cs:
+        return False
+
+    rng = random.Random(SEED + 3)  # noqa: S311 — 가짜 문의 분포용, 보안 용도 아님
+    now = conn.execute(select(func.now())).scalar_one()
+    for n in range(INQUIRY_COUNT):
+        title, body = rng.choice(INQUIRY_TEMPLATES)
+        created_at = now - timedelta(seconds=rng.randint(3600, 60 * 24 * 3600))
+        answered = n % 3 != 0  # 3건 중 2건 답변 완료, 1건 대기
+        conn.execute(
+            insert(inquiry).values(
+                member_id=rng.choice(members),
+                title=title,
+                body=body,
+                status="ANSWERED" if answered else "OPEN",
+                answer=INQUIRY_ANSWER if answered else None,
+                answered_by=rng.choice(cs) if answered else None,
+                created_at=created_at,
+                answered_at=created_at + timedelta(hours=rng.randint(1, 48)) if answered else None,
+            )
+        )
+    return True
+
+
 def main() -> int:
     logging.basicConfig(level=logging.INFO, format="%(levelname)s [seed] %(message)s")
     settings = Settings()
@@ -243,6 +303,7 @@ def main() -> int:
             created = seed(conn, password)
             backfilled = backfill_consents(conn)
             commerce = seed_commerce(conn, FieldCipher(settings.require_payment_key()))
+            inquiries = seed_inquiries(conn)
     finally:
         engine.dispose()
 
@@ -254,6 +315,8 @@ def main() -> int:
         logger.info("backfilled consent history for %d members", backfilled)
     if commerce:
         logger.info("seeded %d orders, %d refund accounts", ORDER_COUNT, REFUND_ACCOUNT_COUNT)
+    if inquiries:
+        logger.info("seeded %d inquiries", INQUIRY_COUNT)
     return 0
 
 

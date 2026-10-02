@@ -128,3 +128,17 @@ export type RefundAccountView = {
 export function won(amount: number): string {
   return `${amount.toLocaleString("ko-KR")}원`;
 }
+
+// ── 1:1 문의 ─────────────────────────────────────────
+
+export type Inquiry = {
+  id: number;
+  title: string;
+  body: string;
+  status: "OPEN" | "ANSWERED";
+  answer: string | null;
+  created_at: string;
+  answered_at: string | null;
+};
+
+export const INQUIRY_STATUS: Record<string, string> = { OPEN: "답변 대기", ANSWERED: "답변 완료" };

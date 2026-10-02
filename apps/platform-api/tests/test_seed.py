@@ -37,7 +37,8 @@ def test_seed_is_reproducible(engine):
         first = conn.execute(select(member.c.id, member.c.name, member.c.address)).all()
     with engine.begin() as conn:
         conn.exec_driver_sql(
-            "TRUNCATE operator, member, member_consent, outbox, orders, payment, refund_account"
+            "TRUNCATE operator, member, member_consent, outbox, orders, payment, refund_account,"
+            " inquiry"
             " RESTART IDENTITY"
         )
     _seed(engine)
@@ -167,3 +168,18 @@ def test_commerce_seed_skips_members_who_signed_up_on_screen(engine, client):
         owners = set(conn.execute(select(orders.c.member_id)).scalars())
         owners |= set(conn.execute(select(refund_account.c.member_id)).scalars())
     assert signed_up not in owners
+
+
+def test_inquiry_seed_mixes_open_and_answered(engine):
+    from app.models import inquiry
+    from app.scripts.seed import INQUIRY_COUNT, seed_inquiries
+
+    _seed(engine)
+    with engine.begin() as conn:
+        assert seed_inquiries(conn) is True
+        assert seed_inquiries(conn) is False
+        rows = conn.execute(select(inquiry.c.status, inquiry.c.answered_by)).all()
+    assert len(rows) == INQUIRY_COUNT
+    statuses = {s for s, _ in rows}
+    assert statuses == {"OPEN", "ANSWERED"}
+    assert all((s == "ANSWERED") == (by is not None) for s, by in rows)

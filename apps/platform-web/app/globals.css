@@ -563,3 +563,36 @@ textarea {
   border-radius: 6px;
   padding: 8px 10px;
 }
+
+/* ── 1:1 문의 ────────────────────────────── */
+
+.tabs {
+  display: flex;
+  gap: 6px;
+  margin-bottom: 12px;
+}
+
+.inquiry {
+  border-bottom: 1px solid var(--border);
+  padding-bottom: 12px;
+}
+
+.inquiry-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.inquiry-body {
+  white-space: pre-wrap;
+  margin: 10px 0;
+}
+
+.inquiry-answer {
+  white-space: pre-wrap;
+  background: var(--bg);
+  border-left: 3px solid var(--accent);
+  border-radius: 4px;
+  padding: 8px 12px;
+}

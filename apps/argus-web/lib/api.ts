@@ -91,6 +91,7 @@ export type CaseLog = {
   subject_count: number;
   subject_truncated: boolean;
   subjects: string[]; // 서버에서 이미 마스킹된 값(member_10***)만 온다
+  ticket_id: string | null; // 업무 근거 티켓(예: 1:1 문의 INQ-12) — 소명 대조용
 };
 
 export type Explanation = {

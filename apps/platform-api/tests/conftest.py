@@ -113,7 +113,7 @@ def clean_tables(request):
         conn.execute(
             text(
                 "TRUNCATE operator, member, member_consent, outbox, orders, payment,"
-                " refund_account,"
+                " refund_account, inquiry,"
                 " retained_member_record, destruction_history RESTART IDENTITY"
             )
         )
