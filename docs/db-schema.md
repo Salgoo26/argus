@@ -1,6 +1,6 @@
 # DB 스키마 (Argus / 플랫폼)
 
-> 작성일: 2026-09-23 / v0.2 (2026-09-23 개정 — 요구사항 전수 대조 후 6개 테이블·다수 컬럼 추가) / **v0.3 (2026-09-29 개정 — 구현 M1 반영: 해시체인 정규화 규칙 v1 확정, DB 계정 구조·권한 확정, 알려진 한계 명시)** (2026-09-30 보완 — A5 초기 해시 주석) / **v0.4 (2026-10-01 개정 — 구현 M3 반영: 탐지 날짜 KST 기준, 해석 불가 룰 시 순찰 실패, 빈 순찰 기록, 순찰 상한, `log_summary` 잘림 표시)** (2026-10-01 보완 — 구현 M4: `detection_rule.auto_request`, `explanation.requested_by` NULL 허용, 자동 소명 요청, A5 조회 범위)
+> 작성일: 2026-09-23 / v0.2 (2026-09-23 개정 — 요구사항 전수 대조 후 6개 테이블·다수 컬럼 추가) / **v0.3 (2026-09-29 개정 — 구현 M1 반영: 해시체인 정규화 규칙 v1 확정, DB 계정 구조·권한 확정, 알려진 한계 명시)** (2026-09-30 보완 — A5 초기 해시 주석) / **v0.4 (2026-10-01 개정 — 구현 M3 반영: 탐지 날짜 KST 기준, 해석 불가 룰 시 순찰 실패, 빈 순찰 기록, 순찰 상한, `log_summary` 잘림 표시)** (2026-10-01 보완 — 구현 M4: `detection_rule.auto_request`, `explanation.requested_by` NULL 허용, 자동 소명 요청, A5 조회 범위) / **v0.5 (2026-10-02 — 기능 레이어 1·4·6·7 반영: 룰 평가 대상, 명부 미등록 처리, `min_baseline`, 집계 윈도우 1회 판단, 룰 변경 이력 운영, 결제수단 재설계, 고객 잠금 컬럼, 탈퇴 즉시 파기)** / **v0.6 (2026-10-02 — 기능 레이어 7 구현 반영: `payment`·`refund_account` 확정, 탈퇴 분리보관 실제 절차, 소명 첨부 권한·무결성, `explanation.ticket_ids`, 동의 항목 `AGE_OVER_14`)**
 > 관련 문서: [[아키텍처_설계서.md]], [[API명세서_시스템간.md]], [[정책정의서.md]], [[액터별_플로우.md]], [[요구사항정의서.md]]
 > DBMS: PostgreSQL 16 (플랫폼 DB / Argus DB 별도 인스턴스)
 > 표기: **[S]** = Walking Skeleton에 필요한 테이블. 컬럼은 전체를 정의하되 Skeleton에서는 [S] 테이블만 생성한다.
@@ -242,7 +242,12 @@ CREATE TABLE detection_rule_history (
     changed_at   timestamptz NOT NULL DEFAULT now()
 );
 CREATE INDEX ix_rule_history ON detection_rule_history (rule_id, changed_at);
+-- (2026-10-01, 기능 레이어 6) (rule_id, version) 유일 — 켜기·끄기도 version +1로 하나의 축
+-- 앱 계정은 추가·조회만(감사 추적). 변경 사유 컬럼은 두지 않음(사용자 결정 — 변경 후 스냅숏 + 누가·언제로 추적)
+-- 시드 룰의 CREATE 이력은 소급 기록(changed_by NULL = 시스템)
 ```
+
+> **룰 삭제 없음** (2026-10-01, 기능 레이어 6): 탐지건이 룰을 참조하고 "그 시점에 운영한 룰"이 점검 근거이므로 룰은 삭제하지 않고 끈다(`enabled=false`, 화면은 켜짐/꺼짐 필터). 앱 계정에는 처음부터 `detection_rule` DELETE 권한이 없다(3-5 DB 계정 구조) — 정책과 DB 권한이 일치. `rule_type`은 생성 후 변경 불가.
 
 > `access_path`를 조건식이 아니라 **독립 컬럼**으로 둔 이유: 정책정의서 1-2가 이를 룰 스펙의 별도 필드로 규정하고, 두 경로는 정상 기준선이 반대여서 룰을 경로별로 분리 적용해야 한다. 컬럼으로 두면 배치가 로그를 경로별로 먼저 나눠 룰 평가 대상을 줄일 수 있다.
 
@@ -316,10 +321,15 @@ CREATE TABLE explanation (
     reviewed_at      timestamptz,
     review_result    varchar(16) CHECK (review_result IN ('APPROVED','REJECTED')),
     review_comment   text,
+    ticket_ids       varchar(32)[] NOT NULL DEFAULT '{}',  -- (2026-10-02) 관련 업무 티켓 번호(`INQ-n`), 최대 3개 CHECK. 제출과 함께 저장, 이후 변경 API 없음
     UNIQUE (detection_id, round)
 );
+```
 
--- 소명 첨부 (Skeleton 제외)
+> **관련 업무 티켓 (2026-10-02)**: 취급자가 소명 제출 시 플랫폼 1:1 문의 번호를 직접 입력한다(서버는 형식 `INQ-[1-9][0-9]{0,9}`만 검사 — 링크 주소에 그대로 들어가므로 엄격히). **Argus는 티켓 내용을 보유하지 않고** 탐지건 상세에 플랫폼 관리자 화면 링크(`ARGUS_PLATFORM_ADMIN_URL` + `/inquiries/{번호}`)만 준다 — 절대 규칙 #3·두 시스템 분리. 담당자가 링크로 문의를 열면 그 열람은 **플랫폼 접속기록으로 Argus에 남는다**(감시자도 감시됨). 검증(티켓이 실제 근거인가)은 담당자 판단, 자동 대조는 v0.2.
+
+```sql
+-- 소명 첨부 (2026-10-02 구현, 기능 레이어 7 ③)
 CREATE TABLE explanation_attachment (
     id               bigserial    PRIMARY KEY,
     explanation_id   bigint       NOT NULL REFERENCES explanation(id),
@@ -327,9 +337,29 @@ CREATE TABLE explanation_attachment (
     stored_path      varchar(500) NOT NULL,     -- 로컬 볼륨 경로 (1차)
     content_type     varchar(100) NOT NULL,
     size_bytes       bigint       NOT NULL,
-    sha256           char(64)     NOT NULL,     -- 제출 후 변조 여부 확인
+    sha256           char(64)     NOT NULL,     -- 업로드 시 계산, 내려받을 때마다 재계산해 다르면 거부
     uploaded_at      timestamptz  NOT NULL DEFAULT now()
 );
+```
+
+**소명 첨부 규칙 (2026-10-02)**
+
+| 항목 | 규칙 | 이유 |
+|---|---|---|
+| 형식 | PNG·JPG·PDF — **매직 바이트로 판정**(이름·Content-Type 무시) | `.png` 이름의 HTML 같은 위장 차단 |
+| 크기·개수 | 파일당 5MB, 소명 차수당 최대 3개, 빈 파일 거부 | |
+| 저장 경로 | 서버가 `년/월/uuid`로 생성, `O_CREAT\|O_EXCL`·0600, 볼륨 밖 경로 거부. 보낸 파일 이름은 표시용으로만(경로·제어문자 제거, 200자) | **파일 이름 불신** — 경로 조작 방지 |
+| 무결성 | SHA-256을 업로드 시 계산·저장, **내려받을 때마다 재계산해 다르면 500 `ATTACHMENT_TAMPERED`** | 제출된 근거의 사후 변조 탐지 |
+| 권한(앱 계정) | **SELECT·INSERT·DELETE, UPDATE 없음** — 해시·경로를 바꿔 근거를 갈아치울 수 없음 | DELETE는 제출 전 정정용, 제출 후 삭제는 앱에서 409 |
+| 올리기·지우기 | 취급자 본인 + `REQUESTED` 상태일 때만 | |
+| 내려받기 | 담당자는 **제출된 차수만**(미제출 초안은 소명이 아님), 취급자는 본인 것. `attachment`·`nosniff`·`CSP: sandbox`·`no-store` | 파일 안의 스크립트가 화면 출처에서 실행되지 않게 |
+| 기록 | **내려받기 = Argus 자체 접속기록 `READ`**(ACCESS_LOG, 정보주체 0, `context.target = {"detection_id": N}`) — 캡처에 개인정보가 있을 수 있음. 올리기·지우기는 본인 자료 제출이라 기록 제외 | API명세서 2-7 |
+| 저장소 | Argus 전용 볼륨(`argus-attachments`) — **argus-api에만** 연결(worker·플랫폼 미연결) | 아키텍처 설계서 7-2 |
+
+- 요청이 취소된 차수의 미제출 첨부는 그대로 둔다(그 시점 소명 과정의 기록, 양이 작음) — 보관 기간은 파기 배치(v0.2)에서 정한다.
+- 바이러스·악성 PDF 검사는 하지 않음(형식 판정 + 내려받기 강제까지) — 보안성 검토 이월.
+
+```sql
 
 -- 룰 예외 / 화이트리스트 (Skeleton 제외, 단 시스템 계정 예외는 시드로 투입)
 CREATE TABLE rule_exception (
@@ -507,12 +537,14 @@ GRANT SELECT, DELETE ON access_log TO argus_purge;  -- 파기 배치 전용
 | `data_category` | 데이터 유형 | `eq`, `in` |
 | `result` | SUCCESS / FAILURE | `eq` |
 | `subject_count` | 처리 건수 | `gte`, `lte`, `eq` |
-| `occurred_time` | 발생 시각(HH:MM) | `between` (자정 넘김 허용: `["22:00","06:00"]`) |
+| `occurred_time` | 발생 시각(HH:MM, KST) | `between` (자정 넘김 허용: `["22:00","06:00"]`). **시작 포함·끝 미포함, 분 단위**, 두 값은 서로 달라야 함 |
 | `occurred_weekday` | 요일 | `in` (`["SAT","SUN"]`) |
 | `actor_team` | 소속 (handler 조인) | `eq`, `in` |
-| `actor_terminated_at_or_before` | **행위 시점에 이미 퇴직 상태였는지** (`handler.terminated_at <= occurred_at`) | `eq: true` |
+| `actor_terminated_at_or_before` | **행위 시점에 이미 퇴직 상태였는지** (`handler.terminated_at <= occurred_at`). 명부에 없는 계정도 참 | `eq: true`만 허용 |
 
-> **취급자 속성 조건의 미동기화 처리**: `actor_team` 등 handler 조인이 필요한 조건인데 해당 취급자가 아직 동기화되지 않았다면, 룰을 **조용히 통과시키지 않고 평가를 보류**한다(다음 배치에서 재평가). 판정 불가를 "이상 없음"으로 처리하면 탐지 누락이 된다.
+> **취급자 속성 조건의 미동기화 처리** — **2026-10-01 개정(기능 레이어 1)**: 해당 취급자가 명부에 없으면 판정 불가로 보고 **탐지한다(fail-closed)**. 퇴직자 룰은 상태 이력에 "취급자 명부에 없는 계정 — 퇴직 여부를 판정할 수 없어 탐지"를 남긴다. 판정 불가를 "이상 없음"으로 처리하면 탐지 누락이 된다는 원칙은 그대로다.
+> - 기존 설계("평가 보류 후 다음 배치에서 재평가")를 바꾼 이유: 배치는 `id` 커서로 지나간 기록을 다시 보지 않으므로 보류하려면 **순찰 정지**(계정 하나가 동기화되지 않으면 모든 룰의 탐지가 멈춤)나 **보류 테이블**(스키마 변경)이 필요했다. relay가 명부를 기록보다 먼저 보내므로 정상이면 생기지 않고, 생겼다면 그 자체가 점검 대상이다.
+> - 행위자 명부는 순찰마다 범위의 계정만 한 번 읽는다. `actor_team`은 쓰는 룰이 없어 아직 구현하지 않았다(v0.2 후보).
 
 **aggregate** (AGGREGATE 전용)
 
@@ -528,7 +560,11 @@ GRANT SELECT, DELETE ON access_log TO argus_purge;  -- 파기 배치 전용
 | `measure` | `LOG_COUNT` / `SUBJECT_COUNT`(처리 건수 합) / `DISTINCT_SUBJECT`(고유 정보주체 수) |
 | `compare` | `ABSOLUTE` / `RATIO_TO_BASELINE` |
 | `baseline` | `PREV_MONTH_SAME_PERIOD` (추후 `PREV_3M_AVG` 등) |
-| `threshold` | 숫자 |
+| `threshold` | 숫자 (ABSOLUTE: 양의 정수 / RATIO: 양수 배율) |
+| `min_baseline` | (선택, RATIO 전용, 2026-10-01) 전월 같은 기간 집계값이 이보다 작으면(0 포함) **판정하지 않음**. 기본 룰 값 20 — 정책정의서 1-2 |
+
+- 형식 규칙: 키 집합 정확히 일치, EVENT 룰에 집계 스펙 금지, RATIO는 월 윈도우 + `PREV_MONTH_SAME_PERIOD`만.
+- 윈도우는 **KST 고정 구간**(매시 정각·0시·1일), 그룹 키 = 윈도우 시작 시각(`2026-09-15T14:00+09:00`). 전월 동기 = 전월 1일부터 같은 경과 시간(전월이 짧으면 전월 말에서 자름).
 
 **기본 룰 시드** (정책정의서 1-3절 → JSON, 모두 `access_path='APP'`)
 
@@ -539,17 +575,19 @@ GRANT SELECT, DELETE ON access_log TO argus_purge;  -- 파기 배치 전용
 | 주말 접속 | EVENT | `occurred_weekday∈{SAT,SUN}` | — | LOW | |
 | 결제수단 조회 | EVENT | `data_category=PAYMENT ∧ action=READ` | — | HIGH | |
 | 대량 조회 | AGGREGATE | `action=READ` | 1h / LOG_COUNT / ABSOLUTE / 100 | HIGH | |
-| 전월 대비 급증 | AGGREGATE | `action=READ` | 1mo / LOG_COUNT / RATIO / 2.0 | MEDIUM | |
+| 전월 대비 급증 | AGGREGATE | `action=READ` | 1mo / LOG_COUNT / RATIO / 2.0 / `min_baseline` 20 | MEDIUM | |
 | **퇴직자 계정 접속** | EVENT | `actor_terminated_at_or_before=true` | — | HIGH | (6절 #2 제안) |
 
 ### 3-7. 탐지 배치의 데이터 흐름 (F-04)
 
 1. 직전 성공 실행의 `to_access_log_id` **초과** ~ 현재 최대 `id` **이하**를 이번 범위로 잡고 `detection_batch_run` 생성(RUNNING — 별도 트랜잭션으로 먼저 기록해 진행 중인 순찰이 밖에서 보이게). **순찰 1회 최대 10,000건**, 밀려 있으면 쉬지 않고 다음 순찰. **새 기록이 없어도 순찰 이력을 남긴다**(v0.4 — "탐지가 주기적으로 수행됐다"는 점검 증적이자, worker 중단 기간과 기록 없는 기간을 구분하는 근거). 동시 실행은 advisory lock으로 막고, 비정상 종료로 남은 RUNNING은 다음 순찰이 정리한다.
-2. 활성 룰 로드 → **켜진 룰 중 해석할 수 없는 룰(모르는 필드·연산자, 값 타입, 구조, 미지원 유형)이 하나라도 있으면 순찰 전체를 FAILED로 끝내고 책갈피를 유지**(v0.4 — 그 룰만 건너뛰면 책갈피가 넘어가 그 사이 기록이 그 룰로 영영 평가되지 않음. 기준값의 적절성은 해석 가능성과 별개로 담당자 판단) → 룰의 `access_path`로 대상 로그를 먼저 필터 → `rule_exception` 해당 건 제외
+2. 활성 룰 로드 → **켜진 룰 중 해석할 수 없는 룰(모르는 필드·연산자, 값 타입, 구조, 미지원 유형)이 하나라도 있으면 순찰 전체를 FAILED로 끝내고 책갈피를 유지**(v0.4 — 그 룰만 건너뛰면 책갈피가 넘어가 그 사이 기록이 그 룰로 영영 평가되지 않음. 기준값의 적절성은 해석 가능성과 별개로 담당자 판단) → **출처 ARGUS(Argus 자체 접속기록)는 평가에서 제외**(2026-10-01 — 룰은 감시 대상 시스템 기록에만 적용, 정책정의서 1-2. 순찰 건수에는 포함) → 룰의 `access_path`로 대상 로그를 먼저 필터 → `rule_exception` 해당 건 제외(화이트리스트는 v0.2)
 3. **EVENT**: 조건식 판정 → 그룹 키 `(rule, source, actor, occurred_at의 날짜)`로 **진행 중** 탐지건 조회(`FOR UPDATE`) → 없으면 생성(`DETECTED`) + 룰 사본 + 상태 이력(시스템) + 알림, 있으면 하위 로그만 추가하고 `log_count`·`last_occurred_at`·`log_summary` 갱신. 같은 룰로 이미 어떤 탐지건에 붙은 기록은 다시 붙이지 않는다(재처리 시 증거 복제 방지)
    - **자동 소명 요청** (2026-10-01): 탐지건을 **새로 만들 때** 룰의 `auto_request`가 켜져 있고 행위자에게 재직 중·비활성 아닌 A5 계정이 있으면 같은 트랜잭션에서 `REQUESTED`(round 1, `explanation.requested_by` NULL) + 상태 이력 2줄(DETECTED·REQUESTED, 모두 시스템). 룰 사본에 `auto_request` 포함. `explanation (detection_id, round)` 유일 제약이 이중 요청을 DB에서 막는다
    - **날짜는 한국 시각(KST, +09:00 고정) 기준**(v0.4) — UTC 날짜를 쓰면 KST 새벽 0~9시 행위가 전날 탐지건으로 묶인다. 야간·주말 룰의 시각·요일 판정도 KST. DB 시간대 데이터에 의존하지 않도록 앱에서 고정 오프셋으로 계산
-4. **AGGREGATE**: 범위 내 로그가 속한 윈도우들을 다시 집계(늦게 도착한 로그 포함) → 임계치 초과 시 같은 방식으로 upsert
+4. **AGGREGATE**: 범위의 기록으로 "다시 볼 (취급자, 윈도우)"를 고르고, 원장에서 **윈도우를 통째로 다시 집계**(순찰 경계에서 윈도우가 쪼개지지 않게, 늦게 도착한 기록 포함, 이번 순찰이 본 id까지만) → 기준 초과 시 같은 방식으로 upsert + `aggregate_value` 갱신, 상태 이력에 판정 근거("집계 100 ≥ 기준 100", "당월 63 / 전월 동기 23 = 2.74배 ≥ 2.0배")
+   - **윈도우는 한 번만 판단**(2026-10-01): 같은 (룰, 취급자, 윈도우)의 탐지건이 **종결됐으면** 새 탐지건을 만들지 않음 — 정책정의서 2-3 AGGREGATE 예외
+   - 월 윈도우는 순찰마다 한 달치를 다시 읽음 — 데이터가 커지면 윈도우별 누적값 테이블 검토(v0.2 후보)
 5. 판정·탐지건·하위 로그·SUCCESS를 **한 트랜잭션**으로 기록. 실패 시 FAILED로 남기고 다음 실행이 같은 범위부터 재처리(멱등: 하위 로그 PK 중복은 무시). 실패 사유에는 예외 메시지 **첫 줄만** 남긴다(DB 오류의 상세 줄에 값이 실릴 수 있음)
 
 > **왜 배치이고 5분인가** (2026-10-01 정리): Argus는 접근을 막는 통제가 아니라 **이미 일어난 행위를 보고 소명을 받는 탐지 통제**다. 소명은 사람의 속도로 진행되고, 배치는 집계형 룰·늦게 도착한 기록·실패 재처리·수집과의 분리·단일 VM 인프라에 모두 유리하다. 실시간 스트리밍은 인프라 부담으로 스트레치(요구사항정의서 5-3). 5분은 당일 대응이 가능하면서 부담 없는 간격이며 `setting`으로 조정한다.
@@ -585,6 +623,9 @@ CREATE TABLE member (
     phone          varchar(20),
     address        varchar(255),
     status         varchar(16)  NOT NULL DEFAULT 'ACTIVE' CHECK (status IN ('ACTIVE','WITHDRAWN')),
+    -- (2026-10-01 결정, 고객 화면 최소판) 로그인 실패 5회 → 15분 자동 잠금 — 정책정의서 4-3 "고객 인증". 컬럼명은 구현 시 확정
+    failed_login_count int      NOT NULL DEFAULT 0,
+    locked_until   timestamptz,
     created_at     timestamptz  NOT NULL DEFAULT now(),
     withdrawn_at   timestamptz,
     CHECK (status <> 'WITHDRAWN' OR withdrawn_at IS NOT NULL)
@@ -592,7 +633,7 @@ CREATE TABLE member (
 
 -- 동의 항목 정의 (PLT-01)
 CREATE TABLE consent_item (
-    code            varchar(32)  PRIMARY KEY,   -- 'TOS','PRIVACY_REQUIRED','MARKETING'
+    code            varchar(32)  PRIMARY KEY,   -- 'TOS','PRIVACY_REQUIRED','AGE_OVER_14'(필수, 2026-10-02),'MARKETING'
     name            varchar(100) NOT NULL,
     required        boolean      NOT NULL,      -- 필수/선택 (PIPA §22①·⑤)
     version         varchar(16)  NOT NULL,
@@ -629,17 +670,35 @@ CREATE TABLE outbox (
 );
 CREATE INDEX ix_outbox_pending ON outbox (status, next_retry_at) WHERE status = 'PENDING';
 
--- 결제수단 (§7②5·6호 암호화 대상)
-CREATE TABLE payment_method (
-    id                bigserial   PRIMARY KEY,
-    member_id         bigint      NOT NULL REFERENCES member(id),
-    method_type       varchar(16) NOT NULL CHECK (method_type IN ('CARD','ACCOUNT')),
-    card_number_enc   bytea,                   -- 앱 레벨 양방향 암호화 (키는 VM .env, DB와 분리)
-    card_last4        char(4),                 -- 화면 표시용
-    bank_account_enc  bytea,
-    bank_name         varchar(50),
-    created_at        timestamptz NOT NULL DEFAULT now()
+-- 결제수단 — 2026-10-01 재설계 → 2026-10-02 구현 확정: 아래 설계안 대신 `payment` + `refund_account` 두 테이블(표 참고)
+-- ① 카드: PG 목업. 플랫폼은 카드번호를 받지도 저장하지도 않음(끝 4자리도 미저장 — 카드 등록·간편결제 기능이 없어 쓸 목적이 없음, 최소수집)
+--    → 주문의 결제 정보로 PG 거래 정보만 저장: 결제수단 종류, 카드사, PG 거래번호, 승인 시각, 금액
+-- ② 계좌: 고객이 마이페이지에서 등록하는 환불계좌만 직접 수집 — §7② 6호(계좌번호) 앱 레벨 암호화
+CREATE TABLE refund_account (                -- (설계안) 기존 payment_method의 계좌 부분
+    id                  bigserial   PRIMARY KEY,
+    member_id           bigint      NOT NULL REFERENCES member(id),
+    bank_name           varchar(50) NOT NULL,
+    account_number_enc  bytea       NOT NULL,   -- AES-GCM 앱 레벨 암호화 (키 PAYMENT_ENCRYPTION_KEY, .env — DB와 분리, 절대 규칙 #11)
+    account_last4       char(4)     NOT NULL,   -- 관리자 화면 기본 표시용
+    created_at          timestamptz NOT NULL DEFAULT now()
 );
+-- 관리자 화면은 끝 4자리만 기본 표시, "전체 보기"는 별도 동작 → 데이터 유형 PAYMENT로 접속기록 → 결제수단 조회 룰(HIGH)로 항상 탐지
+-- 기각: 기존 설계(카드번호 직접 저장·암호화) — 실무 커머스는 PCI DSS·여신전문금융업법 때문에 카드번호를 PG에 맡김. 보안성 검토에서 수집 최소화 위반으로 지적받을 구조
+```
+
+**결제 관련 테이블 — 구현 확정 (2026-10-02, 플랫폼 마이그레이션 0003. 정확한 컬럼은 레포 마이그레이션 기준)**
+
+| 테이블 | 담는 것 | 담지 않는 것 / 규칙 |
+|---|---|---|
+| `payment` | PG 승인 결과 — 결제수단 종류, 카드사, **PG 거래번호**(서버 생성 `MOCKPG-…`), 승인 시각, 금액(서버가 상품 가격으로 결정) | **카드번호 컬럼 자체가 없음**(컬럼 집합을 테스트로 고정). 주문 API는 카드번호·금액을 보내도 무시 |
+| `refund_account` | 은행, 예금주, **계좌번호 암호문**, 끝 4자리(평문), 회원당 1개 | **AES-256-GCM**, 버전 1바이트 + nonce 12바이트, **AAD = `refund_account:{회원번호}`**(암호문을 다른 회원 행으로 옮기면 복호화 실패). 키 `PAYMENT_ENCRYPTION_KEY`(16진수 64자, 없거나 형식 오류면 기동 거부) — platform-api·seed에만 전달 |
+| `orders` | 상품 1개, 상태 `PAID`만 | 취소·환불 처리는 v0.2 |
+
+- `payment_method` 한 테이블 대신 둘로 나눈 이유: 카드는 저장할 번호가 없어 컬럼 절반이 항상 비고, **성격(거래 기록 / 고객 정보)과 보존 규칙(5년 분리보관 / 탈퇴 즉시 삭제)이 다르다.**
+- 끝 4자리를 평문으로 둔 이유: 목록·상세마다 복호화하지 않게 해 **복호화 지점을 "전체 보기" 하나로 좁힘**. 고객 본인 화면도 끝 4자리만(세션 탈취 시 노출 최소화).
+- 관리자 접속기록: 주문 목록 `READ`·`ORDER`, 회원 상세 `READ`·`MEMBER_BASIC`(환불계좌 끝 4자리 포함), **환불계좌 전체 보기 `READ`·`PAYMENT`** → 결제수단 조회 룰(HIGH)로 항상 탐지·자동 소명 요청.
+
+```sql
 
 CREATE TABLE product (
     id     bigserial    PRIMARY KEY,
@@ -703,11 +762,23 @@ CREATE TABLE destruction_history (
 
 ### 4-1. 회원 탈퇴 시 파기·분리보관 절차 (v0.1 미결 해소)
 
+> **2026-10-01 개정 — v0.1은 탈퇴 즉시 파기** (기능 레이어 7, 고객 화면 최소판): 파기 배치는 v0.2라, 아래 절차대로 "상태만 바꾸고 배치를 기다리면" v0.1 동안 탈퇴 회원 정보가 계속 남아 **PIPA §21(지체 없이 파기) 위반 상태**가 된다. 따라서 **탈퇴 처리 트랜잭션 안에서** 아래를 수행한다(2026-10-02 구현). 아래 번호 절차는 v0.2 파기 배치의 설계로 유지. **보안성 검토 때 재확인.**
+>
+> | 순서 | v0.1 탈퇴 처리 (비밀번호 재확인 후, 한 트랜잭션) |
+> |---|---|
+> | 1 | 주문이 있으면 `retained_member_record`에 **PAYMENT_5Y**(전자상거래법 시행령 §6①3호, 5년) — 주문번호·상품·금액·일시·PG 거래번호·카드사 + 분쟁 시 본인 확인용 이름·이메일·전화. 비밀번호·주소·환불계좌는 담지 않음 |
+> | 2 | 문의가 있으면 **DISPUTE_3Y**(시행령 §6①4호, 3년) — 제목·본문·답변·시각 + 연락처를 **옮기고**, 운영 테이블 `inquiry`의 제목·본문·답변은 "(탈퇴 회원 문의 — 분리보관됨)"으로 지움(번호·상태·시각·답변자만 남음) |
+> | 3 | 환불계좌·동의 이력·회원 행 **실제 삭제**(`orders.member_id`는 SET NULL) |
+> | 4 | `destruction_history`에 MEMBER 1건(개인정보 미기록) |
+>
+> - 문의 **내용을 옮기고 지우는** 이유: 아래 3번은 "member_id SET NULL로 끊겨 통계 데이터가 된다"였지만, 문의 본문에는 고객이 쓴 개인정보(주소·전화 등)가 있을 수 있어 **연결만 끊으면 사실상 보관 기간 없는 보관**. 기각: 그대로 둠(§21 위반 소지), 문의 행 삭제(CS 처리 통계·답변자 이력 소실)
+> - **보안성 검토 이월**: 분리보관 데이터의 연락처 범위(최소수집 관점), **분리보관 테이블의 접근 권한 분리 미이행**(플랫폼 DB 계정 하나 — 아래 "분리보관의 의미"의 권한 분리가 실제로는 안 돼 있음)
+
 1. 탈퇴 요청 → `member.status='WITHDRAWN'`, `withdrawn_at` 기록
 2. 파기 배치가 탈퇴 회원을 집어 **법정 보존 대상 항목만** `retained_member_record`로 옮긴다
    - 대금결제·재화공급 기록 5년, 소비자 불만·분쟁처리 기록 3년 (전자상거래법 시행령 §6)
    - `data`에는 보존 목적에 **필요한 최소 항목만** 담는다 (주문번호·금액·일시·연락처 등). 비밀번호·주소 전체는 담지 않는다
-3. `member` 행과 `payment_method`를 **실제 삭제**(논리삭제 아님). `orders`·`inquiry`의 `member_id`는 `SET NULL`로 끊어져 개인과 연결되지 않는 통계 데이터가 된다
+3. `member` 행과 결제수단(환불계좌)을 **실제 삭제**(논리삭제 아님). `orders`·`inquiry`의 `member_id`는 `SET NULL`로 끊어져 개인과 연결되지 않는 통계 데이터가 된다
 4. `destruction_history`에 파기 이력 기록 (개인정보 자체는 미기록)
 5. `retain_until` 경과 시 `retained_member_record`도 파기
 

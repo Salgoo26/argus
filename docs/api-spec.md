@@ -222,7 +222,7 @@ POST /ingest/v1/access-logs
 | `DELETE` | 삭제 |
 | `DOWNLOAD` | 파일 다운로드·출력 |
 | `EXPORT` | (Argus 전용) 점검 보고서 export |
-| `UNMASK` | (Argus 전용) 정보주체 식별값 마스킹 해제 — `context.reason` 필수 |
+| `UNMASK` | (Argus 전용) 정보주체 식별값 마스킹 해제 — `context.reason` 필수. **⚠ 재검토 메모(2026-10-01)**: Argus 해제 기능은 v0.2 이후로 보류됐고, 보안성 검토 후 **플랫폼 관리자 화면에 표시제한 + 사유 입력 해제**를 구현할 예정 — 그때 플랫폼 출처의 해제 행위를 받기 위해 `UNMASK`의 외부 출처 허용 또는 `READ` + `context.reason`으로 명세를 바꿔야 함 |
 
 > **(Argus 전용)** 코드값(`EXPORT`·`UNMASK`, 아래 `ACCESS_LOG`)은 Argus 자체 기록(2-7절)에서만 쓴다. **외부 출처가 보내면 거부**한다(`INVALID_ACTION` / `INVALID_CATEGORY`) — 외부 시스템이 Argus 내부 행위를 사칭한 기록을 원장에 남기지 못하게 하기 위함 (v0.3).
 
@@ -256,7 +256,11 @@ POST /ingest/v1/access-logs
 | 회원 목록 조회, 20건 표시 (F-03 #2) | `READ` | `MEMBER_BASIC` | ids 20개, count 20 |
 | 회원 상세 조회 (F-02 #4) | `READ` | `MEMBER_BASIC` | ids 1개, count 1 |
 | 문의 상세 확인 (F-02 #3) | `READ` | `INQUIRY` | ids 1개 + `context.ticket_id` |
-| 주문·결제 조회 (F-03 #4) | `READ` | `PAYMENT` | ids 1개, count 1 |
+| 주문 목록 조회 (2026-10-02 구현) | `READ` | `ORDER` | 표시된 주문의 회원(중복 제거) |
+| 회원 상세 조회 — 환불계좌 끝 4자리 포함 (2026-10-02) | `READ` | `MEMBER_BASIC` | ids 1개, count 1 |
+| **환불계좌 전체 보기** (2026-10-02, 구 "주문·결제 조회") | `READ` | `PAYMENT` | ids 1개, count 1 — 결제수단 조회 룰(HIGH)로 항상 탐지 |
+| 1:1 문의 목록 (2026-10-02) | `READ` | `INQUIRY` | 표시된 작성자(중복 제거), 본문 제외 |
+| 1:1 문의 답변 (2026-10-02) | `UPDATE` | `INQUIRY` | ids 1개 + `context.ticket_id` (한 번만 — 이미 답변이면 409, 실패도 기록) |
 | 회원 목록 다운로드 120건 (F-03 #5) | `DOWNLOAD` | `MEMBER_BASIC` | ids 120개, count 120 |
 | 회원정보 수정 실패 (검증 오류) | `UPDATE` | `MEMBER_BASIC` | ids 1개, `result: FAILURE` |
 | 관리자 로그인 실패 — **존재하는 계정**(비밀번호 오류·잠김·퇴직자) (v0.4) | `LOGIN` | `NONE` | 생략, `result: FAILURE` |
@@ -320,8 +324,9 @@ Argus 내부 행위(LOG-17)도 같은 규격으로 기록하지만, **outbox를 
 | 로그인 | `LOGIN` | 생략 | |
 | 탐지건·접속기록 조회 | `READ` | **`count`만 기록, `ids`는 비움** | 조회할 때마다 회원 PK를 Argus 접속기록에 다시 쌓으면 식별자가 중복 축적되어 최소처리 원칙에 반한다 |
 | 정보주체 ID로 검색 | `READ` | `count`만 + `request.query_keys` | 검색어 값 자체는 기록하지 않음 |
-| **마스킹 해제** | `UNMASK` | `count` + `context.reason`·`context.target` | 무엇을 열어봤는지가 감사의 핵심 |
+| **마스킹 해제** (v0.2 이후 — 2-3 재검토 메모) | `UNMASK` | `count` + `context.reason`·`context.target` | 무엇을 열어봤는지가 감사의 핵심 |
 | 보고서 export | `EXPORT` | `count` + `context.report_id`, 언마스킹 시 `context.reason` | 보고서가 마스킹 우회 경로가 되지 않게 |
+| **소명 첨부 내려받기** (2026-10-02) | `READ` (`ACCESS_LOG`) | count 0 + `context.target = {"detection_id": N}` | 캡처에 개인정보가 있을 수 있음. 경로 변수 값은 원장에 남기지 않으므로 대상은 `target`으로. 코드는 `DOWNLOAD`를 섞지 않고 Argus 자체 기록 코드(LOGIN·READ·UNMASK·EXPORT) 안에서 |
 
 ---
 
@@ -374,6 +379,7 @@ POST /ingest/v1/handler-events
 - **A5 계정 발급** (v0.4 확정): 재직(`ACTIVE`) 상태 이벤트 수신 시 연결된 계정이 없으면 Argus에 취급자용 로그인 계정(`role=HANDLER`, `argus_user.login_id = handler.login_id`)을 생성한다.
   - 초기 비밀번호는 **무작위 argon2id 해시**(사실상 로그인 불가) — 해시가 아닌 표식값을 넣으면 로그인 코드가 특수 처리해야 하므로 정상 형식을 쓴다. 실제 비밀번호는 **M4에서 관리 스크립트로 설정**한다.
   - 같은 `login_id`를 다른 Argus 계정(예: 정보보호 담당자)이 이미 쓰고 있으면 **생성하지 않고 경고 로그** — 남의 계정을 취급자 계정으로 바꿔치기하지 않는다.
+  - **반대 순서 (2026-10-02)**: **플랫폼 백오피스 아이디 = Argus 아이디** 원칙(정책정의서 4-4)에 따라 담당자도 플랫폼 계정을 가지므로, 동기화가 먼저 돌면 담당자 아이디로 A5 계정(로그인 불가)이 먼저 생긴다. 이때 담당자 생성 명령(`create-officer`)은 **로그인 이력이 없는 A5 계정만 담당자로 전환**한다(명부 연결 유지 — 플랫폼에서 퇴직하면 Argus 담당자 계정도 막힘, `DISABLED`는 되살리지 않음). 실제로 쓰던 취급자 계정은 거부.
   - 퇴직 상태로 처음 들어온 취급자는 계정을 만들지 않는다.
 - `HANDLER_TERMINATED` 수신 시 해당 A5 계정을 `DISABLED`로 전환한다. 진행 중인 소명 건은 담당자가 판단한다 — `DETECTED`·`REQUESTED`면 DISMISS(요청 취소), `REJECTED`면 ESCALATE 가능 (2026-10-01 정합화: 정책정의서 3-2 상태도에 `REQUESTED → DISMISSED` 추가로 "요청 후 제출 전 퇴직 시 건이 멈추는" 모순 해소).
 - **재입사(`TERMINATED` → `ACTIVE`) 이벤트가 와도 `DISABLED` 계정을 자동 복구하지 않는다** (v0.4) — 권한 복구는 사람이 판단한다.

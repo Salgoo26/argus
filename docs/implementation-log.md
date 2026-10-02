@@ -29,6 +29,22 @@
 
 ---
 
+## 2026-10-02 (저녁) — Cowork 사본 갱신 대조 + 기능 레이어 8(2티어) 논의 시작
+
+**한 일**
+- Cowork가 갱신한 사본 8개(CLAUDE.md, docs/README·requirements·policy·actor-flows·architecture·api-spec·db-schema — 10/01 기능 레이어 1~6, 10/02 기능 레이어 7·관련 티켓 반영)를 구현과 대조 → docs PR
+- **대조 결과: 구현과 어긋나는 동작 기술 없음.** 다음 동기화 때 다듬을 작은 차이(문서 수정은 Cowork에서 — CLAUDE.md 4절):
+  1. db-schema 4절 `refund_account` DDL(설계안 블록)에 `account_holder`·`updated_at`·`UNIQUE(member_id)`가 없음, `payment` DDL 블록 없음 — 표에 "레포 마이그레이션 기준"이라 적혀 있어 동작 오해는 없지만 DDL 원본으로 쓰려면 0003과 맞추기
+  2. db-schema 4절 `member` 주석 "컬럼명은 구현 시 확정" → 확정됨(`failed_login_count`·`locked_until`). `orders.status` CHECK(PAID)·`product.price` CHECK·`inquiry` 인덱스 2개·`explanation_attachment` 인덱스도 마이그레이션에만 있음
+  3. policy 3절: 3-3(소명 근거)이 3-2 뒤 기존 설명 목록("반려는 독립 상태로 둔다" 등) 앞에 끼어 그 목록이 3-3 아래로 들어감 / 4-4가 4-3보다 앞에 있음 — 배치만의 문제
+  4. actor-flows F-01 #7 "분리보관은 주문 기능과 함께" → 구현 완료(주문 PAYMENT_5Y + 문의 DISPUTE_3Y, db-schema 4-1과 같게)
+  5. architecture 8-6 이월 목록의 "보안 관련은 보안성 검토 단계로" → 사용자 정정(2026-10-02): **기본 보안은 바로 논의·반영, 논쟁 여지가 있거나 구현이 복잡한 것만 이월**
+
+**다음 할 일**
+- 기능 레이어 8(2티어) 계획 논의 — 상용 솔루션 방식 비교 → 범위·식별자·정보주체 기록 방식 결정 후 착수
+
+---
+
 ## 2026-10-02 (오후) — 소명의 관련 업무 티켓 + 플랫폼 아이디 = Argus 아이디
 
 > PR #29~#33 머지 후 사용자 테스트 중 "소명 화면에 관련 1:1 문의 티켓을 등록하는 부분이 없다"는 지적에서 시작.
