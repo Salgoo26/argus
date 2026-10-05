@@ -1,6 +1,6 @@
 # DB 스키마 (Argus / 플랫폼)
 
-> 작성일: 2026-09-23 / v0.2 (2026-09-23 개정 — 요구사항 전수 대조 후 6개 테이블·다수 컬럼 추가) / **v0.3 (2026-09-29 개정 — 구현 M1 반영: 해시체인 정규화 규칙 v1 확정, DB 계정 구조·권한 확정, 알려진 한계 명시)** (2026-09-30 보완 — A5 초기 해시 주석) / **v0.4 (2026-10-01 개정 — 구현 M3 반영: 탐지 날짜 KST 기준, 해석 불가 룰 시 순찰 실패, 빈 순찰 기록, 순찰 상한, `log_summary` 잘림 표시)** (2026-10-01 보완 — 구현 M4: `detection_rule.auto_request`, `explanation.requested_by` NULL 허용, 자동 소명 요청, A5 조회 범위) / **v0.5 (2026-10-02 — 기능 레이어 1·4·6·7 반영: 룰 평가 대상, 명부 미등록 처리, `min_baseline`, 집계 윈도우 1회 판단, 룰 변경 이력 운영, 결제수단 재설계, 고객 잠금 컬럼, 탈퇴 즉시 파기)** / **v0.6 (2026-10-02 — 기능 레이어 7 구현 반영: `payment`·`refund_account` 확정, 탈퇴 분리보관 실제 절차, 소명 첨부 권한·무결성, `explanation.ticket_ids`, 동의 항목 `AGE_OVER_14`)**
+> 작성일: 2026-09-23 / v0.2 (2026-09-23 개정 — 요구사항 전수 대조 후 6개 테이블·다수 컬럼 추가) / **v0.3 (2026-09-29 개정 — 구현 M1 반영: 해시체인 정규화 규칙 v1 확정, DB 계정 구조·권한 확정, 알려진 한계 명시)** (2026-09-30 보완 — A5 초기 해시 주석) / **v0.4 (2026-10-01 개정 — 구현 M3 반영: 탐지 날짜 KST 기준, 해석 불가 룰 시 순찰 실패, 빈 순찰 기록, 순찰 상한, `log_summary` 잘림 표시)** (2026-10-01 보완 — 구현 M4: `detection_rule.auto_request`, `explanation.requested_by` NULL 허용, 자동 소명 요청, A5 조회 범위) / **v0.5 (2026-10-02 — 기능 레이어 1·4·6·7 반영: 룰 평가 대상, 명부 미등록 처리, `min_baseline`, 집계 윈도우 1회 판단, 룰 변경 이력 운영, 결제수단 재설계, 고객 잠금 컬럼, 탈퇴 즉시 파기)** / **v0.6 (2026-10-02 — 기능 레이어 7 구현 반영: `payment`·`refund_account` 확정, 탈퇴 분리보관 실제 절차, 소명 첨부 권한·무결성, `explanation.ticket_ids`, 동의 항목 `AGE_OVER_14`)** / **v0.7 (2026-10-05 — 기능 레이어 8(2티어) 설계 확정: 플랫폼 `db_access_token` 발급 기록, 5절 대조표 DB 직접 접근 행, `detection.access_path`·진행 중 탐지건 유니크 키에 경로 추가(정책정의서 1-5 경로 구분 원칙) — 구현 시 마이그레이션, 기존 행은 `APP`)**
 > 관련 문서: [[아키텍처_설계서.md]], [[API명세서_시스템간.md]], [[정책정의서.md]], [[액터별_플로우.md]], [[요구사항정의서.md]]
 > DBMS: PostgreSQL 16 (플랫폼 DB / Argus DB 별도 인스턴스)
 > 표기: **[S]** = Walking Skeleton에 필요한 테이블. 컬럼은 전체를 정의하되 Skeleton에서는 [S] 테이블만 생성한다.
@@ -53,6 +53,7 @@
 | Argus | `destruction_history` | 파기 증적 (개인정보 미포함) | 정책정의서 5-3 |
 | Argus | `setting` | 점검 주기 등 | §8② (설정값) |
 | 플랫폼 | `operator` / `operator_permission_history` | 관리자 UI 사용자, 동기화 원천, 권한 이력 | PLT-10·14 |
+| 플랫폼 | `db_access_token` | DB 접속 토큰 발급 기록(감사용, 토큰 값 미저장) — 2026-10-05 | 2단계(2티어), 아키텍처 3-4 |
 | 플랫폼 | `member` | 고객 = 정보주체 | PLT-01~03 |
 | 플랫폼 | `consent_item` / `member_consent` | 동의 항목 정의와 동의·철회 이력 | **PLT-01** |
 | 플랫폼 | `payment_method` / `orders` / `product` / `inquiry` | 무대장치 업무 데이터 | PLT-04~06 |
@@ -261,6 +262,7 @@ CREATE TABLE detection (
     rule_version       int          NOT NULL,
     rule_snapshot      jsonb        NOT NULL,     -- 탐지 당시 룰 전체 (판단 근거 보존)
     source_system_id   smallint     NOT NULL REFERENCES source_system(id),
+    access_path        varchar(8)   NOT NULL DEFAULT 'APP' CHECK (access_path IN ('APP','DB')),  -- (2026-10-05) 한 탐지건 = 한 경로. 룰이 ALL이어도 경로별로 따로 생성 — 정책정의서 1-5
     actor_login_id     varchar(64)  NOT NULL,
     group_bucket       varchar(64)  NOT NULL,     -- EVENT: '2026-09-15'(occurred_at의 KST 날짜, v0.4) / AGGREGATE: 윈도우 시작 시각
     severity           varchar(8)   NOT NULL,
@@ -279,7 +281,7 @@ CREATE TABLE detection (
 
 -- 같은 그룹의 "진행 중" 탐지건은 1개만 (정책 보완: 6절 #1)
 CREATE UNIQUE INDEX ux_detection_open_group
-    ON detection (rule_id, source_system_id, actor_login_id, group_bucket)
+    ON detection (rule_id, source_system_id, access_path, actor_login_id, group_bucket)   -- access_path 추가 (2026-10-05)
     WHERE status IN ('DETECTED','REQUESTED','SUBMITTED','REJECTED');
 
 CREATE INDEX ix_detection_status ON detection (status, detected_at);
@@ -737,6 +739,21 @@ CREATE TABLE operator_permission_history (
     changed_at   timestamptz NOT NULL DEFAULT now()
 );
 
+-- DB 접속 토큰 발급 기록 (2026-10-05, 기능 레이어 8 — 아키텍처 설계서 3-4)
+-- 감사용 기록일 뿐 검증에 쓰지 않는다: 게이트웨이는 서명 토큰(JWT)의 서명·만료만 검증하고 이 테이블을 조회하지 않음
+-- (공용 계정이 DB 소유자라 이 테이블은 게이트웨이 접속자가 고칠 수 있음 → 검증 근거로 쓰면 위장 가능)
+CREATE TABLE db_access_token (
+    token_id     uuid         PRIMARY KEY,       -- 토큰의 jti. 게이트웨이 기록의 context.token_id와 연결
+    operator_id  bigint       NOT NULL REFERENCES operator(id),
+    issued_at    timestamptz  NOT NULL DEFAULT now(),
+    expires_at   timestamptz  NOT NULL,          -- issued_at + 1시간 (고정)
+    issued_ip    inet         NOT NULL,          -- 발급 요청 IP (관리자 화면 접속지)
+    CHECK (expires_at = issued_at + interval '1 hour')
+);
+-- 토큰 값·해시는 저장하지 않는다(발급 시 화면에 한 번만 표시). 발급 사유 칸 없음 — 사용자 결정(이상 징후 시 소명 단계가 있음)
+-- SQL 원문·매개변수는 이 DB가 아니라 게이트웨이 원문 저장소(gateway-data 볼륨)에 둔다 — 같은 이유(소유자 계정의 변조 가능성)
+CREATE INDEX ix_db_access_token_operator ON db_access_token (operator_id, issued_at);
+
 -- 법정 보존 항목 분리보관 (PIPA §21③)
 CREATE TABLE retained_member_record (
     id                  bigserial    PRIMARY KEY,
@@ -815,7 +832,7 @@ CREATE TABLE destruction_history (
 | LOG-15 시간차 | 계산 |
 | LOG-16 이메일 알림 | **`notification.channel='EMAIL'`** |
 | LOG-17 Argus 자체 기록 | `access_log` (`source_system='ARGUS'`) |
-| 2단계 DB 직접 접근 | `access_path='DB'` + `context`에 쿼리문·결과 건수 |
+| 2단계 DB 직접 접근 (기능 레이어 8, 2026-10-05) | `access_path='DB'` + `context`에 **정규화 SQL·DB 계정·테이블·컬럼·건수·원문 참조·지문·정보주체 미특정·토큰 ID**(API명세서 2-3 v0.5 — 원문 SQL은 Argus에 저장하지 않음). 실사용자는 `actor_login_id`(토큰 주인 = 플랫폼 아이디). 플랫폼 쪽은 **`db_access_token` 발급 기록**(4절) |
 
 ---
 

@@ -1,6 +1,6 @@
 # API 명세서 — 시스템 간 (플랫폼 → Argus)
 
-> 작성일: 2026-09-23 / v0.2 (2026-09-23 개정 — DB 스키마와 상호 대조하여 불일치 8건 수정) / v0.3 (2026-09-29 개정 — 구현 M1 반영: 오류 코드 세분, 원본 개인정보 유입 차단 검증, Argus 전용 코드값 거부) / **v0.4 (2026-09-30 개정 — 구현 M2 반영: relay 401 해석, 경로 템플릿, 로그인·로그아웃·실패 요청 기록 규칙, A5 초기 계정)**
+> 작성일: 2026-09-23 / v0.2 (2026-09-23 개정 — DB 스키마와 상호 대조하여 불일치 8건 수정) / v0.3 (2026-09-29 개정 — 구현 M1 반영: 오류 코드 세분, 원본 개인정보 유입 차단 검증, Argus 전용 코드값 거부) / **v0.4 (2026-09-30 개정 — 구현 M2 반영: relay 401 해석, 경로 템플릿, 로그인·로그아웃·실패 요청 기록 규칙, A5 초기 계정)** / **v0.5 (2026-10-05 개정 — 기능 레이어 8(2티어) 설계 확정: `access_path=DB` 기록 규칙, `context` DB 키, DB 예시, 원문 SQL 유입 차단)**
 > 관련 문서: [[아키텍처_설계서.md]], [[DB스키마.md]], [[요구사항정의서.md]], [[정책정의서.md]], [[액터별_플로우.md]]
 > 범위: 두 시스템의 **경계 계약**만 다룬다. 화면용 내부 API(argus-web ↔ argus-api 등)는 구현하며 코드로 정의하고 FastAPI OpenAPI(Swagger)로 자동 문서화한다.
 
@@ -10,7 +10,7 @@
 | **② 취급자 동기화** | 취급자 계정의 생성·변경·퇴직을 Argus에 반영 (소명 대상 지정, 퇴직자 룰, A5 로그인) | 플랫폼 relay worker → argus-api |
 | **③ 헬스체크** | 배포 검증·전송 전 가용성 확인 | 배포 스크립트 / relay worker |
 
-> 상용 솔루션으로 치면 **Agent ↔ 수집 서버 프로토콜**에 해당한다. Argus는 이 계약만 지키면 어떤 출처 시스템(2단계의 DB 감사로그 수집기 포함)이든 받아들인다.
+> 상용 솔루션으로 치면 **Agent ↔ 수집 서버 프로토콜**에 해당한다. Argus는 이 계약만 지키면 어떤 출처 시스템(2단계의 DB 접근 게이트웨이 포함 — 2026-10-05)이든 받아들인다.
 
 ### v0.2 개정 내역
 
@@ -35,6 +35,15 @@
 | 4 | **원본 개인정보 유입 차단 검증** (2-2절) | CLAUDE.md 절대 규칙 #3(원본 개인정보 전송 금지)을 발신 측 약속에만 맡기지 않고 **수신 측에서도 방어**. `subject.ids` 형식 제한, `request.path`의 쿼리스트링 거부 등 |
 | 5 | **Argus 전용 코드값은 외부 출처에서 거부** (2-3·2-5절) | `EXPORT`·`UNMASK`·`ACCESS_LOG`의 "(Argus 전용)" 표기를 수신 검증으로 구체화 — 외부 출처가 Argus 내부 행위를 사칭하지 못하게 |
 | 6 | **② 취급자 동기화의 멱등·중복 판정 규칙** (3-1절) | `handler`에 event_id 저장 칸이 없어 판정 기준이 미정이었음. 상태 스냅샷 + `last_event_at` 기준으로 확정, event_id 저장 테이블은 기각 |
+
+### v0.5 개정 내역 (2026-10-05, 기능 레이어 8 설계 확정)
+
+| # | 수정 | 사유 |
+|---|---|---|
+| 1 | **`access_path=DB` 기록 규칙** (2-2절) | DB 접근 게이트웨이(아키텍처 설계서 3-4)가 보내는 기록의 필드별 의미 정의 |
+| 2 | **`context` DB 키 확정** (2-3절) — `db_user`·`sql_normalized`·`tables`·`columns`·`row_count`·`raw_ref`·`raw_fingerprint`·`subject_unresolved`·`token_id` | v0.2에 예약한 `query`(실행된 SQL)는 **원문이라 폐기** — 매개변수·리터럴에 개인정보가 실림(절대 규칙 #3). 원문은 게이트웨이 저장소에만 |
+| 3 | DB 이벤트 예시 (2-4절) | 회원번호 추출·정보주체 미특정·연결 인증 |
+| 4 | **원문 SQL 유입 차단 검증** (2-2절) | `sql_normalized`에 문자열 리터럴(`'`)이 있으면 거부 — 정규화가 깨졌거나 원문이 실린 것 |
 
 ### v0.4 개정 내역 (2026-09-30, 구현 M2에서 확정)
 
@@ -185,7 +194,7 @@ POST /ingest/v1/access-logs
 | `subject.ids` | string[] | 조건부 | 처리한 정보주체의 **내부 PK**. 이름·이메일 등 원본 정보는 절대 보내지 않음. 최대 1,000개 | 동일 |
 | `subject.count` | int | 조건부 | 처리한 정보주체 수 (목록 조회·다운로드 건수). **정보주체를 기록하기 전에 실패한 요청은 0** (v0.4) | 동일 / 대량 룰 판정 |
 | `subject.truncated` | bool | - | `ids`가 1,000개를 넘어 잘렸는지 (`count`는 항상 전체 건수) | |
-| `access_path` | enum | ✅ | `APP` / `DB` (1단계는 APP만) | 요구사항정의서 1-2절 |
+| `access_path` | enum | ✅ | `APP`(관리자 화면 경유) / `DB`(**DB 접근 게이트웨이 경유** 직접 접근 — 아키텍처 설계서 3-4, v0.5). DB 기록의 필드 규칙은 아래 "`access_path=DB` 기록 규칙" | 요구사항정의서 1-2절 |
 | `data_category` | enum | ✅ | 처리한 데이터 유형 (2-3절) | 결제수단 조회 룰 등 |
 | `request.method` / `request.path` | string | - | 호출된 관리자 기능. **`path`는 실제 URL이 아니라 라우트 템플릿**(예: `/admin/members/{member_id}`) — 경로 변수의 값이 원장에 남지 않게 (v0.4) | 수행업무 재구성 근거 |
 | `request.query_keys` | string[] | - | 검색 조건의 **키 이름만** (값은 개인정보일 수 있어 제외) | 최소수집 |
@@ -206,8 +215,26 @@ POST /ingest/v1/access-logs
 | `request.method` | 표준 HTTP 메서드 | |
 | **`request.query_keys`** | 최대 50개, 각 원소 **키 이름 형식** `[A-Za-z0-9_.\[\]-]{1,64}`만 (`INVALID_FIELD`) | 키 대신 값이 실려 오는 것 차단 |
 | `context` 값 | `reason` 1~500자, `ticket_id` 1~64자, `report_id`·`row_count` 정수, `target`은 `{"detection_id": int}` 또는 `{"access_log_id": int}` (`INVALID_FIELD`) | |
+| **`context` DB 키** (v0.5) | 2-3절 DB 키는 **`access_path=DB`일 때만** 허용(APP 기록에 오면 `UNKNOWN_CONTEXT_KEY`). DB 기록은 `db_user`·`raw_ref`·`raw_fingerprint` 필수, `LOGIN` 외에는 `sql_normalized`·`row_count`도 필수 (`MISSING_FIELD`). 형식: `db_user` `[A-Za-z0-9_]{1,63}` / `sql_normalized` 1~4,000자, **작은따옴표(`'`) 포함 불가** / `tables`·`columns` 각 최대 50·200개, 원소는 `[A-Za-z0-9_."]{1,128}` / `raw_ref` `[A-Za-z0-9:_-]{1,128}` / `raw_fingerprint` `sha256:` + 소문자 hex 64자 / `subject_unresolved` bool / `token_id` UUID (`INVALID_FIELD`) | **원문 SQL 유입 차단** — 정규화 SQL은 리터럴을 `$1`…로 바꾸므로 따옴표가 남을 수 없다. 남았다면 정규화 실패이거나 원문이 실린 것 |
 
 > 절대 규칙 #3(원본 개인정보 전송 금지)은 발신 측 약속이다. 수신 측 검증은 그 약속이 깨졌을 때를 대비한 **두 번째 방어선**이며, 형식만으로 모든 개인정보를 걸러낼 수는 없다(예: 숫자로만 된 값). 1차 책임은 여전히 발신 측에 있다.
+
+**`access_path=DB` 기록 규칙** (v0.5 — 발신 측: DB 접근 게이트웨이, 아키텍처 설계서 3-4)
+
+| 필드 | DB 기록에서의 의미 |
+|---|---|
+| `event_id` | 게이트웨이가 문장(또는 연결 인증) 1건마다 생성. 게이트웨이 원문 저장소의 키와 같다 |
+| `occurred_at` | 문장 실행 시작 시각 (`LOGIN`은 인증 시각) |
+| `actor.login_id` | **토큰의 주인 = 플랫폼 관리자 아이디**. DB 계정(공용)이 아니다 → 3티어 기록과 같은 아이디라 취급자 명부·탐지 그룹이 그대로 맞는다 |
+| `client_ip` | 게이트웨이가 TCP 연결에서 직접 본 DB 툴의 IP(프록시 헤더 없음) |
+| `action` | 문장 종류 → 수행업무 (아키텍처 설계서 3-4 "수행업무 매핑"). 연결 인증은 `LOGIN` |
+| `subject` | `type=MEMBER`. 결과·조건에서 추출한 회원번호를 `ids`(중복 제거), `count`는 고유 회원 수. **정보주체 미특정**이면 `ids` 비움 + `count = row_count` + `context.subject_unresolved = true` |
+| `data_category` | 문장이 건드린 테이블 중 가장 민감한 유형 (3-4 "데이터 유형") |
+| `request` | 생략 (HTTP 요청이 아님). 대신 `context.sql_normalized`·`tables`·`columns` |
+| `result` | DB가 오류를 돌려주거나 실행 중 연결이 끊기면 `FAILURE` |
+
+- 연결 인증 실패(`LOGIN` + `FAILURE`)는 **존재하는 플랫폼 아이디일 때만** 기록한다(2-4절 v0.4 규칙과 동일 — 아이디 칸에 잘못 입력된 값이 원장에 영구 저장되는 것 방지).
+- 시스템 카탈로그만 읽는 문장(DB 툴의 메타데이터 조회)·트랜잭션 제어·`SET`·`SHOW`는 보내지 않는다. **DDL·DCL은 v0.1에서 보내지 않는다**(게이트웨이 원문 저장소에만 — 수행업무 코드가 없음, v0.2에서 명령어 통제와 함께 정의).
 
 ### 2-3. 코드값
 
@@ -245,8 +272,16 @@ POST /ingest/v1/access-logs
 | `reason` | string(≤500) | `UNMASK`·`EXPORT` 시 사유 — **§12① 용도 특정** |
 | `target` | object | `UNMASK` 대상 (`{"detection_id": 123}` 또는 `{"access_log_id": 456}`) |
 | `report_id` | int | `EXPORT` 시 생성된 보고서 ID |
-| `query` | string | (2단계) 실행된 SQL |
-| `row_count` | int | (2단계) 결과 건수 |
+| ~~`query`~~ | ~~string~~ | ~~(2단계) 실행된 SQL~~ — **v0.5 폐기**: 원문은 리터럴·매개변수에 개인정보가 실림. `sql_normalized` + 게이트웨이 원문 참조로 대체 |
+| `row_count` | int | (DB) 결과 행 수(SELECT) 또는 영향받은 행 수(DML) — DB가 돌려준 완료 태그 기준 |
+| `db_user` | string | (DB, v0.5) 실제로 DB에 연결한 계정(공용 계정). 실사용자는 `actor.login_id` |
+| `sql_normalized` | string(≤4,000) | (DB, v0.5) **정규화 SQL** — 리터럴을 `$1`…로 치환(`SELECT id, name FROM member WHERE email = $1`). 4,000자 초과는 잘라 보낸다 |
+| `tables` | string[] | (DB, v0.5) 문장이 참조한 테이블(`member`, `public.orders` 등) |
+| `columns` | string[] | (DB, v0.5) 참조·반환한 컬럼(`member.email`). `*`는 펼친 결과 기준 |
+| `raw_ref` | string | (DB, v0.5) **게이트웨이 원문 저장소의 참조** — 원문(SQL·매개변수)을 찾는 키 |
+| `raw_fingerprint` | string | (DB, v0.5) 원문 레코드의 SHA-256 지문(`sha256:…`). 원문 저장소와 대조해 위·변조·유실 확인 |
+| `subject_unresolved` | bool | (DB, v0.5) **정보주체 미특정** — 회원번호를 추출하지 못한 처리 |
+| `token_id` | string(UUID) | (DB, v0.5) 이 연결에 쓴 DB 접속 토큰의 ID — 플랫폼 토큰 발급 기록과 연결(DB스키마 4절) |
 
 ### 2-4. 이벤트 예시 (플랫폼 관리자 행위별)
 
@@ -267,6 +302,19 @@ POST /ingest/v1/access-logs
 | 관리자 로그인 실패 — **존재하지 않는 ID** (v0.4) | **기록하지 않음** | | |
 | 관리자 로그아웃 (v0.4) | **기록하지 않음** (명시적 제외) | | |
 | 정보주체를 기록하기 전에 실패한 요청(입력 검증 오류 400 등) (v0.4) | 해당 행위 | 해당 유형 | count 0, `result: FAILURE` |
+
+**DB 직접 접근 (게이트웨이, `access_path=DB`, v0.5)** — `context` 공통: `db_user`, `raw_ref`, `raw_fingerprint`, `token_id`
+
+| 행위 (DB 툴) | action | data_category | subject / context |
+|---|---|---|---|
+| 게이트웨이 접속(토큰 인증 성공) | `LOGIN` | `NONE` | 생략 |
+| 접속 실패 — 존재하는 아이디, 토큰 오류·만료·퇴직 | `LOGIN` | `NONE` | 생략, `result: FAILURE` |
+| `SELECT * FROM member WHERE email = 'a@x.com'` | `READ` | `MEMBER_BASIC` | 결과의 `member.id`에서 ids 1개 · `sql_normalized: …WHERE email = $1` · `row_count: 1` |
+| `SELECT name, phone FROM member LIMIT 50` | `READ` | `MEMBER_BASIC` | **미특정** — ids 비움, count 50, `subject_unresolved: true` |
+| `SELECT o.member_id, r.bank_name FROM orders o JOIN refund_account r …` | `READ` | `PAYMENT` | 결과의 `member_id`에서 ids · `tables: [orders, refund_account]` |
+| `UPDATE member SET phone = $1 WHERE id = $2` | `UPDATE` | `MEMBER_BASIC` | 매개변수 `$2`에서 ids 1개 |
+| `DELETE FROM inquiry WHERE created_at < $1` | `DELETE` | `INQUIRY` | **미특정** — count = 삭제 행 수 |
+| `SELECT` 실행 중 DB 오류 | `READ` | 해당 유형 | count 0, `result: FAILURE` |
 
 - **존재하지 않는 ID의 로그인 실패를 기록하지 않는 이유**(v0.4): ID 칸에 비밀번호를 잘못 입력하는 일이 흔한데, 그 값이 append-only 원장에 영구 저장된다. 게다가 그 값은 §2 3호의 "개인정보취급자 식별자"도 아니다. 대가로 존재하지 않는 ID 대입 시도는 Argus에 보이지 않는다(아키텍처 설계서 8-6 과제).
 - **로그아웃을 제외하는 이유**(v0.4): 개인정보 처리가 없고 수행업무 코드(2-3절)에도 없다. 발신 측은 `@access_log_exempt("사유")`로 **명시적으로** 제외한다 — 표시가 없는 관리자 라우트는 기동 자체가 거부된다(아키텍처 설계서 3-2).
@@ -401,6 +449,7 @@ POST /ingest/v1/handler-events
 | 전송 주기 | relay가 수 초 간격으로 `PENDING` 건을 최대 100건씩 묶어 전송 |
 | 순서 | 같은 topic 안에서 `created_at` 순으로 전송 (엄격한 순서 보장은 요구하지 않음 — 수신 측이 `occurred_at`·`last_event_at`으로 처리) |
 | 금지 | 이름·이메일·연락처·카드번호 등 **원본 개인정보를 payload에 넣지 않는다** |
+| **DB 접근 게이트웨이** (v0.5) | 2티어 기록은 게이트웨이가 **자체 버퍼**(플랫폼 outbox 아님 — 공용 계정으로 변조 가능)에 쌓고 자체 전송 루프로 보낸다. 출처는 `PLATFORM`(같은 HMAC 키) → 취급자 매칭이 3티어와 같다. 재시도·건별 판정·413 분할·스스로 버리지 않음은 이 표와 1-4·1-5절 그대로 |
 | **시드 데이터** | baseline용 과거 접속기록(요구사항 4-3)도 **이 수집 API를 통해** 주입한다. Argus DB에 직접 INSERT하면 해시체인이 성립하지 않는다. 시드 스크립트는 `occurred_at`을 과거로 지정하고 `X-Argus-Timestamp`는 현재 시각을 쓴다 |
 
 > 시드 주입 시 `INVALID_TIMESTAMP`는 **미래 5분 초과**만 거부하므로 과거 시각은 통과한다.
@@ -427,7 +476,7 @@ GET /healthz
 ## 7. 미결 / 구현 시 확정
 
 - [x] A5 초기 계정 발급 → 무작위 해시로 생성, 비밀번호는 M4 관리 스크립트로 설정 (v0.4, 3-1절)
-- [x] 2단계(`access_path=DB`) 확장 필드 → `context.query`·`context.row_count` 예약 (v0.2)
+- [x] 2단계(`access_path=DB`) 확장 필드 → `context.query`·`context.row_count` 예약 (v0.2) → **v0.5에서 확정**: `query` 폐기, DB 키 9종(2-3절) (2026-10-05)
 - [ ] DEAD 상태 이벤트 운영 알림 채널 (로그 / 이메일) — M2 구현은 ERROR 로그뿐, DEAD 재처리 도구 없음
 - [ ] HMAC 비밀키 교체 절차의 운영 문서화
 - [ ] HMAC 신·구 키 병행 허용(1-2절 #4) — Walking Skeleton 미구현(출처당 키 1개). 보안성 검토 단계 과제(아키텍처 설계서 8-6)
