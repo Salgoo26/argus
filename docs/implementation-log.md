@@ -29,6 +29,48 @@
 
 ---
 
+## 2026-10-06 — 기능 레이어 8(2티어) 착수 확인 3가지 실측 (CLAUDE.md 6절)
+
+**한 일**
+- 레포 밖 임시 폴더에 실측용 최소 게이트웨이(Python asyncio, 버리는 코드)를 만들어 PG16(실측 전용, trust) 앞에 두고 확인. 클라이언트: pgjdbc 42.7.13(Java 21), psql(libpq 16), **사용자 PC의 DBeaver 26.2.1**
+- **① 평문 비밀번호 요청 + TLS — 통과**
+  - pgjdbc·psql·DBeaver 모두 SSLRequest → TLS 1.3 → `AuthenticationCleartextPassword`에 토큰을 보냄. 비TLS 시작은 인증 전 거부(`sslmode=disable` 실패 확인), 틀린 토큰 거부
+  - `sslmode=prefer`(pgjdbc·libpq 기본값)도 TLS로 붙음
+  - DBeaver는 연결 설정의 Driver properties에 `sslmode=require`로 설정(버전에 따라 SSL 탭 위치가 다름 — 사용자 안내용)
+- **② 확장 쿼리 프로토콜 — 통과**: Parse(SQL·매개변수 타입 OID) / Bind(매개변수 값) / RowDescription(컬럼별 테이블 OID·컬럼 번호) / CommandComplete(`SELECT 3`·`UPDATE 1`)로 필요한 정보가 다 나옴. 구현 시 반영할 점:
+  1. pgjdbc는 같은 PreparedStatement를 5회 넘게 실행하면 이름 있는 문장(`S_1`)으로 바꾸고, 이후엔 **Parse·Describe 없이 Bind만** 보냄(RowDescription도 안 옴) → 게이트웨이가 연결별로 "문장 이름 → SQL·RowDescription"을 캐시해야 함
+  2. `int8` 매개변수는 **바이너리 형식**으로 옴 → 타입 OID로 해석해야 회원번호 추출(②)·원문 저장 가능
+  3. 계산 컬럼(`count(*)`)은 테이블 OID 0 / 테이블 OID → 이름은 카탈로그 조회로 매핑
+  4. pgjdbc는 시작 직후 `SET application_name …`을 단순 쿼리로 보냄 → 설계의 `SET` 제외 규칙으로 걸러짐
+- **DBeaver 실제 동작**: 한 번 열면 **연결 4개**(연결 테스트·Main·Metadata·SQLEditor, `application_name`으로 구분)를 각각 토큰으로 인증 → 연결 1:1 원칙과 문제없음, 다만 `LOGIN` 기록이 세션당 여러 건 생김. 메타데이터 조회는 대부분 `pg_catalog`만 참조(기록 제외 대상), `SELECT version()`·`current_schema()`처럼 **테이블을 전혀 참조하지 않는 문장**과 `pg_get_keywords()` 같은 함수 FROM도 있음. 사용자 쿼리는 Windows 줄바꿈(`\r`) 포함(`select *\r from member`)
+- **③ `pglast` — 통과**: 최신 v8.5(내장 파서 PostgreSQL 18.6)가 PG16 신문법(숫자 밑줄·SQL/JSON 생성자·`IS JSON`·`SYSTEM_USER`·`GRANT … WITH INHERIT`·`any_value`)과 MERGE·COPY·`$n`·다중 문장을 파싱. **정규화 함수는 없음** → `scan()` 토큰(SCONST·ICONST·FCONST·BCONST·XCONST, 달러 인용 포함)으로 리터럴을 `$n` 치환(오프셋은 문자 단위라 한글 SQL도 정확). `fingerprint()`는 리터럴 값을 무시(쿼리 패턴 ID 후보). 테이블 추출은 RangeVar 방문 — **CTE 이름이 테이블로 잡혀 걸러야 함**
+- 실측 컨테이너 정리(`docker compose down -v`), 레포 변경 없음
+- **구현 순서 ① PR 1 — Argus 수집 검증 v0.5** (`apps/argus-api/app/ingest/validation.py`)
+  - `context.query`(SQL 원문) 삭제 → 어느 경로로 와도 `UNKNOWN_CONTEXT_KEY`
+  - DB 키 9종(`db_user`·`sql_normalized`·`tables`·`columns`·`row_count`·`raw_ref`·`raw_fingerprint`·`subject_unresolved`·`token_id`)은 `access_path=DB`일 때만 허용. 필수: `db_user`·`raw_ref`·`raw_fingerprint`, `LOGIN` 외에는 `sql_normalized`·`row_count`도 (`MISSING_FIELD`). 형식 검증은 api-spec 2-2 표 그대로
+  - 원문 SQL 유입 차단: `sql_normalized`에 작은따옴표 **또는 달러 인용(`$$…$$`·`$tag$…$tag$`)**이 있으면 `INVALID_FIELD`, 메시지에 값을 되풀이하지 않음
+  - `row_count`는 원래 APP에도 허용됐으나 v0.5에서 DB 키로 분류 → APP 기록에 오면 거부(보내는 곳 없음 확인)
+  - 테스트: DB 정상 수집·`LOGIN` 최소 필드·거부 코드 18건·원문 리터럴 3형태 거부(응답에 값 미노출, 원장 미저장) — argus-api pytest 378개 통과, ruff 통과
+
+**결정사항**
+- `pglast`는 v8.x(PG18 파서 — PG16 문법의 상위 집합)로 진행. 설계의 "기본안 `pglast`, 구현 시 확정" 범위 안이라 설계 변경 아님
+- 실측용 코드는 레포에 넣지 않음(구현은 ① PR에서 테스트와 함께 새로 작성)
+- **DB 접속 토큰 발급 라우트는 3티어 접속기록에서 제외**(`@access_log_exempt`) — 사용자 결정. 기각: `CREATE` + `NONE`으로 기록(발급 사실을 변조 불가능한 Argus 원장에 한 번 더 남기는 이점이 있으나, 개인정보 처리가 아니고 범위를 키우지 않기로). 발급 사실은 플랫폼 `db_access_token`과 게이트웨이 `LOGIN` 기록의 `token_id`로 추적
+
+**설계 변경**
+- **api-spec 2-4 표에 한 줄 추가 필요**: "DB 접속 토큰 발급 — **기록하지 않음**(명시적 제외, 로그아웃과 같은 처리)". 영향 문서: api-spec 2-4(Cowork 반영)
+- **api-spec 2-2 "원문 SQL 유입 차단" 보완**: 작은따옴표뿐 아니라 **달러 인용**(`$$…$$`, `$tag$…$tag$`)도 거부 — PostgreSQL은 달러 인용으로도 문자열 리터럴을 쓸 수 있어 따옴표 검사만으로는 원문이 통과함. 정규화 SQL에는 `$1` 같은 자리표시만 남으므로 정상 기록은 영향 없음. 영향 문서: api-spec 2-2 검증 표(Cowork 반영)
+
+**미결·이슈**
+- **기록 제외 범위 해석**: architecture 3-4 "시스템 카탈로그만 읽는 문장" — DBeaver는 테이블을 전혀 참조하지 않는 문장(`SELECT version()`)·함수 FROM(`pg_get_keywords()`)도 보냄. **해석: 사용자 테이블을 하나도 참조하지 않는 문장은 제외**(원문 저장소에는 남김). Cowork 확인 요청
+- **연결당 `LOGIN` 기록 다건**: DBeaver 1회 접속 = `LOGIN` 4건 — 설계대로 모두 기록(원장 노이즈지만 연결 단위 귀속의 증거). 묶을지는 v0.2 후보
+- **게이트웨이 우회 경로(보안성 검토 후보)**: 호스트에서 `docker compose exec platform-db psql`은 게이트웨이를 거치지 않음 — 서버 관리자 권한 경로라 앱 설계로 막을 수 없음. architecture 3-4 "게이트웨이 우회가 구조적으로 불가"는 **네트워크 경로 기준**이라는 한정 필요
+
+**다음 할 일**
+- 구현 순서 ① PR 3개: (1) Argus 수집 검증 v0.5 → (2) 플랫폼 DB 접속 토큰(발급 기록·API·관리자 화면) → (3) `db-gateway`(TLS·토큰·SCRAM 백엔드·1:1 중계·정규화·원문 저장·자체 버퍼·전송 루프, platform-db 호스트 포트 닫기). 게이트 B = (3) 병합
+
+---
+
 ## 2026-10-05 — Cowork 사본 갱신 대조 (기능 레이어 8(2티어) 설계 확정분)
 
 **한 일**

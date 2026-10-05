@@ -7,6 +7,7 @@
 - 정의되지 않은 필드는 무시한다(저장하지 않음, api-spec 6절 하위 호환)
 - subject.ids는 내부 PK 형태만 허용 — 이메일·전화번호 같은 값이 섞여 들어오면 거부
 - request.path에 쿼리스트링이 붙어 오면 거부 — 검색 조건 "값"이 개인정보일 수 있음
+- DB 경로(2티어)는 정규화 SQL만 받는다 — 작은따옴표(문자열 리터럴)가 남아 있으면 거부
 - 거부 메시지에는 입력값을 되풀이하지 않는다(코드값 제외) — 응답·로그로 개인정보가 새지 않게
 """
 
@@ -26,7 +27,24 @@ ACCESS_PATHS = frozenset({"APP", "DB"})
 RESULTS = frozenset({"SUCCESS", "FAILURE"})
 SUBJECT_TYPES = frozenset({"MEMBER"})
 HTTP_METHODS = frozenset({"GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"})
-CONTEXT_KEYS = frozenset({"ticket_id", "reason", "target", "report_id", "query", "row_count"})
+CONTEXT_KEYS = frozenset({"ticket_id", "reason", "target", "report_id"})
+# DB 접근 게이트웨이(2티어) 전용 키 — access_path=DB일 때만 허용 (api-spec 2-3 v0.5)
+# SQL 원문(구 `query`)은 받지 않는다 — 리터럴·매개변수에 개인정보가 실림 (원문은 게이트웨이에만)
+DB_CONTEXT_KEYS = frozenset(
+    {
+        "db_user",
+        "sql_normalized",
+        "tables",
+        "columns",
+        "row_count",
+        "raw_ref",
+        "raw_fingerprint",
+        "subject_unresolved",
+        "token_id",
+    }
+)
+DB_REQUIRED_KEYS = ("db_user", "raw_ref", "raw_fingerprint")
+DB_REQUIRED_KEYS_UNLESS_LOGIN = ("sql_normalized", "row_count")
 
 SUBJECT_IDS_LIMIT = 1000  # api-spec 2-2
 FUTURE_TOLERANCE = timedelta(minutes=5)  # api-spec 2-5
@@ -35,6 +53,12 @@ _UUID = re.compile(r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4
 _SUBJECT_ID = re.compile(r"^[A-Za-z0-9_-]{1,64}$")  # 내부 PK — '@', '.', 공백 등 불가
 _LOGIN_ID = re.compile(r"^[\x21-\x7e]{1,64}$")  # 공백·제어문자 없는 출력 가능 ASCII
 _QUERY_KEY = re.compile(r"^[A-Za-z0-9_.\[\]-]{1,64}$")
+_DB_USER = re.compile(r"^[A-Za-z0-9_]{1,63}$")
+_DB_OBJECT = re.compile(r'^[A-Za-z0-9_."]{1,128}$')  # 테이블·컬럼 이름 (스키마·별칭 포함)
+_RAW_REF = re.compile(r"^[A-Za-z0-9:_-]{1,128}$")
+_FINGERPRINT = re.compile(r"^sha256:[0-9a-f]{64}$")
+_DOLLAR_QUOTE = re.compile(r"\$(?:[A-Za-z_][A-Za-z0-9_]*)?\$")  # $$·$tag$ (자리표시 $1은 제외)
+SQL_NORMALIZED_MAX = 4000
 
 
 @dataclass(frozen=True)
@@ -171,12 +195,56 @@ def _parse_request(raw: Any) -> dict[str, Any]:
     return {"request_method": method, "request_path": path, "request_query_keys": keys}
 
 
-def _parse_context(raw: Any, action: str) -> dict[str, Any] | None:
+def _string_list(value: Any, limit: int, pattern: re.Pattern) -> bool:
+    return (
+        isinstance(value, list)
+        and len(value) <= limit
+        and all(isinstance(v, str) and pattern.fullmatch(v) for v in value)
+    )
+
+
+def _check_db_context(raw: dict, action: str, check) -> None:
+    """2티어 기록 필드 (api-spec 2-2 "`access_path=DB` 기록 규칙", v0.5)"""
+    required = DB_REQUIRED_KEYS
+    if action != "LOGIN":
+        required += DB_REQUIRED_KEYS_UNLESS_LOGIN
+    for key in required:
+        if raw.get(key) in (None, ""):
+            raise _Reject("MISSING_FIELD", f"context.{key} is required for access_path DB")
+
+    db_user, sql = raw.get("db_user"), raw.get("sql_normalized")
+    check("db_user", isinstance(db_user, str) and _DB_USER.fullmatch(db_user), "a DB account name")
+    check(
+        "sql_normalized",
+        isinstance(sql, str) and 0 < len(sql) <= SQL_NORMALIZED_MAX,
+        f"a string (1-{SQL_NORMALIZED_MAX})",
+    )
+    # 두 번째 방어선: 정규화 SQL은 리터럴이 $n으로 바뀌어 따옴표·달러 인용($$…$$)이 남을 수 없다.
+    # 남았다면 정규화 실패이거나 원문이 실린 것 — 값은 메시지에 되풀이하지 않는다 (절대 규칙 #3)
+    if isinstance(sql, str) and ("'" in sql or _DOLLAR_QUOTE.search(sql)):
+        raise _Reject("INVALID_FIELD", "context.sql_normalized must not contain string literals")
+    check("tables", _string_list(raw.get("tables"), 50, _DB_OBJECT), "table names (<=50)")
+    check("columns", _string_list(raw.get("columns"), 200, _DB_OBJECT), "column names (<=200)")
+    check("row_count", _is_int(raw.get("row_count")) and raw["row_count"] >= 0, "an integer")
+    raw_ref, fingerprint = raw.get("raw_ref"), raw.get("raw_fingerprint")
+    check("raw_ref", isinstance(raw_ref, str) and _RAW_REF.fullmatch(raw_ref), "a raw reference")
+    check(
+        "raw_fingerprint",
+        isinstance(fingerprint, str) and _FINGERPRINT.fullmatch(fingerprint),
+        "sha256:<64 lowercase hex>",
+    )
+    check("subject_unresolved", isinstance(raw.get("subject_unresolved"), bool), "a boolean")
+    token_id = raw.get("token_id")
+    check("token_id", isinstance(token_id, str) and _UUID.fullmatch(token_id), "a UUID")
+
+
+def _parse_context(raw: Any, action: str, access_path: str) -> dict[str, Any] | None:
     if raw is None:
         raw = {}
     if not isinstance(raw, dict):
         raise _Reject("INVALID_FIELD", "context must be an object")
-    unknown = raw.keys() - CONTEXT_KEYS
+    allowed = CONTEXT_KEYS | DB_CONTEXT_KEYS if access_path == "DB" else CONTEXT_KEYS
+    unknown = raw.keys() - allowed
     if unknown:
         raise _Reject("UNKNOWN_CONTEXT_KEY", f"unknown context keys: {sorted(unknown)[:5]}")
 
@@ -184,12 +252,12 @@ def _parse_context(raw: Any, action: str) -> dict[str, Any] | None:
         if key in raw and not ok:
             raise _Reject("INVALID_FIELD", f"context.{key} must be {expected}")
 
-    reason, ticket, query = raw.get("reason"), raw.get("ticket_id"), raw.get("query")
+    reason, ticket = raw.get("reason"), raw.get("ticket_id")
     check("reason", isinstance(reason, str) and 0 < len(reason) <= 500, "a string (1-500)")
     check("ticket_id", isinstance(ticket, str) and 0 < len(ticket) <= 64, "a string (1-64)")
     check("report_id", _is_int(raw.get("report_id")), "an integer")
-    check("query", isinstance(query, str) and len(query) <= 10_000, "a string")
-    check("row_count", _is_int(raw.get("row_count")) and raw["row_count"] >= 0, "an integer")
+    if access_path == "DB":
+        _check_db_context(raw, action, check)
     target = raw.get("target")
     check(
         "target",
@@ -271,7 +339,7 @@ def validate_event(raw: Any, now: datetime, *, internal: bool = False) -> dict |
             "result": raw["result"],
             **_parse_subject(raw.get("subject"), action),
             **_parse_request(raw.get("request")),
-            "context": _parse_context(raw.get("context"), action),
+            "context": _parse_context(raw.get("context"), action, access_path),
         }
     except _Reject as reject:
         return Rejection(shown_id, reject.code, reject.message)
