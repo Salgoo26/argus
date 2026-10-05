@@ -40,6 +40,10 @@ class Settings(BaseSettings):
     # DB와 분리해 .env에만 둔다. platform-api·platform-seed에만
     payment_encryption_key: SecretStr | None = None
 
+    # DB 접속 토큰(2티어) 서명 키 — platform-api·db-gateway에만 (architecture 3-4).
+    # 관리자 로그인 키와 반드시 다른 값: 같으면 관리자 쿠키를 DB 비밀번호로 쓸 수 있게 된다
+    db_gateway_token_key: SecretStr | None = None
+
     # relay → Argus 수집 API (api-spec 1-2) — platform-relay에만.
     # HMAC 키는 argus-api의 ARGUS_INGEST_SECRET_PLATFORM과 같은 값
     argus_ingest_url: str = "http://argus-api:8000"
@@ -61,6 +65,16 @@ class Settings(BaseSettings):
             # 짧은 HMAC 키는 오프라인 대입으로 토큰 위조가 가능해진다
             raise ValueError(f"PLATFORM_AUTH_SECRET must be at least {MIN_SECRET_LENGTH} chars")
         return secret.encode()
+
+    def require_db_gateway_token_key(self) -> bytes:
+        key = self.db_gateway_token_key.get_secret_value() if self.db_gateway_token_key else ""
+        if len(key) < MIN_SECRET_LENGTH:
+            raise ValueError(
+                f"PLATFORM_DB_GATEWAY_TOKEN_KEY must be at least {MIN_SECRET_LENGTH} chars"
+            )
+        if key.encode() == self.require_auth_secret():
+            raise ValueError("PLATFORM_DB_GATEWAY_TOKEN_KEY must differ from PLATFORM_AUTH_SECRET")
+        return key.encode()
 
     def require_payment_key(self) -> bytes:
         value = (

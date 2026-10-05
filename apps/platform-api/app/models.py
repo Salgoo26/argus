@@ -174,3 +174,14 @@ inquiry = Table(
     Column("created_at", DateTime(timezone=True), nullable=False),
     Column("answered_at", DateTime(timezone=True)),
 )
+
+# DB 접속 토큰 발급 기록 — 감사용, 토큰 값은 저장하지 않는다 (2티어, 0005)
+db_access_token = Table(
+    "db_access_token",
+    metadata,
+    Column("token_id", Uuid, primary_key=True),
+    Column("operator_id", BigInteger, ForeignKey("operator.id"), nullable=False),
+    Column("issued_at", DateTime(timezone=True), nullable=False),
+    Column("expires_at", DateTime(timezone=True), nullable=False),
+    Column("issued_ip", INET, nullable=False),
+)

@@ -38,7 +38,7 @@ def test_seed_is_reproducible(engine):
     with engine.begin() as conn:
         conn.exec_driver_sql(
             "TRUNCATE operator, member, member_consent, outbox, orders, payment, refund_account,"
-            " inquiry"
+            " inquiry, db_access_token"
             " RESTART IDENTITY"
         )
     _seed(engine)

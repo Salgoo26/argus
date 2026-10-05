@@ -81,6 +81,8 @@ services:
       PLATFORM_AUTH_SECRET: ${PLATFORM_AUTH_SECRET:?set PLATFORM_AUTH_SECRET in .env}
       # 환불계좌 AES-256-GCM 키(16진수 64자) — DB와 분리, 없거나 형식이 틀리면 기동 거부 (§7②6호)
       PLATFORM_PAYMENT_ENCRYPTION_KEY: ${PAYMENT_ENCRYPTION_KEY:?set PAYMENT_ENCRYPTION_KEY in .env}
+      # DB 접속 토큰(2티어) 서명 키 — platform-api·db-gateway에만, 관리자 로그인 키와 별개 (architecture 3-4)
+      PLATFORM_DB_GATEWAY_TOKEN_KEY: ${DB_GATEWAY_TOKEN_KEY:?set DB_GATEWAY_TOKEN_KEY in .env}
       # 접속 IP 헤더(X-Forwarded-For)를 믿을 프록시 — 운영은 Caddy. 로컬은 비움(아무도 믿지 않음).
       # platform-web(Next.js)은 신뢰하지 않는다: 원래 요청자 IP를 붙이지 않으면서 클라이언트가 보낸
       # X-Forwarded-For는 그대로 전달하므로, 믿으면 접속지 위조가 가능해진다 (CLAUDE.md 3절 #10)

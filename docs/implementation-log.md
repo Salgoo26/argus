@@ -51,6 +51,15 @@
   - 원문 SQL 유입 차단: `sql_normalized`에 작은따옴표 **또는 달러 인용(`$$…$$`·`$tag$…$tag$`)**이 있으면 `INVALID_FIELD`, 메시지에 값을 되풀이하지 않음
   - `row_count`는 원래 APP에도 허용됐으나 v0.5에서 DB 키로 분류 → APP 기록에 오면 거부(보내는 곳 없음 확인)
   - 테스트: DB 정상 수집·`LOGIN` 최소 필드·거부 코드 18건·원문 리터럴 3형태 거부(응답에 값 미노출, 원장 미저장) — argus-api pytest 378개 통과, ruff 통과
+- **구현 순서 ① PR 2 — 플랫폼 DB 접속 토큰**
+  - 마이그레이션 0005 `db_access_token`(db-schema 4절 DDL 그대로 — `expires_at = issued_at + 1시간` CHECK)
+  - `POST /admin/db-tokens`(`app/dbtoken/router.py`): JWT HS256 `sub`=플랫폼 아이디·`jti`=토큰 ID·`aud`=`db-gateway`·`exp`=발급+1시간(연장 없음). 발급 기록에는 토큰 값을 넣지 않고 응답으로 한 번만 반환. 발급 IP는 관리자 접속기록과 같은 신뢰 프록시 규칙, 정할 수 없으면 발급 거부. `@access_log_exempt`(사용자 결정)
+  - JWT 시각이 초 단위라 발급 시각을 초로 잘라 발급 기록의 `expires_at`과 토큰 `exp`가 정확히 같게 함
+  - 서명 키 `DB_GATEWAY_TOKEN_KEY`(`.env.example`, compose는 platform-api에만 — 시드 컨테이너엔 주지 않음): 없음·32자 미만·**관리자 로그인 키와 같음**이면 기동 거부(키 분리를 설정 실수로 깨지 않게)
+  - 관리자 화면 `/admin/db-token`(메뉴 "DB 접속"): 발급 버튼, 사용자 이름·토큰(복사)·만료 표시, "이 화면을 벗어나면 다시 볼 수 없음" 안내, DB 툴 설정(SSL 필수). 토큰은 React 상태에만 두고 브라우저 저장소에 쓰지 않음
+  - README 2-2 "DB 직접 접속 (2티어) — 구현 중" 추가(게이트웨이 전까지 15432 직통 포트는 기록되지 않는 경로임을 명시)
+  - 테스트(`tests/test_db_tokens.py`): 1시간 서명 토큰·발급 기록(토큰 값 미저장·발급 IP)·발급마다 새 토큰·접속기록 미적재·로그인 필요·퇴직자 차단·관리자 세션 키로 검증 불가 + DB 토큰을 관리자 쿠키로 못 씀·키 없음/짧음/관리자 키와 같음 기동 거부 — platform-api pytest 197개 통과, ruff 통과, platform-web eslint·typecheck·build 통과(컨테이너)
+  - 로컬 `.env`에 `DB_GATEWAY_TOKEN_KEY` 무작위 값 추가(값 미출력)
 
 **결정사항**
 - `pglast`는 v8.x(PG18 파서 — PG16 문법의 상위 집합)로 진행. 설계의 "기본안 `pglast`, 구현 시 확정" 범위 안이라 설계 변경 아님
