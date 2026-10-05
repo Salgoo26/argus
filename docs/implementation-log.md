@@ -29,6 +29,36 @@
 
 ---
 
+## 2026-10-05 — Cowork 사본 갱신 대조 (기능 레이어 8(2티어) 설계 확정분)
+
+**한 일**
+- 레포 정리: 병합이 끝난 `docs/sync-1002`에서 `main`으로 전환, Dependabot PR #36(fastapi·sqlalchemy·ruff)·#37(`@types/node`) 병합(CI·E2E 통과 확인), 원격에 남은 브랜치 없음 확인
+- Cowork가 갱신한 사본 8개(CLAUDE.md, docs/README·requirements·policy·actor-flows·architecture·api-spec·db-schema — 2티어 설계 확정: pgaudit안 폐기 → DB 접근 게이트웨이 중계 + DB 접속 토큰)를 구현과 대조 → docs PR
+- **대조 결과: 이미 구현된 동작과 충돌하는 기술은 없음.** 새 설계가 요구하는 구현 변경은 아래처럼 구현 순서에 배정:
+  1. **①에서 수정** — 수집 검증 `CONTEXT_KEYS`(`apps/argus-api/app/ingest/validation.py`)가 `query`(≤10,000자)를 허용 중 → api-spec v0.5에서 폐기(원문 SQL 유입 차단). `query` 제거 + DB 키 9종·`'` 포함 거부·`access_path=DB` 전용 규칙 추가
+  2. **①에서 수정** — `infra/docker-compose.yml`이 platform-db를 `127.0.0.1:15432`로 호스트에 공개 중 → 설계(CLAUDE.md 2절, architecture 7-2)는 게이트웨이만 DB 툴 입구. 닫으면 DBeaver 직접 접속이 불가해지므로 README 포트 표·`.env.example`의 `PLATFORM_DB_PORT`도 함께 정리
+  3. **③에서 수정** — `detection.access_path` 마이그레이션(기존 행 `APP`)·진행 중 유니크 인덱스·그룹 키에 경로, 퇴직자 룰 적용 경로 APP → 전체
+- **해석이 필요한 곳**(구현은 아래 해석으로 진행, 다음 동기화 때 문구 확인 요청):
+  1. architecture 3-4 "토큰 검증 방식": "게이트웨이는 … DB를 조회하지 않는다" ↔ 같은 절 "연결 시 계정 상태(퇴직·잠금) 재확인", api-spec 2-2 "연결 인증 실패는 존재하는 아이디일 때만 기록" — 후자 둘은 `operator` 조회가 필요. **해석: 조회하지 않는 것은 토큰 발급 기록(`db_access_token`)이고, `operator`는 조회한다**
+  2. api-spec 2-2: DB 기록은 `raw_ref`·`raw_fingerprint` 필수 — `LOGIN`도 포함. **해석: 연결 인증도 원문 저장소에 레코드를 남긴다**(시작 메시지의 사용자·DB·앱 이름, 토큰은 제외). 서명이 깨진 토큰은 `jti`를 믿을 수 없으므로 실패 기록에서 `token_id` 생략
+- 작은 차이(배치·문구만): policy 3-3 "경로별 소명 기준"도 3-2 뒤 기존 설명 목록("반려는 독립 상태로 둔다" 등) 앞에 끼어 들어감(10/02 대조 #3과 같은 문제) / architecture 7-2 "platform-db 포트는 db-gateway·platform-api·relay만" — 일회성 컨테이너(platform-migrate·platform-seed)도 내부망으로 접근
+
+**결정사항**
+- 설계 문서 사본 갱신은 지난번처럼 **별도 `docs:` PR**(코드와 섞지 않음)
+- 사본은 Cowork가 로컬 레포 폴더에 직접 쓴다(사용자가 내려받아 덮어쓰지 않음)
+
+**설계 변경**
+- 없음 (Cowork 확정분의 사본 반영)
+
+**미결·이슈**
+- 위 "해석이 필요한 곳" 2건 — Cowork 문구 확인
+
+**다음 할 일**
+- CLAUDE.md 6절 "2티어 착수 시 가장 먼저 확인할 것" 3가지 실측: ①DBeaver가 TLS 위에서 평문 비밀번호 요청에 토큰을 보내는지 ②확장 쿼리 프로토콜에서 SQL·매개변수·결과 컬럼 정보 획득 ③`pglast`의 PG16 문법 처리
+- 실측 통과 시 구현 순서 ①(게이트웨이 중계 + 토큰 + TLS + 원장 도착 + 원문 저장 + 자체 버퍼) PR 단위 계획 공유 — 게이트 B 기준
+
+---
+
 ## 2026-10-02 (저녁) — Cowork 사본 갱신 대조 + 기능 레이어 8(2티어) 논의 시작
 
 **한 일**
