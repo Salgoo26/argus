@@ -4,9 +4,9 @@ version = "0.0.0"
 description = "Argus — 접속기록 수집·탐지·소명·보고 API + worker"
 requires-python = ">=3.12,<3.13"
 dependencies = [
-    "fastapi==0.141.1",
+    "fastapi==0.142.2",
     "uvicorn==0.54.0",
-    "sqlalchemy==2.1.1",
+    "sqlalchemy==2.1.2",
     "alembic==1.20.0",
     "pydantic==2.13.5",
     "pydantic-settings==2.15.0",
@@ -19,7 +19,7 @@ dependencies = [
 [project.optional-dependencies]
 dev = [
     "pytest==9.1.1",
-    "ruff==0.16.9",
+    "ruff==0.16.10",
     "httpx2==2.13.1",  # FastAPI TestClient (starlette 권장 클라이언트)
 ]
 
