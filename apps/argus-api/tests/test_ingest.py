@@ -152,6 +152,107 @@ def test_personal_data_in_subject_ids_is_rejected_without_echo(client):
     assert "hong@" not in res.text
 
 
+# ── DB 경로 (2티어 게이트웨이, api-spec 2-2·2-3 v0.5) ─────────
+
+FINGERPRINT = "sha256:" + "ab" * 32
+
+
+def _db_context(**overrides) -> dict:
+    context = {
+        "db_user": "platform",
+        "sql_normalized": "SELECT id, name FROM member WHERE email = $1",
+        "tables": ["member"],
+        "columns": ["member.id", "member.name", "member.email"],
+        "row_count": 1,
+        "raw_ref": "gw:2026-10-06:000001",
+        "raw_fingerprint": FINGERPRINT,
+        "subject_unresolved": False,
+        "token_id": str(uuid.uuid4()),
+    }
+    context.update(overrides)
+    return context
+
+
+def _db_event(context: dict | None = None, **overrides) -> dict:
+    fields = {
+        "access_path": "DB",
+        "action": "READ",
+        "subject": {"type": "MEMBER", "ids": ["10293"], "count": 1},
+        "request": None,
+        "context": _db_context() if context is None else context,
+    }
+    return make_event(**(fields | overrides))
+
+
+def test_db_event_is_accepted_with_normalized_sql(client, app_engine):
+    event = _db_event()
+    assert post_events(client, [event]).json()["accepted"] == 1
+    row = _rows(app_engine)[0]
+    assert row["access_path"] == "DB"
+    assert row["context"] == event["context"]
+
+
+def test_db_login_needs_no_sql(client):
+    # 연결 인증은 문장이 없다 — 정규화 SQL·건수 없이 원문 참조·지문만
+    context = {"db_user": "platform", "raw_ref": "gw:login:1", "raw_fingerprint": FINGERPRINT}
+    event = _db_event(context, action="LOGIN", data_category="NONE")
+    del event["subject"]
+    assert post_events(client, [event]).json()["accepted"] == 1
+
+
+def _db_without(key: str) -> dict:
+    context = _db_context()
+    del context[key]
+    return _db_event(context)
+
+
+@pytest.mark.parametrize(
+    ("event", "code"),
+    [
+        # 원문 SQL 키는 v0.5에서 폐기 — 어느 경로로도 받지 않는다
+        (make_event(context={"query": "SELECT 1"}), "UNKNOWN_CONTEXT_KEY"),
+        (_db_event(_db_context(query="SELECT 1")), "UNKNOWN_CONTEXT_KEY"),
+        # DB 키는 DB 경로 전용
+        (make_event(context={"row_count": 1}), "UNKNOWN_CONTEXT_KEY"),
+        (make_event(context={"sql_normalized": "SELECT 1"}), "UNKNOWN_CONTEXT_KEY"),
+        (_db_without("db_user"), "MISSING_FIELD"),
+        (_db_without("raw_ref"), "MISSING_FIELD"),
+        (_db_without("raw_fingerprint"), "MISSING_FIELD"),
+        (_db_without("sql_normalized"), "MISSING_FIELD"),
+        (_db_without("row_count"), "MISSING_FIELD"),
+        (_db_event(_db_context(db_user="app user")), "INVALID_FIELD"),
+        (_db_event(_db_context(sql_normalized="SELECT " + "x" * 4000)), "INVALID_FIELD"),
+        (_db_event(_db_context(tables=["member"] * 51)), "INVALID_FIELD"),
+        (_db_event(_db_context(columns=["member.email; --"])), "INVALID_FIELD"),
+        (_db_event(_db_context(row_count=-1)), "INVALID_FIELD"),
+        (_db_event(_db_context(raw_ref="../etc/passwd")), "INVALID_FIELD"),
+        (_db_event(_db_context(raw_fingerprint="sha256:" + "AB" * 32)), "INVALID_FIELD"),
+        (_db_event(_db_context(subject_unresolved="yes")), "INVALID_FIELD"),
+        (_db_event(_db_context(token_id="not-a-uuid")), "INVALID_FIELD"),
+    ],
+)
+def test_db_context_rejection_codes(client, event, code):
+    body = post_events(client, [event]).json()
+    assert body["accepted"] == 0
+    assert body["rejected"][0]["code"] == code
+
+
+@pytest.mark.parametrize(
+    "raw_sql",
+    [
+        "SELECT id FROM member WHERE email = 'hong@example.com'",
+        "SELECT id FROM member WHERE email = $$hong@example.com$$",
+        "SELECT id FROM member WHERE email = $q$hong@example.com$q$",
+    ],
+)
+def test_raw_sql_literal_is_rejected_without_echo(client, app_engine, raw_sql):
+    # 정규화가 깨져 원문이 실려 와도 저장하지 않고, 응답에 값을 되풀이하지 않는다 (절대 규칙 #3)
+    res = post_events(client, [_db_event(_db_context(sql_normalized=raw_sql))])
+    assert res.json()["rejected"][0]["code"] == "INVALID_FIELD"
+    assert "hong@" not in res.text
+    assert _rows(app_engine) == []
+
+
 # ── 인증 (api-spec 1-2) ───────────────────────────────────
 
 
