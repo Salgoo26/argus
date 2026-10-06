@@ -596,3 +596,14 @@ textarea {
   border-radius: 4px;
   padding: 8px 12px;
 }
+
+/* DB 접속 토큰 — 긴 JWT를 줄바꿈해 한 칸에 보여준다 */
+.token-box {
+  word-break: break-all;
+  padding: 8px 10px;
+  margin-bottom: 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg);
+  user-select: all;
+}

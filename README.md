@@ -119,6 +119,15 @@ http://localhost:3000 — 가상 쇼핑몰의 고객 화면. Argus 시연용이 
 
 **관리자: 1:1 문의 처리 (CS)** — `/admin/inquiries` → 문의 열기(티켓 `INQ-번호`) → 작성자 링크로 회원 상세 → 답변 등록. 문의 상세·답변 기록에는 티켓 번호가 함께 실려 Argus로 간다(`context.ticket_id` — 문의 내용은 가지 않음). 이 기록이 탐지되면 Argus 탐지건 상세의 **연계 티켓** 칸에 보인다 — 취급자는 "INQ-12 처리 중 조회"처럼 소명할 수 있다.
 
+### 2-2. DB 직접 접속 (2티어) — 구현 중
+
+DBeaver 같은 DB 툴의 직접 접속도 접속기록으로 남기는 기능(기능 레이어 8, architecture 3-4). DB 툴은 **DB 게이트웨이**로만 접속하고, 게이트웨이가 공용 계정으로 플랫폼 DB에 중계하며 SQL마다 실사용자를 붙여 Argus로 보낸다.
+
+1. 관리자 화면 `/admin/db-token`에서 **DB 접속 토큰** 발급 — 1시간 유효(연장 없음), 화면에 한 번만 표시(서버에 토큰 값 저장 안 함)
+2. DB 툴 설정: 사용자 이름 = **본인 플랫폼 아이디**, 비밀번호 = 토큰, SSL 필수(DBeaver는 Driver properties에 `sslmode=require`)
+
+> 게이트웨이(`db-gateway`)는 다음 단계에서 추가된다. 그전까지 `127.0.0.1:15432`의 platform-db 직통 포트는 **기록되지 않는 경로**이며, 게이트웨이가 들어오면서 닫힌다.
+
 
 ### 3. 자동 검증 (E2E)
 
@@ -136,7 +145,7 @@ bash scripts/e2e.sh
 
 | 서비스 | 호스트 접속 | 비고 |
 |---|---|---|
-| platform-web | http://localhost:3000 | **플랫폼 화면** — 고객은 `/`(회원가입·로그인·상품·가상 PG 결제·주문 내역·1:1 문의·마이페이지·처리방침), 관리자는 `/admin` 아래(로그인·회원 목록·상세·CSV 다운로드·주문 조회·1:1 문의 처리). 운영에서는 Caddy가 `/admin` 경로를 허용 IP로 제한(architecture 7-2). `/api/*`는 Next.js가 platform-api로 전달(같은 출처라 세션 쿠키 그대로) |
+| platform-web | http://localhost:3000 | **플랫폼 화면** — 고객은 `/`(회원가입·로그인·상품·가상 PG 결제·주문 내역·1:1 문의·마이페이지·처리방침), 관리자는 `/admin` 아래(로그인·회원 목록·상세·CSV 다운로드·주문 조회·1:1 문의 처리·DB 접속 토큰 발급). 운영에서는 Caddy가 `/admin` 경로를 허용 IP로 제한(architecture 7-2). `/api/*`는 Next.js가 platform-api로 전달(같은 출처라 세션 쿠키 그대로) |
 | argus-web | http://localhost:3001 | **Argus 화면** — 담당자·취급자 로그인, 탐지건 목록·상세(정보주체 마스킹), 소명 요청·제출·승인·반려·요청 취소, **접속기록 검색**(담당자 전용 — 계정·기간·수행업무·회원번호·접근 경로·출처), **룰 관리**(담당자 전용 — 생성·수정·켜기/끄기, 변경 이력), **소명 근거자료 첨부**(취급자 업로드 — 파일 내용으로 형식 판정, 저장 이름은 서버가 정함, 내려받을 때마다 SHA-256 확인) |
 | platform-db | `127.0.0.1:15432` | 플랫폼 DB (PostgreSQL 16) |
 | argus-db | `127.0.0.1:15433` | Argus 접속기록 원장 (PostgreSQL 16) |
@@ -145,7 +154,7 @@ bash scripts/e2e.sh
 | argus-worker | — | 탐지 배치: `setting.detection_interval_min`(기본 5분)마다 원장을 순찰해 룰에 걸린 기록으로 탐지건 생성 + 자동 소명 요청 |
 | platform-migrate | — | 기동 시 1회 실행: 플랫폼 Alembic 마이그레이션 후 종료 |
 | platform-seed | — | 기동 시 1회 실행: 가상 회원 500명·취급자 5명(비어 있을 때만), 동의 이력이 없는 회원에게 가입 시점 동의 이력, 주문이 없으면 가상 주문 300건·환불계좌 60개(암호화), 문의가 없으면 가상 문의 40건(⅔ 답변 완료), 담당자 플랫폼 계정 `officer`가 없으면 생성 후 종료 |
-| platform-api | `127.0.0.1:18001` | 고객 API `/shop/*`(접속기록 대상 아님), 관리자 로그인 `POST /admin/auth/login`, 회원 목록 `GET /admin/members`, CSV `GET /admin/members/export`, API 문서 `/docs`. 관리자 라우트 요청은 접속기록으로 outbox에 적재 |
+| platform-api | `127.0.0.1:18001` | 고객 API `/shop/*`(접속기록 대상 아님), 관리자 로그인 `POST /admin/auth/login`, 회원 목록 `GET /admin/members`, CSV `GET /admin/members/export`, DB 접속 토큰 발급 `POST /admin/db-tokens`(접속기록 제외), API 문서 `/docs`. 관리자 라우트 요청은 접속기록으로 outbox에 적재 |
 | platform-relay | — | outbox → Argus 전송(HMAC 서명). 2초 주기, 실패 시 1분→최대 1시간 백오프. 플랫폼 쪽에서 유일하게 Argus 네트워크에 붙는다 |
 
 - 소명 첨부 파일은 Argus 전용 볼륨 `argus-attachments`에 저장된다(argus-api만 붙음). `docker compose down -v`로 DB와 함께 지워진다.

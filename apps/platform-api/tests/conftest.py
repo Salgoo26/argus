@@ -27,6 +27,7 @@ ADMIN_URL = os.environ.get("DATABASE_URL")
 TEST_AUTH_SECRET = "test-auth-secret-not-for-production-0123456789"  # 테스트 전용 더미 값
 TEST_PASSWORD = "test-password-1234"  # 테스트 전용 더미 값
 TEST_PAYMENT_KEY = "00" * 32  # 테스트 전용 더미 AES 키 (16진수 64자)
+TEST_DB_GATEWAY_TOKEN_KEY = "test-db-gateway-key-not-for-production-01"  # 테스트 전용 더미 값
 # 테스트 클라이언트의 접속 주소 — 기본값 "testclient"는 IP가 아니라 접속지로 기록할 수 없다.
 # 203.0.113.0/24는 문서·예시용으로 예약된 대역 (RFC 5737)
 TEST_CLIENT_ADDR = ("203.0.113.10", 50000)
@@ -77,6 +78,7 @@ def settings(db_url: URL) -> Settings:
         db_password=db_url.password,
         auth_secret=TEST_AUTH_SECRET,
         payment_encryption_key=TEST_PAYMENT_KEY,
+        db_gateway_token_key=TEST_DB_GATEWAY_TOKEN_KEY,
         # TestClient는 http://testserver — Secure 쿠키면 다음 요청에 실리지 않는다
         cookie_secure=False,
     )
@@ -113,7 +115,7 @@ def clean_tables(request):
         conn.execute(
             text(
                 "TRUNCATE operator, member, member_consent, outbox, orders, payment,"
-                " refund_account, inquiry,"
+                " refund_account, inquiry, db_access_token,"
                 " retained_member_record, destruction_history RESTART IDENTITY"
             )
         )

@@ -11,6 +11,7 @@ const MENU = [
   { href: "/admin/members", label: "회원" },
   { href: "/admin/orders", label: "주문" },
   { href: "/admin/inquiries", label: "1:1 문의" },
+  { href: "/admin/db-token", label: "DB 접속" },
 ];
 
 export function AppHeader({ me }: { me: Operator | null }) {
