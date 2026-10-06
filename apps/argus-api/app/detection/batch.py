@@ -12,7 +12,10 @@
    건너뛰면 책갈피가 넘어가 그 사이 기록은 그 룰로 영영 평가되지 않는다 (2026-10-01 결정)
 
 탐지건 그룹핑 (policy 2-2·2-3):
-- 키 = (룰, 출처, 취급자, 발생 날짜) — 날짜는 **한국 시각(KST)** 기준 (2026-10-01 결정)
+- 키 = (룰, 출처, 접근 경로, 취급자, 발생 날짜)
+  — 날짜는 **한국 시각(KST)** 기준 (2026-10-01 결정)
+- **탐지건 하나 = 경로 하나**: 적용 경로가 "전체"인 룰도 화면 경유(APP)·DB 직접(DB) 기록을
+  한 탐지건에 섞지 않는다 (policy 1-5, 2026-10-06 — 두 경로는 성격이 다른 기록이고 보고도 따로)
 - 같은 그룹에 **진행 중**(DETECTED·REQUESTED·SUBMITTED·REJECTED) 건이 있으면 하위 로그만 추가,
   없거나 종결(APPROVED·DISMISSED·ESCALATED)됐으면 새 탐지건
   — 승인은 "그때까지의 행위"에 대한 판단이므로
@@ -26,7 +29,8 @@
   판정 불가로 탐지하고 상태 이력에 사유를 남긴다 (rules.evaluation_facts)
 
 AGGREGATE 룰 (기능 레이어 4 — aggregate.py):
-- 범위의 기록이 속한 (취급자, 윈도우)를 골라 그 윈도우를 원장에서 통째로 다시 집계한다
+- 범위의 기록이 속한 (취급자, 경로, 윈도우)를 골라 그 윈도우를 원장에서 통째로 다시 집계한다
+  — 경로별로 따로 집계하므로 전월 기준선도 같은 경로 안에서만 잡힌다 (policy 1-5)
 - 그룹 키의 날짜 자리에 윈도우 시작 시각(KST)을 쓴다 — 집계 단위가 곧 탐지건 (policy 2-2)
 - 진행 중 건이 있으면 새 기록을 붙이고 집계값을 갱신, **이미 종결된 윈도우는 다시 탐지하지 않는다**
   (EVENT의 "종결 후엔 새 건"과 다르다 — 집계는 누적이라 순찰마다 새 건이 생김)
@@ -233,11 +237,12 @@ def _evaluate(conn: Connection, run_id: int, from_id: int, to_id: int) -> tuple[
         if rule["rule_type"] == "AGGREGATE":
             detected += _evaluate_aggregate(conn, run_id, rule, facts, roster, to_id)
             continue
-        groups: dict[tuple[int, str, str], list[Any]] = defaultdict(list)
+        groups: dict[tuple[int, str, str, str], list[Any]] = defaultdict(list)
         for fact in facts:
             if _hits(rule, fact):
                 key = (
                     fact["source_system_id"],
+                    fact["access_path"],
                     fact["actor_login_id"],
                     group_bucket(fact["occurred_at"]),
                 )
@@ -268,14 +273,20 @@ def _evaluate_aggregate(
     """
     spec = rule["aggregate"]
     windows = {
-        (f["source_system_id"], f["actor_login_id"], window_start(f["occurred_at"], spec["window"]))
+        (
+            f["source_system_id"],
+            f["access_path"],
+            f["actor_login_id"],
+            window_start(f["occurred_at"], spec["window"]),
+        )
         for f in facts
         if _hits(rule, f)
     }
     detected = 0
-    for source_system_id, actor, start in sorted(windows):
+    for source_system_id, path, actor, start in sorted(windows):
         end = window_end(start, spec["window"])
-        logs = _window_logs(conn, rule, roster, source_system_id, actor, start, end, to_id)
+        scope = (source_system_id, path, actor)
+        logs = _window_logs(conn, rule, roster, scope, start, end, to_id)
         value = measure(logs, spec["measure"])
         if spec["compare"] == "ABSOLUTE":
             note = f"집계 {value} ≥ 기준 {spec['threshold']}"
@@ -284,7 +295,7 @@ def _evaluate_aggregate(
             as_of = min(datetime.now(UTC), end)
             b_start, b_end = prev_month_same_period(start, as_of)
             base = measure(
-                _window_logs(conn, rule, roster, source_system_id, actor, b_start, b_end, to_id),
+                _window_logs(conn, rule, roster, scope, b_start, b_end, to_id),
                 spec["measure"],
             )
             if base < spec.get("min_baseline", 1):
@@ -295,7 +306,7 @@ def _evaluate_aggregate(
             note = f"당월 {value} / 전월 동기 {base} = {ratio:.2f}배 ≥ {spec['threshold']}배"
             exceeded, aggregate_value = ratio >= spec["threshold"], round(ratio, 4)
         if exceeded and logs:
-            key = (source_system_id, actor, bucket_label(start))
+            key = (source_system_id, path, actor, bucket_label(start))
             detected += _attach(conn, run_id, rule, key, logs, aggregate_value, note)
     return detected
 
@@ -304,13 +315,13 @@ def _window_logs(
     conn: Connection,
     rule: Any,
     roster: dict[tuple[int, str], datetime | None],
-    source_system_id: int,
-    actor: str,
+    scope: tuple[int, str, str],
     start: datetime,
     end: datetime,
     to_id: int,
 ) -> list[dict[str, Any]]:
-    """한 취급자의 [start, end) 기록 중 룰에 맞는 것 — 이번 순찰이 본 범위(id ≤ to_id)까지만"""
+    """한 취급자·한 경로의 [start, end) 기록 중 룰에 맞는 것 — 이번 순찰 범위(id ≤ to_id)까지"""
+    source_system_id, path, actor = scope
     columns = list(_LOG_COLUMNS)
     if rule["aggregate"]["measure"] == "DISTINCT_SUBJECT":
         columns.append(access_log.c.subject_ids)
@@ -320,6 +331,7 @@ def _window_logs(
             .join(source_system, source_system.c.id == access_log.c.source_system_id)
             .where(
                 access_log.c.source_system_id == source_system_id,
+                access_log.c.access_path == path,
                 access_log.c.actor_login_id == actor,
                 access_log.c.occurred_at >= start,
                 access_log.c.occurred_at < end,
@@ -360,7 +372,7 @@ def _attach(
 
     AGGREGATE는 집계값(aggregate_value)을 함께 갱신하고, note(집계 근거)를 탐지 이력에 남긴다.
     """
-    source_system_id, actor, bucket = key
+    source_system_id, path, actor, bucket = key
     ids = [log["id"] for log in logs]
 
     # 같은 룰로 이미 어떤 탐지건에 붙은 기록은 다시 붙이지 않는다 — 재처리해도 증거가 중복되지 않게
@@ -382,6 +394,7 @@ def _attach(
         .where(
             detection.c.rule_id == rule["id"],
             detection.c.source_system_id == source_system_id,
+            detection.c.access_path == path,
             detection.c.actor_login_id == actor,
             detection.c.group_bucket == bucket,
             detection.c.status.in_(OPEN_STATUSES),
@@ -409,6 +422,7 @@ def _attach(
                 rule_version=rule["version"],
                 rule_snapshot=_rule_snapshot(rule),  # 룰이 바뀌어도 "왜 탐지됐는지"가 남는다
                 source_system_id=source_system_id,
+                access_path=path,
                 actor_login_id=actor,
                 group_bucket=bucket,
                 severity=rule["severity"],
@@ -446,12 +460,13 @@ def _attach(
 
 
 def _window_was_judged(conn: Connection, rule: Any, key: tuple) -> bool:
-    source_system_id, actor, bucket = key
+    source_system_id, path, actor, bucket = key
     return (
         conn.execute(
             select(detection.c.id).where(
                 detection.c.rule_id == rule["id"],
                 detection.c.source_system_id == source_system_id,
+                detection.c.access_path == path,
                 detection.c.actor_login_id == actor,
                 detection.c.group_bucket == bucket,
             )

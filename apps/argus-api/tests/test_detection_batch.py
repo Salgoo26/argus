@@ -722,3 +722,88 @@ def test_payment_full_view_is_detected_every_time(app_engine, admin_engine, seed
     [case] = detections(app_engine)
     assert case["rule_snapshot"]["name"] == "결제수단 조회"
     assert case["severity"] == "HIGH" and case["log_count"] == 1
+
+
+# ── 경로 구분·DB 직접 접근 기본 룰 (기능 레이어 8 ③, policy 1-5) ─────
+
+DB = {"access_path": "DB"}
+
+
+def test_all_path_rule_keeps_each_path_in_its_own_case(app_engine, admin_engine):
+    # 적용 경로가 "전체"인 룰도 화면 경유·DB 직접 기록을 한 탐지건에 섞지 않는다
+    with admin_engine.begin() as conn:
+        conn.execute(
+            update(detection_rule)
+            .where(detection_rule.c.name == "대량 다운로드")
+            .values(access_path="ALL")
+        )
+    app_log = download(app_engine)
+    db_log = download(app_engine, **DB)
+    assert run_batch(app_engine).detected == 2
+
+    cases = {c["access_path"]: c for c in detections(app_engine)}
+    assert set(cases) == {"APP", "DB"}
+    assert linked_logs(app_engine, cases["APP"]["id"]) == [app_log]
+    assert linked_logs(app_engine, cases["DB"]["id"]) == [db_log]
+
+
+@pytest.mark.parametrize(
+    ("overrides", "expected"),
+    [
+        (DB, True),  # DB 툴로 회원 조회
+        ({**DB, "data_category": "PAYMENT"}, True),
+        ({**DB, "action": "UPDATE"}, True),  # 앱을 거치지 않은 변경도
+        ({**DB, "data_category": "NONE"}, False),  # 업무 외 테이블
+        ({}, False),  # 화면 경유 기록은 3티어 룰이 본다
+    ],
+)
+def test_db_night_access(app_engine, admin_engine, seed_rules, overrides, expected):
+    use_rules(admin_engine, seed_rules, "DB 직접 야간 접근")
+    add_log(app_engine, occurred_at=kst(2026, 10, 6, 23, 0), **overrides)
+    run_batch(app_engine)
+    found = [
+        (c["rule_snapshot"]["name"], c["access_path"], c["severity"])
+        for c in detections(app_engine)
+    ]
+    assert found == ([("DB 직접 야간 접근", "DB", "HIGH")] if expected else [])
+
+
+def test_db_weekend_access(app_engine, admin_engine, seed_rules):
+    use_rules(admin_engine, seed_rules, "DB 직접 주말 접근")
+    add_log(app_engine, occurred_at=kst(2026, 10, 10, 14, 0), **DB)  # 토요일
+    add_log(app_engine, occurred_at=kst(2026, 10, 12, 14, 0), **DB)  # 월요일
+    run_batch(app_engine)
+    [case] = detections(app_engine)
+    assert case["access_path"] == "DB" and case["severity"] == "MEDIUM"
+    assert case["group_bucket"] == "2026-10-10"
+
+
+def test_db_surge_counts_db_path_only(app_engine, admin_engine, seed_rules):
+    # 7월 DB 23건 → 8월 DB 63건 = 2.74배. 화면 경유 기록이 많아도 DB 집계·기준선에 섞이지 않는다
+    use_rules(admin_engine, seed_rules, "DB 직접 전월 대비 급증")
+    add_reads(app_engine, weekday_reads(2026, 7, 1), **DB)
+    add_reads(app_engine, weekday_reads(2026, 7, 5))
+    add_reads(app_engine, weekday_reads(2026, 8, 3), **DB)
+    run_batch(app_engine)
+    [case] = aggregate_cases(app_engine, "DB 직접 전월 대비 급증")
+    assert case["access_path"] == "DB" and case["log_count"] == 63
+    assert float(case["aggregate_value"]) == pytest.approx(63 / 23, abs=1e-4)
+
+
+def test_all_path_aggregate_has_a_baseline_per_path(app_engine, admin_engine, seed_rules):
+    # "전체" 경로 집계 룰은 경로별로 따로 센다 — 기준선도 같은 경로 안에서만 (policy 1-5)
+    use_rules(admin_engine, seed_rules, "전월 대비 급증")
+    with admin_engine.begin() as conn:
+        conn.execute(
+            update(detection_rule)
+            .where(detection_rule.c.name == "전월 대비 급증")
+            .values(access_path="ALL")
+        )
+    add_reads(app_engine, weekday_reads(2026, 7, 1))  # 화면 경유 7월 23건
+    add_reads(app_engine, weekday_reads(2026, 8, 3))  # 화면 경유 8월 63건 → 탐지
+    add_reads(
+        app_engine, weekday_reads(2026, 8, 3), **DB
+    )  # DB 8월 63건 — DB 기준선 없음 → 판정 안 함
+    run_batch(app_engine)
+    cases = aggregate_cases(app_engine, "전월 대비 급증")
+    assert [(c["access_path"], c["log_count"]) for c in cases] == [("APP", 63)]

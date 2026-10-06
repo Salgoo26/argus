@@ -104,6 +104,9 @@ def _case_summary(row) -> dict:
         "id": row["id"],
         "rule_name": row["rule_snapshot"]["name"],
         "severity": row["severity"],
+        "access_path": row[
+            "access_path"
+        ],  # APP = 화면 경유(3티어) / DB = DB 직접(2티어), policy 1-5
         "actor_login_id": row["actor_login_id"],
         "actor_name": row["actor_name"],
         "group_bucket": row["group_bucket"],
@@ -136,12 +139,15 @@ def list_detections(
     request: Request,
     user: CurrentUser,
     status: Annotated[str | None, Query(pattern="^(" + "|".join(STATUSES) + ")$")] = None,
+    access_path: Annotated[str | None, Query(pattern="^(APP|DB)$")] = None,
     page: Annotated[int, Query(ge=1)] = 1,
     size: Annotated[int, Query(ge=1, le=100)] = 20,
 ) -> dict:
     query = _visible(_case_query(), user)
     if status is not None:
         query = query.where(detection.c.status == status)
+    if access_path is not None:
+        query = query.where(detection.c.access_path == access_path)
     with request.app.state.engine.connect() as conn:
         total = conn.execute(select(func.count()).select_from(query.subquery())).scalar_one()
         rows = conn.execute(
