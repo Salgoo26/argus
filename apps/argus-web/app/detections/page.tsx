@@ -5,7 +5,15 @@ import { useEffect, useState } from "react";
 
 import { AppHeader, useMe } from "@/components/app-header";
 import { api, type CaseSummary, type Status } from "@/lib/api";
-import { SEVERITY_LABELS, STATUS_LABELS, formatDateTime, statusBadgeClass } from "@/lib/labels";
+import {
+  type AccessPath,
+  PATH_LABELS,
+  SEVERITY_LABELS,
+  STATUS_LABELS,
+  formatDateTime,
+  pathBadgeClass,
+  statusBadgeClass,
+} from "@/lib/labels";
 import { severityBadgeClass } from "@/lib/rules";
 
 type CasePage = { items: CaseSummary[]; page: number; size: number; total: number };
@@ -17,6 +25,7 @@ export default function DetectionsPage() {
   const router = useRouter();
   const { me, handleError } = useMe();
   const [status, setStatus] = useState<Status | null>(null);
+  const [path, setPath] = useState<AccessPath | null>(null);
   const [page, setPage] = useState(1);
   const [data, setData] = useState<CasePage | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -24,11 +33,12 @@ export default function DetectionsPage() {
   useEffect(() => {
     const params = new URLSearchParams({ page: String(page), size: String(PAGE_SIZE) });
     if (status) params.set("status", status);
+    if (path) params.set("access_path", path);
     // 목록 조회도 Argus 자체 접속기록(READ)으로 남는다 — 목록엔 회원 식별값이 없어 건수 0
     api<CasePage>(`/detections?${params}`)
       .then(setData)
       .catch((e) => setError(handleError(e)));
-  }, [status, page, handleError]);
+  }, [status, path, page, handleError]);
 
   const isOfficer = me?.role === "OFFICER";
   const lastPage = data ? Math.max(1, Math.ceil(data.total / PAGE_SIZE)) : 1;
@@ -46,6 +56,7 @@ export default function DetectionsPage() {
 
         {error && <div className="alert-error">{error}</div>}
 
+        <div className="filter-row">
         <div className="tabs">
           {FILTERS.map((s) => (
             <button
@@ -60,6 +71,22 @@ export default function DetectionsPage() {
             </button>
           ))}
         </div>
+          {/* 경로별로 따로 점검·보고한다 (policy 1-5) */}
+          <label className="inline-field">
+            접근 경로{" "}
+            <select
+              value={path ?? ""}
+              onChange={(e) => {
+                setPath((e.target.value || null) as AccessPath | null);
+                setPage(1);
+              }}
+            >
+              <option value="">전체</option>
+              <option value="APP">{PATH_LABELS.APP}</option>
+              <option value="DB">{PATH_LABELS.DB}</option>
+            </select>
+          </label>
+        </div>
 
         <section className="card">
           <div className="table-wrap">
@@ -69,6 +96,7 @@ export default function DetectionsPage() {
                   <th className="num">번호</th>
                   <th>룰</th>
                   <th>심각도</th>
+                  <th>경로</th>
                   <th>취급자</th>
                   <th>발생일</th>
                   <th className="num">기록</th>
@@ -89,6 +117,9 @@ export default function DetectionsPage() {
                       </span>
                     </td>
                     <td>
+                      <span className={pathBadgeClass(c.access_path)}>{PATH_LABELS[c.access_path]}</span>
+                    </td>
+                    <td>
                       {c.actor_name ?? "-"} <span className="muted">({c.actor_login_id})</span>
                     </td>
                     <td>{c.group_bucket.replace("T", " ").replace("+09:00", "")}</td>
@@ -103,7 +134,7 @@ export default function DetectionsPage() {
                 ))}
                 {data && data.items.length === 0 && (
                   <tr>
-                    <td colSpan={10} className="muted" style={{ textAlign: "center", padding: 24 }}>
+                    <td colSpan={11} className="muted" style={{ textAlign: "center", padding: 24 }}>
                       해당하는 탐지건이 없습니다.
                     </td>
                   </tr>

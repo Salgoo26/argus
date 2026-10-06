@@ -6,15 +6,19 @@ import { useCallback, useEffect, useState } from "react";
 
 import { AppHeader, useMe } from "@/components/app-header";
 import { AttachmentList, AttachmentUploader } from "@/components/attachments";
+import { DbStatement, SubjectsCell } from "@/components/db-statement";
 import { TicketInput } from "@/components/ticket-input";
 import { api, type CaseDetail } from "@/lib/api";
 import {
   ACTION_LABELS,
   type ActionButton,
+  EXPLANATION_GUIDE,
+  PATH_LABELS,
   SEVERITY_LABELS,
   STATUS_LABELS,
   actionsFor,
   formatDateTime,
+  pathBadgeClass,
   statusBadgeClass,
 } from "@/lib/labels";
 
@@ -81,6 +85,12 @@ export default function DetectionDetailPage() {
   // 지금 차수의 소명 — 취급자가 요청 중일 때 첨부를 올리고 지울 수 있다
   const currentRound = detail?.explanations.find((e) => e.round === detail.round);
   const canAttach = me?.role === "HANDLER" && detail?.status === "REQUESTED" && !!currentRound;
+  // 경로별 소명 기준 (policy 3-3) — 취급자에겐 작성 안내, 담당자에겐 검토 기준
+  const guide = detail ? EXPLANATION_GUIDE[detail.access_path] : null;
+  const showGuide =
+    !!guide &&
+    ((me?.role === "HANDLER" && detail?.status === "REQUESTED") ||
+      (me?.role === "OFFICER" && detail?.status === "SUBMITTED"));
 
   return (
     <>
@@ -94,12 +104,17 @@ export default function DetectionDetailPage() {
           <>
             <h1 className="page-title">
               #{detail.id} {detail.rule.name}{" "}
-              <span className={statusBadgeClass(detail.status)}>{STATUS_LABELS[detail.status]}</span>
+              <span className={statusBadgeClass(detail.status)}>{STATUS_LABELS[detail.status]}</span>{" "}
+              <span className={pathBadgeClass(detail.access_path)}>{PATH_LABELS[detail.access_path]}</span>
             </h1>
             <p className="page-subtitle">{detail.rule.description}</p>
 
             <section className="card">
               <dl className="summary-grid">
+                <div>
+                  <dt>접근 경로</dt>
+                  <dd>{PATH_LABELS[detail.access_path]}</dd>
+                </div>
                 <div>
                   <dt>취급자</dt>
                   <dd>
@@ -164,13 +179,26 @@ export default function DetectionDetailPage() {
                 <h2 className="card-title">
                   {me?.role === "HANDLER" ? "소명 작성" : "처리"}
                 </h2>
+                {showGuide && guide && (
+                  <div className="guide">
+                    <strong>
+                      {PATH_LABELS[detail.access_path]}{" "}
+                      {me?.role === "HANDLER" ? "소명에 적을 것" : "검토 기준"}
+                    </strong>
+                    <ul>
+                      {(me?.role === "HANDLER" ? guide.write : guide.review).map((line) => (
+                        <li key={line}>{line}</li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
                 <textarea
                   value={text}
                   onChange={(e) => setText(e.target.value)}
                   maxLength={me?.role === "HANDLER" ? 5000 : 1000}
                   placeholder={
                     me?.role === "HANDLER"
-                      ? "행위 사유를 구체적으로 작성하세요 (예: 요청 부서, 업무 목적, 근거 문서)."
+                      ? "위 안내에 따라 행위 사유를 구체적으로 작성하세요."
                       : "요청 메시지 또는 사유·의견 (불요·요청 취소·반려는 필수)"
                   }
                 />
@@ -211,7 +239,7 @@ export default function DetectionDetailPage() {
                       <th>행위</th>
                       <th>결과</th>
                       <th>접속지</th>
-                      <th>기능</th>
+                      <th>{detail.access_path === "DB" ? "실행한 SQL (정규화)" : "기능"}</th>
                       <th className="num">처리 건수</th>
                       <th>정보주체</th>
                       <th>연계 티켓</th>
@@ -229,13 +257,21 @@ export default function DetectionDetailPage() {
                         </td>
                         <td>{log.client_ip}</td>
                         <td>
-                          {log.request_method} {log.request_path}
+                          {log.db ? (
+                            <DbStatement db={log.db} />
+                          ) : (
+                            <>
+                              {log.request_method} {log.request_path}
+                            </>
+                          )}
                         </td>
                         <td className="num">{log.subject_count}</td>
                         <td className="subjects">
-                          {log.subjects.slice(0, SUBJECT_PREVIEW).join(", ")}
-                          {log.subjects.length > SUBJECT_PREVIEW &&
-                            ` 외 ${log.subject_count - SUBJECT_PREVIEW}명`}
+                          <SubjectsCell
+                            subjects={log.subjects.slice(0, SUBJECT_PREVIEW)}
+                            count={log.subject_count}
+                            db={log.db}
+                          />
                         </td>
                         <td>{log.ticket_id ?? "-"}</td>
                       </tr>

@@ -4,12 +4,15 @@ import Link from "next/link";
 import { type FormEvent, useEffect, useState } from "react";
 
 import { AppHeader, useMe } from "@/components/app-header";
+import { DbStatement, SubjectsCell } from "@/components/db-statement";
 import { api, type AccessLogPage, type AccessLogSearch } from "@/lib/api";
 import {
   ACTION_LABELS,
   DATA_CATEGORY_LABELS,
+  PATH_LABELS,
   SOURCE_LABELS,
   formatDateTime,
+  pathBadgeClass,
 } from "@/lib/labels";
 
 const PAGE_SIZE = 50;
@@ -119,8 +122,8 @@ export default function AccessLogsPage() {
               <label htmlFor="access_path">접근 경로</label>
               <select id="access_path" name="access_path" defaultValue="">
                 <option value="">전체</option>
-                <option value="APP">응용프로그램</option>
-                <option value="DB">DB 직접</option>
+                <option value="APP">{PATH_LABELS.APP}</option>
+                <option value="DB">{PATH_LABELS.DB}</option>
               </select>
             </div>
             <div className="field">
@@ -153,12 +156,13 @@ export default function AccessLogsPage() {
                 <tr>
                   <th>발생 시각</th>
                   <th>출처</th>
+                  <th>경로</th>
                   <th>계정</th>
                   <th>접속지</th>
                   <th>수행업무</th>
                   <th>데이터</th>
                   <th>결과</th>
-                  <th>기능</th>
+                  <th>기능 / SQL</th>
                   <th className="num">처리 건수</th>
                   <th>정보주체</th>
                   <th>탐지건</th>
@@ -170,7 +174,9 @@ export default function AccessLogsPage() {
                     <td>{formatDateTime(log.occurred_at)}</td>
                     <td>
                       {SOURCE_LABELS[log.source] ?? log.source}
-                      {log.access_path === "DB" && <span className="muted"> · DB</span>}
+                    </td>
+                    <td>
+                      <span className={pathBadgeClass(log.access_path)}>{PATH_LABELS[log.access_path]}</span>
                     </td>
                     <td>
                       {log.actor_name ?? "-"} <span className="muted">({log.actor_login_id})</span>
@@ -184,16 +190,20 @@ export default function AccessLogsPage() {
                       </span>
                     </td>
                     <td className="muted">
-                      {log.request_method} {log.request_path}
+                      {log.db ? (
+                        <DbStatement db={log.db} />
+                      ) : (
+                        <>
+                          {log.request_method} {log.request_path}
+                        </>
+                      )}
                     </td>
                     <td className="num">
                       {log.subject_count}
                       {log.subject_truncated && <span className="muted"> (일부 저장)</span>}
                     </td>
                     <td className="subjects">
-                      {log.subjects.join(", ")}
-                      {log.subject_count > log.subjects.length &&
-                        ` 외 ${log.subject_count - log.subjects.length}명`}
+                      <SubjectsCell subjects={log.subjects} count={log.subject_count} db={log.db} />
                     </td>
                     <td>
                       {log.detection_ids.map((id) => (
@@ -206,7 +216,7 @@ export default function AccessLogsPage() {
                 ))}
                 {data && data.items.length === 0 && (
                   <tr>
-                    <td colSpan={11} className="muted" style={{ textAlign: "center", padding: 24 }}>
+                    <td colSpan={12} className="muted" style={{ textAlign: "center", padding: 24 }}>
                       조건에 맞는 접속기록이 없습니다.
                     </td>
                   </tr>

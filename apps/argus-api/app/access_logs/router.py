@@ -28,6 +28,7 @@ from sqlalchemy.dialects.postgresql import ARRAY
 from app.agent import access_log, record_query_keys, record_subject_count
 from app.auth.deps import CurrentUser
 from app.detection.rules import KST
+from app.detections.db_detail import db_detail
 from app.detections.masking import mask_subject
 from app.detections.transitions import OFFICER
 from app.errors import ApiError
@@ -144,6 +145,7 @@ def search(body: SearchBody, request: Request, user: CurrentUser) -> dict:
             a.c.subject_ids,
             a.c.subject_count,
             a.c.subject_truncated,
+            a.c.context,
         )
         .join(source_system, source_system.c.id == a.c.source_system_id)
         .where(*_filters(body, start, end))
@@ -207,4 +209,6 @@ def _item(row, detection_ids: list[int]) -> dict:
         # 원본 식별값은 싣지 않는다 — 마스킹 값 앞 몇 개만 (LOG-10, 최소 노출)
         "subjects": [mask_subject(row["subject_type"], s) for s in ids[:SUBJECT_PREVIEW]],
         "detection_ids": detection_ids,
+        # DB 직접(2티어) 기록이면 정규화 SQL·테이블·건수 (policy 1-5)
+        "db": db_detail(row["access_path"], row["context"]),
     }
