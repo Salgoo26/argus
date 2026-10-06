@@ -35,7 +35,9 @@ class Catalog:
         self.conninfo = conninfo
         self._conn: psycopg.AsyncConnection | None = None
         self._lock = asyncio.Lock()
-        self._functions: tuple[float, frozenset[str]] = (0.0, frozenset())
+        # 아직 조회하지 않음 = None. 0.0으로 두면 부팅 직후(monotonic < 60초)엔
+        # 빈 목록이 "방금 조회한 값"으로 취급돼 사용자 함수를 못 알아본다 (2026-10-06 CI에서 발견)
+        self._functions: tuple[float | None, frozenset[str]] = (None, frozenset())
         self._tables: dict[int, tuple[str, dict[int, str]]] = {}
 
     async def _query(self, sql: str, params: tuple | None = None) -> list[tuple]:
@@ -56,7 +58,7 @@ class Catalog:
 
     async def user_functions(self) -> frozenset[str]:
         fetched_at, names = self._functions
-        if time.monotonic() - fetched_at > FUNCTIONS_TTL_SEC:
+        if fetched_at is None or time.monotonic() - fetched_at > FUNCTIONS_TTL_SEC:
             names = frozenset(row[0] for row in await self._query(_USER_FUNCTIONS_SQL))
             self._functions = (time.monotonic(), names)
         return names
