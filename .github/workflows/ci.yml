@@ -28,7 +28,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        app: [argus-api, platform-api]
+        app: [argus-api, platform-api, db-gateway]
     defaults:
       run:
         working-directory: apps/${{ matrix.app }}
@@ -181,6 +181,8 @@ jobs:
           - { app: argus-api, target: dev }
           - { app: platform-api, target: runtime }
           - { app: platform-api, target: dev }
+          - { app: db-gateway, target: runtime }
+          - { app: db-gateway, target: dev }
           - { app: platform-web, target: runtime }
           - { app: argus-web, target: runtime }
     steps:

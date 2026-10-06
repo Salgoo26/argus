@@ -155,6 +155,57 @@ services:
     networks:
       - platform-net
 
+  # ── DB 접근 게이트웨이 (2티어, 기능 레이어 8 — architecture 3-4) ──
+  # DB 툴(DBeaver 등)은 여기로만 접속한다: 사용자 = 본인 플랫폼 아이디, 비밀번호 = 관리자 화면에서 발급한 토큰,
+  # SSL 필수. 게이트웨이가 공용 계정으로 platform-db에 중계하며 접속기록을 남겨 Argus로 보낸다.
+  # 원문·전송 버퍼는 gateway-data 볼륨(이 컨테이너만 마운트) — 플랫폼 DB에 두면 공용 계정으로 지울 수 있다
+  db-gateway:
+    build:
+      context: ../apps/db-gateway
+      target: runtime
+    image: db-gateway:local
+    restart: unless-stopped
+    environment:
+      GATEWAY_UPSTREAM_HOST: platform-db
+      GATEWAY_UPSTREAM_DB: ${PLATFORM_DB_NAME}
+      # 공용 계정 = 플랫폼 앱 계정. 비밀번호는 사람에게 공유하지 않는다
+      GATEWAY_UPSTREAM_USER: ${PLATFORM_DB_USER}
+      GATEWAY_UPSTREAM_PASSWORD: ${PLATFORM_DB_PASSWORD}
+      # platform-api가 토큰을 서명한 키와 같은 값
+      GATEWAY_TOKEN_KEY: ${DB_GATEWAY_TOKEN_KEY:?set DB_GATEWAY_TOKEN_KEY in .env}
+      GATEWAY_ARGUS_INGEST_URL: http://argus-api:8000
+      # 출처 PLATFORM — platform-relay와 같은 키 (취급자 매칭이 3티어와 같게)
+      GATEWAY_ARGUS_INGEST_SECRET: ${ARGUS_INGEST_SECRET_PLATFORM:?set ARGUS_INGEST_SECRET_PLATFORM in .env}
+    volumes:
+      - gateway-data:/data
+    ports:
+      # DB 툴 입구 — 호스트 루프백에만. 운영은 클라우드 방화벽에서 관리자 허용 IP로만 (architecture 7-2)
+      - "127.0.0.1:${DB_GATEWAY_PORT:-16432}:6432"
+    depends_on:
+      # Argus가 꺼져 있어도 기동한다 — 기록은 버퍼에 쌓였다가 Argus가 뜨면 전송
+      platform-migrate:
+        condition: service_completed_successfully
+    networks:
+      - platform-net
+      - argus-net
+
+  db-gateway-test:
+    profiles: ["test"]
+    build:
+      context: ../apps/db-gateway
+      target: dev
+    image: db-gateway:dev
+    environment:
+      # 임시 DB를 만들어 "플랫폼 DB"로 삼고, 이 계정을 공용 계정으로 쓴다
+      DATABASE_URL: postgresql://${PLATFORM_DB_USER}:${PLATFORM_DB_PASSWORD}@platform-db:5432/${PLATFORM_DB_NAME}
+    volumes:
+      - ../apps/db-gateway:/app
+    depends_on:
+      platform-db:
+        condition: service_healthy
+    networks:
+      - platform-net
+
   # ── Argus DB: 접속기록 원장 (§8③ append-only + 해시체인은 M1) ──
   argus-db:
     image: postgres:16-alpine
@@ -300,3 +351,5 @@ volumes:
   platform-db-data:
   argus-db-data:
   argus-attachments:
+  # 2티어 원문 저장소·전송 버퍼·로컬 TLS 키 — db-gateway만 마운트, 백업 대상 (architecture 7-3)
+  gateway-data:
