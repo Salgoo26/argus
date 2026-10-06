@@ -16,6 +16,7 @@ import threading
 from psycopg.conninfo import make_conninfo
 
 from app.auth import fetch_operator_status
+from app.catalog import Catalog
 from app.config import Settings
 from app.sender import BATCH_SIZE, POLL_INTERVAL_SEC, Sender
 from app.server import Gateway, UpstreamConfig
@@ -72,6 +73,7 @@ async def serve(settings: Settings, stop: threading.Event) -> None:
             password,
         ),
         operator_lookup=lambda login_id: fetch_operator_status(conninfo, login_id),
+        catalog=Catalog(conninfo),
     )
 
     sender_thread = threading.Thread(

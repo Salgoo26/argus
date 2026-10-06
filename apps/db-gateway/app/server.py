@@ -17,7 +17,7 @@
   단 **존재하지 않는 아이디는 Argus에도 원문 저장소에도 남기지 않는다**
   (아이디 칸에 잘못 입력된 비밀번호가 영구 저장되지 않게 — 3티어 관리자 로그인과 같은 규칙)
 - 원문에는 접속 정보만 — 토큰 값(비밀번호)은 어디에도 남기지 않는다
-- 문장(SQL) 기록은 다음 단계(구현 순서 ① PR 3b). 지금은 중계만 한다
+- 문장(SQL) 기록은 session.py — 완료 신호를 넘기기 전에 기록한다
 """
 
 import asyncio
@@ -31,6 +31,8 @@ from datetime import UTC, datetime
 from app import protocol as pg
 from app import upstream
 from app.auth import OperatorStatus, TokenCheck, check_token
+from app.catalog import Catalog
+from app.session import Session
 from app.store import Store
 
 logger = logging.getLogger("gateway")
@@ -82,6 +84,7 @@ class Gateway:
         token_key: bytes,
         upstream_config: UpstreamConfig,
         operator_lookup: OperatorLookup,
+        catalog: Catalog,
         clock: Callable[[], datetime] = lambda: datetime.now(UTC),
     ) -> None:
         self.store = store
@@ -89,6 +92,7 @@ class Gateway:
         self.token_key = token_key
         self.upstream = upstream_config
         self.operator_lookup = operator_lookup
+        self.catalog = catalog
         self.clock = clock
         self.backend_keys: set[bytes] = set()  # 살아 있는 중계 연결 — 취소 요청 검증용
 
@@ -196,7 +200,7 @@ class Gateway:
             writer.write(pg.message(tag, body))
         await writer.drain()
         logger.info("session opened: login_id=%s token_id=%s", login_id, check.token_id)
-        return conn, check
+        return conn, check, login
 
     async def _record_login(self, login, check: TokenCheck, failure: str | None) -> bool:
         raw, event = login.records(self.upstream.user, check, failure)
@@ -234,12 +238,23 @@ class Gateway:
 
     # ── 6. 중계 ──
 
-    async def _relay(self, reader, writer, conn: upstream.Upstream, check: TokenCheck) -> None:
+    async def _relay(
+        self, reader, writer, conn: upstream.Upstream, check: TokenCheck, login: "_LoginAttempt"
+    ) -> None:
         if conn.backend_key:
             self.backend_keys.add(conn.backend_key[:8])
+        session = Session(
+            store=self.store,
+            catalog=self.catalog,
+            login_id=login.login_id,
+            client_ip=login.client_ip,
+            token_id=check.token_id,
+            db_user=self.upstream.user,
+            clock=self.clock,
+        )
         tasks = {
-            asyncio.create_task(_pump(reader, conn.writer)),
-            asyncio.create_task(_pump(conn.reader, writer)),
+            asyncio.create_task(_client_to_db(session, reader, conn.writer, writer)),
+            asyncio.create_task(_db_to_client(session, conn.reader, writer)),
             asyncio.create_task(self._expire(writer, check)),
         }
         try:
@@ -256,20 +271,47 @@ class Gateway:
         """토큰 만료 시각에 연결을 끊는다 — 1시간 토큰으로 연결을 무기한 붙잡지 못하게"""
         remaining = (check.expires_at - self.clock()).total_seconds()
         await asyncio.sleep(max(remaining, 0))
-        writer.write(pg.error_response("57P01", "DB access token expired — connection closed"))
-        try:
-            await writer.drain()
-        except ConnectionError:
-            pass
+        await _send(
+            writer, pg.error_response("57P01", "DB access token expired — connection closed")
+        )
         logger.info("session closed at token expiry: token_id=%s", check.token_id)
 
 
-async def _pump(src: asyncio.StreamReader, dst: asyncio.StreamWriter) -> None:
+async def _send(writer: asyncio.StreamWriter, data: bytes) -> None:
+    writer.write(data)
+    try:
+        await writer.drain()
+    except ConnectionError:
+        pass
+
+
+async def _client_to_db(session: Session, src, db_writer, client_writer) -> None:
     try:
         while True:
             tag, body = await pg.read_message(src)
-            dst.write(pg.message(tag, body))
-            await dst.drain()
+            if session.from_client(tag, body):
+                # 기록할 수 없는 요청(fastpath 함수 호출) — DB로 넘기지 않고 연결을 끊는다
+                await _send(
+                    client_writer, pg.error_response("0A000", "function call not supported")
+                )
+                return
+            db_writer.write(pg.message(tag, body))
+            await db_writer.drain()
+    except (asyncio.IncompleteReadError, ConnectionError, pg.ProtocolError):
+        return
+
+
+async def _db_to_client(session: Session, src, client_writer) -> None:
+    try:
+        while True:
+            tag, body = await pg.read_message(src)
+            # 완료·오류 신호는 기록을 마친 뒤에만 넘긴다
+            # — 기록하지 못하면 오류로 바꾸고 끊는다 (fail-closed)
+            if not await session.from_server(tag, body):
+                await _send(client_writer, pg.error_response(*MESSAGES["ACCESS_LOG_UNAVAILABLE"]))
+                return
+            client_writer.write(pg.message(tag, body))
+            await client_writer.drain()
     except (asyncio.IncompleteReadError, ConnectionError, pg.ProtocolError):
         return
 

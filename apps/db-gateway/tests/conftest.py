@@ -21,6 +21,7 @@ from psycopg import sql
 from psycopg.conninfo import conninfo_to_dict, make_conninfo
 
 from app.auth import fetch_operator_status
+from app.catalog import Catalog
 from app.server import Gateway, UpstreamConfig
 from app.store import Store
 from app.tls import ensure_self_signed, server_context
@@ -38,6 +39,23 @@ CREATE TABLE operator (
 INSERT INTO operator (login_id) VALUES ('ops_park'), ('cs_kim');
 INSERT INTO operator (login_id, employment_status) VALUES ('retired_lee', 'TERMINATED');
 INSERT INTO operator (login_id, failed_login_count) VALUES ('locked_choi', 5);
+
+-- 플랫폼 업무 테이블 축약판 (가상 데이터) — 데이터 유형 매핑 확인용
+CREATE TABLE member (id bigserial PRIMARY KEY, name text, email text, phone text);
+CREATE TABLE orders (id bigserial PRIMARY KEY, member_id bigint REFERENCES member(id), amount int);
+CREATE TABLE refund_account (id bigserial PRIMARY KEY, member_id bigint, bank_name text);
+INSERT INTO member (name, email, phone) VALUES
+    ('가상일', 'one@example.com', '010-0000-0001'),
+    ('가상이', 'two@example.com', '010-0000-0002'),
+    ('가상삼', 'three@example.com', '010-0000-0003');
+INSERT INTO orders (member_id, amount) VALUES (1, 1000), (2, 2000);
+INSERT INTO refund_account (member_id, bank_name) VALUES (1, '가상은행');
+
+-- 테이블 이름 없이 개인정보를 처리하는 사용자 함수·프로시저 (architecture 3-4 "기록 제외" 예외)
+CREATE FUNCTION member_email(member_id bigint) RETURNS text LANGUAGE sql
+    AS 'SELECT email FROM member WHERE id = member_id';
+CREATE PROCEDURE touch_member(member_id bigint) LANGUAGE sql
+    AS 'UPDATE member SET phone = phone WHERE id = member_id';
 """
 
 
@@ -84,7 +102,15 @@ class RunningGateway:
         assert ready.wait(10)
 
     def stop(self) -> None:
-        self.loop.call_soon_threadsafe(self.server.close)
+        async def shutdown() -> None:
+            self.server.close()
+            current = asyncio.current_task()
+            tasks = [t for t in asyncio.all_tasks() if t is not current]
+            for task in tasks:
+                task.cancel()
+            await asyncio.gather(*tasks, return_exceptions=True)
+
+        asyncio.run_coroutine_threadsafe(shutdown(), self.loop).result(10)
         self.loop.call_soon_threadsafe(self.loop.stop)
         self.thread.join(10)
 
@@ -113,6 +139,7 @@ def make_gateway(upstream_db, store, tmp_path):
                 upstream_db["password"],
             ),
             "operator_lookup": lambda login_id: fetch_operator_status(conninfo, login_id),
+            "catalog": Catalog(conninfo),
         }
         options.update(overrides)
         gw = RunningGateway(Gateway(**options))
