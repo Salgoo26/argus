@@ -188,6 +188,25 @@ services:
       - platform-net
       - argus-net
 
+  # ── DB 직접 접근 기준선 시드 (일회성) — 지난달 가상 DB 조회 기록을 게이트웨이 버퍼에 넣는다 ──
+  # 게이트웨이 전송 루프가 수집 API로 보낸다(원장 직접 INSERT 금지 — CLAUDE.md 3절 #5).
+  # "DB 직접 전월 대비 급증" 룰 시연용. 한 번만 넣고(완료 표시) 이후 기동 때는 건너뛴다.
+  # DB 비밀번호·서명 키는 주지 않는다 — 원문 저장소와 DB 계정 이름만 필요
+  db-gateway-seed:
+    image: db-gateway:local
+    command: ["python", "-m", "app.seed_baseline"]
+    environment:
+      GATEWAY_UPSTREAM_USER: ${PLATFORM_DB_USER}
+    volumes:
+      - gateway-data:/data
+    healthcheck:
+      disable: true
+    depends_on:
+      db-gateway:
+        condition: service_started
+    restart: "no"
+    network_mode: none
+
   db-gateway-test:
     profiles: ["test"]
     build:

@@ -189,16 +189,14 @@ def test_false_positive_request_is_cancelled(officer, handler_password):
         browser.close()
 
 
-def test_baseline_history_arrived_through_the_ingest_api(officer):
-    """시드한 지난달 조회 기록(기준선)이 relay → 수집 API를 거쳐 원장에 도착했다 (기능 레이어 4)
-
-    형식이 틀리면 relay가 DEAD로 두고 조용히 사라지므로, 원장에서 실제로 찾아 확인한다.
-    """
+def _last_month_reads(officer, access_path: str) -> int:
+    """ops_park의 지난달 조회 기록 수 — 경로별 (기준선 시드는 평일마다 하루 5건)"""
     this_month = datetime.now(KST).date().replace(day=1)
     last_month_end = this_month - timedelta(days=1)
     criteria = {
         "actor": "ops_park",
         "action": "READ",
+        "access_path": access_path,
         "date_from": last_month_end.replace(day=1).isoformat(),
         "date_to": last_month_end.isoformat(),
     }
@@ -210,10 +208,29 @@ def test_baseline_history_arrived_through_the_ingest_api(officer):
         total = response.json()["total"]
         return total if total > 0 else None
 
-    total = wait_until("지난달 기준선 기록 도착", probe)
+    total = wait_until(f"지난달 기준선 기록 도착 ({access_path})", probe)
+    officer_browser.close()
+    return total
+
+
+def test_baseline_history_arrived_through_the_ingest_api(officer):
+    """시드한 지난달 조회 기록(기준선)이 relay → 수집 API를 거쳐 원장에 도착했다 (기능 레이어 4)
+
+    형식이 틀리면 relay가 DEAD로 두고 조용히 사라지므로, 원장에서 실제로 찾아 확인한다.
+    """
+    total = _last_month_reads(officer, "APP")
     # 평일마다 하루 5건 (apps/platform-api app/scripts/baseline.py)
     assert total % 5 == 0 and 15 * 5 <= total <= 23 * 5
-    officer_browser.close()
+
+
+def test_db_baseline_arrived_through_the_gateway(officer):
+    """DB 직접 접근 기준선(지난달)이 게이트웨이 버퍼 → 수집 API를 거쳐 원장에 도착했다 (8 ③-3)
+
+    경로별로 따로 센다 — 화면 경유 기준선과 섞이면 전월 대비 비율이 무의미해진다 (policy 1-5)
+    """
+    total = _last_month_reads(officer, "DB")
+    # 평일마다 하루 5건 (apps/db-gateway app/seed_baseline.py)
+    assert total % 5 == 0 and 15 * 5 <= total <= 23 * 5
 
 
 def test_ledger_hash_chain_is_intact():

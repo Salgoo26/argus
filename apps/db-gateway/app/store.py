@@ -45,6 +45,12 @@ CREATE TABLE IF NOT EXISTS outbox (
     created_at     REAL NOT NULL
 );
 CREATE INDEX IF NOT EXISTS ix_outbox_pending ON outbox (status, next_retry_at, id);
+
+-- 한 번만 해야 하는 작업의 표시 (예: 기준선 시드 완료 시각)
+CREATE TABLE IF NOT EXISTS meta (
+    key    TEXT PRIMARY KEY,
+    value  TEXT NOT NULL
+);
 """
 
 
@@ -67,9 +73,8 @@ class PendingEvent:
 class Store:
     def __init__(self, path: Path) -> None:
         self.path = path
-        self._local = (
-            threading.local()
-        )  # sqlite3 연결은 스레드마다 따로 (게이트웨이 루프 / 전송 스레드)
+        # sqlite3 연결은 스레드마다 따로 (게이트웨이 루프 / 전송 스레드)
+        self._local = threading.local()
         with self._conn() as conn:
             conn.executescript(SCHEMA)
 
@@ -84,29 +89,41 @@ class Store:
 
     def record(self, raw: dict, event: dict) -> None:
         """원문과 접속기록을 함께 남긴다. 실패하면 예외 — 호출 측은 결과를 내보내지 않는다"""
-        ref = raw["event_id"]
-        digest = fingerprint(raw)
-        event = {
-            **event,
-            "context": {**event["context"], "raw_ref": ref, "raw_fingerprint": digest},
-        }
+        self.record_many([(raw, event)])
+
+    def record_many(self, pairs: Sequence[tuple[dict, dict]], mark: str | None = None) -> None:
+        """여러 건을 한 트랜잭션으로. mark를 주면 같은 트랜잭션에 완료 표시도 남긴다
+        (시드를 다시 실행해도 두 번 들어가지 않게)
+        """
         conn = self._conn()
         conn.execute("BEGIN IMMEDIATE")
         try:
-            conn.execute(
-                "INSERT INTO raw_record (ref, created_at, record, fingerprint) VALUES (?, ?, ?, ?)",
-                (ref, raw["occurred_at"], canonical_json(raw), digest),
-            )
             now = time.time()
-            conn.execute(
-                "INSERT INTO outbox (event_id, payload, next_retry_at, created_at)"
-                " VALUES (?, ?, ?, ?)",
-                (event["event_id"], canonical_json(event), now, now),
-            )
+            for raw, event in pairs:
+                ref = raw["event_id"]
+                digest = fingerprint(raw)
+                context = {**event["context"], "raw_ref": ref, "raw_fingerprint": digest}
+                conn.execute(
+                    "INSERT INTO raw_record (ref, created_at, record, fingerprint)"
+                    " VALUES (?, ?, ?, ?)",
+                    (ref, raw["occurred_at"], canonical_json(raw), digest),
+                )
+                conn.execute(
+                    "INSERT INTO outbox (event_id, payload, next_retry_at, created_at)"
+                    " VALUES (?, ?, ?, ?)",
+                    (event["event_id"], canonical_json({**event, "context": context}), now, now),
+                )
+            if mark is not None:
+                conn.execute("INSERT INTO meta (key, value) VALUES (?, ?)", (mark, str(int(now))))
             conn.execute("COMMIT")
         except BaseException:
             conn.execute("ROLLBACK")
             raise
+
+    def marked(self, key: str) -> bool:
+        return (
+            self._conn().execute("SELECT 1 FROM meta WHERE key = ?", (key,)).fetchone() is not None
+        )
 
     def record_raw(self, raw: dict) -> None:
         """Argus에 보내지 않는 문장(기록 제외 대상)도 원문은 남긴다 (architecture 3-4)"""

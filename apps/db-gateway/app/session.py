@@ -29,7 +29,7 @@ from dataclasses import dataclass
 from datetime import datetime
 
 from app.catalog import Catalog
-from app.sql import analyze, split_statements
+from app.sql import Analysis, analyze, split_statements
 from app.store import Store
 
 logger = logging.getLogger("gateway.session")
@@ -269,42 +269,70 @@ class Session:
                 return True
 
             columns = await self.catalog.column_names(execution.columns or [])
-            event = self._event(event_id, occurred_at, analysis, row_count, failed, columns)
+            event = statement_event(
+                event_id=event_id,
+                occurred_at=occurred_at,
+                login_id=self.login_id,
+                client_ip=self.client_ip,
+                token_id=self.token_id,
+                db_user=self.db_user,
+                analysis=analysis,
+                row_count=row_count,
+                failed=failed,
+                columns=columns,
+            )
             await asyncio.to_thread(self.store.record, raw, event)
             return True
         except Exception:
             logger.exception("failed to record statement")
             return False
 
-    def _event(self, event_id, occurred_at, analysis, row_count, failed, columns) -> dict:
-        tables = [t for t in analysis.tables if _DB_OBJECT.fullmatch(t)][:TABLES_MAX]
-        all_columns = list(dict.fromkeys([*columns, *analysis.columns]))
-        context = {
-            "db_user": self.db_user,
-            "sql_normalized": analysis.normalized,
-            "tables": tables,
-            "columns": [c for c in all_columns if _DB_OBJECT.fullmatch(c)][:COLUMNS_MAX],
-            "row_count": row_count,
-        }
-        processed = not failed and analysis.data_category != "NONE"
-        if processed:
-            # 구현 순서 ①: 회원번호 추출 전이라 처리한 정보주체를 특정하지 못한다 — 건수만 남긴다
-            # (api-spec 2-2 "정보주체 미특정", ②에서 결과·조건의 회원번호 추출로 줄인다)
-            context["subject_unresolved"] = True
-        if self.token_id:
-            context["token_id"] = self.token_id
-        return {
-            "event_id": event_id,
-            "occurred_at": occurred_at,
-            "actor": {"login_id": self.login_id},
-            "client_ip": self.client_ip,
-            "action": analysis.action,
-            "access_path": "DB",
-            "data_category": analysis.data_category,
-            "result": "FAILURE" if failed else "SUCCESS",
-            "subject": {"type": "MEMBER", "ids": [], "count": row_count if processed else 0},
-            "context": context,
-        }
+
+def statement_event(
+    *,
+    event_id: str,
+    occurred_at: str,
+    login_id: str,
+    client_ip: str | None,
+    token_id: str | None,
+    db_user: str,
+    analysis: Analysis,
+    row_count: int,
+    failed: bool,
+    columns: list[str],
+) -> dict:
+    """문장 1건의 접속기록 (api-spec 2-2 "access_path=DB 기록 규칙")
+
+    실제 중계(Session)와 기준선 시드(seed_baseline.py)가 같은 함수로 만든다 — 형식이 갈라지지 않게
+    """
+    tables = [t for t in analysis.tables if _DB_OBJECT.fullmatch(t)][:TABLES_MAX]
+    all_columns = list(dict.fromkeys([*columns, *analysis.columns]))
+    context = {
+        "db_user": db_user,
+        "sql_normalized": analysis.normalized,
+        "tables": tables,
+        "columns": [c for c in all_columns if _DB_OBJECT.fullmatch(c)][:COLUMNS_MAX],
+        "row_count": row_count,
+    }
+    processed = not failed and analysis.data_category != "NONE"
+    if processed:
+        # 회원번호 추출 전이라(구현 순서 ② 보류) 처리한 정보주체를 특정하지 못한다 — 건수만 남긴다
+        # (api-spec 2-2 "정보주체 미특정")
+        context["subject_unresolved"] = True
+    if token_id:
+        context["token_id"] = token_id
+    return {
+        "event_id": event_id,
+        "occurred_at": occurred_at,
+        "actor": {"login_id": login_id},
+        "client_ip": client_ip,
+        "action": analysis.action,
+        "access_path": "DB",
+        "data_category": analysis.data_category,
+        "result": "FAILURE" if failed else "SUCCESS",
+        "subject": {"type": "MEMBER", "ids": [], "count": row_count if processed else 0},
+        "context": context,
+    }
 
 
 def _row_count(command_tag: str, streamed_rows: int) -> int:
