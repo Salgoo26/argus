@@ -49,7 +49,8 @@ export type RuleDetail = RuleSummary & { history: RuleHistory[] };
 // ── 라벨 ─────────────────────────────────────────────
 
 export const RULE_TYPE_LABELS: Record<RuleType, string> = { EVENT: "단건", AGGREGATE: "집계" };
-export const ACCESS_PATH_LABELS = { APP: "응용프로그램", DB: "DB 직접", ALL: "전체" } as const;
+// policy 1-5 표기 — 탐지건·접속기록 화면(lib/labels.ts PATH_LABELS)과 같은 말
+export const ACCESS_PATH_LABELS = { APP: "화면 경유(3티어)", DB: "DB 직접(2티어)", ALL: "전체" } as const;
 export const WINDOW_LABELS = { "1h": "1시간(매시 정각부터)", "1d": "하루(0시부터)", "1mo": "한 달(1일부터)" };
 export const MEASURE_LABELS = {
   LOG_COUNT: "기록 수",

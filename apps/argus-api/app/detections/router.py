@@ -34,6 +34,7 @@ from sqlalchemy import Connection, and_, func, insert, select, update
 
 from app.agent import access_log, access_log_exempt, record_subject_count
 from app.auth.deps import AuthenticatedUser, CurrentUser
+from app.detections.db_detail import db_detail
 from app.detections.masking import mask_subject
 from app.detections.transitions import ACTION_ROLES, HANDLER, TRANSITIONS
 from app.errors import ApiError
@@ -212,6 +213,7 @@ def _logs(conn: Connection, detection_id: int) -> list[dict]:
             a.c.subject_ids,
             a.c.subject_count,
             a.c.subject_truncated,
+            a.c.access_path,
             a.c.context,
         )
         .join(detection_log, detection_log.c.access_log_id == a.c.id)
@@ -235,6 +237,8 @@ def _logs(conn: Connection, detection_id: int) -> list[dict]:
             "subjects": [mask_subject(r["subject_type"], s) for s in r["subject_ids"] or []],
             # 업무 근거 티켓(1:1 문의 등) — 소명과 대조할 단서. 다른 context 키는 싣지 않음
             "ticket_id": (r["context"] or {}).get("ticket_id"),
+            # DB 직접(2티어) 기록이면 정규화 SQL·테이블·건수 — 무엇을 소명할지 (policy 1-5)
+            "db": db_detail(r["access_path"], r["context"]),
         }
         for r in rows
     ]

@@ -428,3 +428,38 @@ def test_cases_show_and_filter_by_access_path(app_engine, admin_engine, as_user)
     assert [i["id"] for i in only_db] == [app_case]
     assert officer.get(f"/api/detections/{app_case}").json()["access_path"] == "DB"
     assert officer.get("/api/detections", params={"access_path": "WEB"}).status_code == 400
+
+
+def test_db_case_logs_show_what_to_explain(app_engine, admin_engine, as_user):
+    # 취급자도 DB 기록의 정규화 SQL·테이블·건수를 보고 무엇을 소명할지 안다 (policy 1-5)
+    context = {
+        "db_user": "platform_owner",
+        "sql_normalized": "SELECT * FROM member",
+        "tables": ["member"],
+        "columns": ["member.id"],
+        "row_count": 120,
+        "raw_ref": "6f1d0c2e-0000-4000-8000-000000000003",
+        "raw_fingerprint": "sha256:" + "cd" * 32,
+        "subject_unresolved": True,
+    }
+    case_id = detect(app_engine, actor="ops_park", context=context)
+    [log] = as_user("ops_park").get(f"/api/detections/{case_id}").json()["logs"]
+    assert log["db"] is None  # detect()는 화면 경유 기록 — 경로가 DB일 때만 싣는다
+    with admin_engine.begin() as conn:
+        conn.execute(text("UPDATE detection SET access_path = 'DB'"))
+    # 원장은 수정할 수 없으니(append-only) 새 DB 기록을 만들어 같은 탐지건에 붙여 확인한다
+    with app_engine.begin() as conn:
+        db_log = append_access_logs(
+            conn,
+            [make_entry(access_path="DB", subject_ids=[], subject_count=120, context=context)],
+            received_at=datetime.now(UTC),
+        ).inserted_ids[0]
+    with admin_engine.begin() as conn:
+        conn.execute(
+            text("INSERT INTO detection_log (detection_id, access_log_id) VALUES (:d, :l)"),
+            {"d": case_id, "l": db_log},
+        )
+    logs = as_user("ops_park").get(f"/api/detections/{case_id}").json()["logs"]
+    db = next(entry["db"] for entry in logs if entry["access_log_id"] == db_log)
+    assert db["sql_normalized"] == "SELECT * FROM member" and db["row_count"] == 120
+    assert "platform_owner" not in str(logs)

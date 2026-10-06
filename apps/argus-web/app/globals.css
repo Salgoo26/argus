@@ -572,3 +572,60 @@ tr.clickable {
   padding: 0;
   margin: 6px 0;
 }
+
+/* ── 접근 경로 (policy 1-5) — 화면 경유(3티어)는 기본 배지, DB 직접(2티어)은 청록으로 구분 ── */
+
+.badge-path-db {
+  background: #ccfbf1;
+  color: #115e59;
+}
+
+.filter-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.inline-field {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  color: var(--muted);
+}
+
+/* 정규화 SQL — 값은 $1 같은 자리표시. 긴 문장은 줄바꿈 */
+.db-statement {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  max-width: 520px;
+}
+
+.sql {
+  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+  font-size: 12px;
+  white-space: pre-wrap;
+  word-break: break-all;
+  background: #f3f4f6;
+  color: var(--text);
+  padding: 2px 6px;
+  border-radius: 4px;
+}
+
+/* 경로별 소명 작성 안내·검토 기준 (policy 3-3) */
+.guide {
+  padding: 10px 12px;
+  margin-bottom: 12px;
+  border-radius: var(--radius);
+  background: var(--accent-soft);
+  color: var(--accent-strong);
+  font-size: 13px;
+}
+
+.guide ul {
+  margin: 6px 0 0;
+  padding-left: 18px;
+}

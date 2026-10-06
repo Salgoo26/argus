@@ -253,3 +253,29 @@ def test_search_is_logged_with_condition_names_but_not_values(app_engine, as_use
 
 def test_unauthenticated_is_401(client):
     assert client.post(SEARCH, json={}).status_code == 401
+
+
+DB_CONTEXT = {
+    "db_user": "platform_owner",
+    "sql_normalized": "SELECT id, email FROM member WHERE email = $1",
+    "tables": ["member"],
+    "columns": ["member.id", "member.email"],
+    "row_count": 1,
+    "raw_ref": "6f1d0c2e-0000-4000-8000-000000000001",
+    "raw_fingerprint": "sha256:" + "ab" * 32,
+    "subject_unresolved": True,
+    "token_id": "6f1d0c2e-0000-4000-8000-000000000002",
+}
+
+
+def test_db_records_show_normalized_sql_only(app_engine, as_user):
+    # DB 직접(2티어) 기록은 정규화 SQL·테이블·건수를 보여 준다 — DB 계정·토큰 ID는 싣지 않는다
+    add(app_engine, access_path="DB", subject_ids=[], context=DB_CONTEXT)
+    add(app_engine)  # 화면 경유
+    items = as_user("officer").post(SEARCH, json={}).json()["items"]
+    by_path = {i["access_path"]: i for i in items}
+    assert by_path["APP"]["db"] is None
+    db = by_path["DB"]["db"]
+    assert db["sql_normalized"] == DB_CONTEXT["sql_normalized"]
+    assert db["tables"] == ["member"] and db["row_count"] == 1 and db["subject_unresolved"] is True
+    assert "platform_owner" not in str(items) and DB_CONTEXT["token_id"] not in str(items)

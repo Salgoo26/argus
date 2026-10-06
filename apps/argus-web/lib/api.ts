@@ -67,10 +67,21 @@ export type Status =
   | "DISMISSED"
   | "ESCALATED";
 
+// DB 직접(2티어) 기록의 표시용 상세 — 원문 SQL·매개변수는 Argus에 없다(게이트웨이에만)
+export type DbDetail = {
+  sql_normalized: string | null; // 값은 $1 같은 자리표시로 바뀐 SQL
+  tables: string[] | null;
+  columns: string[] | null;
+  row_count: number | null;
+  raw_ref: string | null; // 게이트웨이 원문 저장소의 참조 — 사고 조사 때 원문을 찾는 키
+  subject_unresolved: boolean; // 처리한 정보주체(회원번호)를 특정하지 못함 — 건수만
+};
+
 export type CaseSummary = {
   id: number;
   rule_name: string;
   severity: "HIGH" | "MEDIUM" | "LOW";
+  access_path: "APP" | "DB";
   actor_login_id: string;
   actor_name: string | null;
   group_bucket: string;
@@ -100,6 +111,7 @@ export type CaseLog = {
   subject_truncated: boolean;
   subjects: string[]; // 서버에서 이미 마스킹된 값(member_10***)만 온다
   ticket_id: string | null; // 업무 근거 티켓(예: 1:1 문의 INQ-12) — 소명 대조용
+  db: DbDetail | null; // DB 직접(2티어) 기록일 때만
 };
 
 export type Explanation = {
@@ -185,6 +197,7 @@ export type AccessLogItem = {
   subject_truncated: boolean;
   subjects: string[]; // 서버에서 마스킹한 앞 몇 개만 온다
   detection_ids: number[];
+  db: DbDetail | null; // DB 직접(2티어) 기록일 때만
 };
 
 export type AccessLogPage = {

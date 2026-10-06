@@ -84,3 +84,40 @@ export function formatDateTime(iso: string | null): string {
   if (!iso) return "-";
   return new Date(iso).toLocaleString("ko-KR", { timeZone: "Asia/Seoul", hour12: false });
 }
+
+// ── 접근 경로 (policy 1-5) — 담당자·취급자 화면 모두 같은 표기 ──
+// 화면 경유(3티어)와 DB 직접(2티어)은 성격이 다른 기록이라 기록부터 소명까지 섞지 않고 구분해 보여 준다
+export type AccessPath = "APP" | "DB";
+
+export const PATH_LABELS: Record<AccessPath, string> = {
+  APP: "화면 경유(3티어)",
+  DB: "DB 직접(2티어)",
+};
+
+export function pathBadgeClass(path: AccessPath): string {
+  return path === "DB" ? "badge badge-path-db" : "badge";
+}
+
+// 경로별 소명 기준 (policy 3-3) — 양식은 같고 작성 안내와 담당자 검토 기준이 다르다
+export const EXPLANATION_GUIDE: Record<AccessPath, { write: string[]; review: string[] }> = {
+  APP: {
+    write: [
+      "어떤 고객·업무를 처리하던 중이었는지",
+      "관련 1:1 문의 티켓이 있으면 티켓 번호(INQ-번호)",
+    ],
+    review: ["업무 맥락(티켓)과 조회 대상·시점이 맞는가"],
+  },
+  DB: {
+    write: [
+      "누가 요청했는지 (요청자·부서)",
+      "요청 근거 — 티켓·메일·결재 문서를 첨부",
+      "작업 목적과 대상 범위 (조건·건수)",
+      "데이터를 바꿨다면 변경 전후를 어떻게 확인했는지",
+    ],
+    review: [
+      "요청 근거가 실재하는가",
+      "작업 범위가 요청 범위를 넘지 않는가",
+      "앱(관리자 화면)을 거치지 않고 바꿨다면 앱으로 할 수 없었던 이유가 있는가",
+    ],
+  },
+};
