@@ -22,9 +22,8 @@ services:
       POSTGRES_PASSWORD: ${PLATFORM_DB_PASSWORD:?set PLATFORM_DB_PASSWORD in .env}
     volumes:
       - platform-db-data:/var/lib/postgresql/data
-    ports:
-      # 호스트 루프백에만 노출 — 외부 네트워크에서 DB 접근 불가
-      - "127.0.0.1:${PLATFORM_DB_PORT:-15432}:5432"
+    # 호스트 포트 없음 — DB 툴은 db-gateway(16432)로만 들어온다. 직통 포트는 기록되지 않는 우회로라 닫았다
+    # (architecture 3-4·7-2, 기능 레이어 8). 앱·마이그레이션·테스트 컨테이너는 내부망(platform-net)으로 접속
     networks:
       - platform-net
     healthcheck:

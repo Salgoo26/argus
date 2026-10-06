@@ -11,6 +11,7 @@ services:
   argus-db: { ports: !reset [] }
   argus-api: { ports: !reset [] }
   argus-web: { ports: !reset [] }
+  db-gateway: { ports: !reset [] }
 
   # ── 시나리오 실행기 ─────────────────────────────────────────
   # 사람이 하는 일(로그인·다운로드·소명)은 브라우저처럼 화면 서버(Next.js) 경유 HTTP로만 한다.
@@ -29,6 +30,8 @@ services:
       E2E_ARGUS_URL: http://argus-web:3000
       # 시드 취급자(ops_park 등)의 플랫폼 로그인 비밀번호
       E2E_OPERATOR_PASSWORD: ${PLATFORM_SEED_OPERATOR_PASSWORD}
+      # DB 직접 접속(2티어) — 게이트웨이로 접속할 플랫폼 DB 이름
+      E2E_PLATFORM_DB_NAME: ${PLATFORM_DB_NAME}
       # 관리 명령용 — argus-api와 같은 앱 계정 (원장은 SELECT·INSERT만)
       ARGUS_DB_HOST: argus-db
       ARGUS_DB_NAME: ${ARGUS_DB_NAME}
@@ -38,6 +41,8 @@ services:
       - ../e2e:/e2e:ro
     depends_on:
       platform-web:
+        condition: service_healthy
+      db-gateway:
         condition: service_healthy
       argus-web:
         condition: service_healthy

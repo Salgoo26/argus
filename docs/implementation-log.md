@@ -29,6 +29,42 @@
 
 ---
 
+## 2026-10-06 (3) — 기능 레이어 8(2티어) 구현 순서 ① PR 3b: 문장 기록 + 직통 포트 닫기 (게이트 B 기준)
+
+**한 일**
+- PR #42(3a) 병합, 사용자 DBeaver 확인(16432 접속·LOGIN 도착)
+- **`app/sql.py` — SQL 분석(pglast 8.5)**
+  - 정규화: `scan()` 토큰으로 문자열·숫자·비트·16진·달러 인용 리터럴 → `$n`(기존 매개변수 번호 다음부터), 주석 토큰 삭제, 공백 정리. 따옴표·달러 인용이 남으면(따옴표 든 식별자 등) 정규화 실패 문구로 바꿔 Argus 검증과 같은 기준으로 원문 유입 차단
+  - 수행업무: SELECT=READ / INSERT=CREATE / UPDATE·MERGE=UPDATE / DELETE·TRUNCATE=DELETE / COPY TO=DOWNLOAD·COPY FROM=CREATE / **CALL·DO·SQL EXECUTE=UPDATE**(안을 볼 수 없음) / EXPLAIN은 안의 문장 기준(ANALYZE는 실제 실행)
+  - 테이블: RangeVar(CTE 이름 제외), 시스템 테이블(`pg_catalog`·`information_schema`·스키마 없는 `pg_*`) 제외. 데이터 유형 = 테이블 매핑 중 가장 민감한 것(architecture 3-4 표)
+  - 기록 제외(원문만 저장): 트랜잭션 제어·SET·SHOW 등 `CONTROL`, DDL·DCL `DDL_DCL`, 사용자 테이블 없음 `NO_USER_TABLE`. **사용자 함수(카탈로그로 판별)·DO·CALL은 전송 — `MEMBER_BASIC`·`subject_unresolved`**(10/06 결정)
+  - 파서가 못 읽은 문장: READ·MEMBER_BASIC·미특정으로 전송(실행됐다면 무엇을 했는지 모르므로 보수적으로) — 대개 DB도 거부해 FAILURE로 남음
+- **`app/session.py` — 연결별 문장 추적**: 단순 질의는 문장마다(pglast `split`), 확장 질의는 Parse(이름→SQL·타입)·Bind(포털→매개변수)·Execute로 실행 단위를 만들고 응답 순서(CommandComplete·ErrorResponse·PortalSuspended·EmptyQuery·ReadyForQuery)로 맞춘다. 오류 뒤 Sync까지 건너뛴 실행은 일어나지 않았으므로 기록 안 함. 이름 있는 문장 재사용(Bind·Execute만)에 대비해 문장 이름별 결과 컬럼 설명 캐시. 바이너리 매개변수는 타입별 해석(int·bool·text·uuid, 그 밖은 hex). 건수: INSERT·UPDATE·DELETE·MERGE·COPY는 완료 태그, 그 밖은 흘려보낸 행 수(나눠 가져오기 누적). fastpath 함수 호출은 기록할 수 없어 연결 종료
+- **`app/catalog.py`**: 게이트웨이 자체 연결로 결과 컬럼(테이블 OID·컬럼 번호 → `member.email`, OID별 캐시)과 사용자 함수 이름(60초 캐시) 조회
+- **fail-closed**: 완료·오류 신호를 DB 툴에 넘기기 전에 원문+접속기록 저장, 실패하면 `access log unavailable` 오류로 바꾸고 연결 종료(카탈로그 조회 실패 포함)
+- 문장 기록 형식(api-spec 2-2): `subject = {type: MEMBER, ids: [], count}` — 개인정보 테이블이면 `count = 건수` + `context.subject_unresolved = true`(구현 순서 ① — 회원번호 추출 전), 업무 데이터가 아니면 0. 실패는 건수 0. `context`: `db_user`·`sql_normalized`·`tables`·`columns`(반환 컬럼 + UPDATE/INSERT 대상 컬럼)·`row_count`·`token_id`·`raw_ref`·`raw_fingerprint`. 원문 레코드: SQL 원문·매개변수·타입·프로토콜·문장 이름·결과·오류 코드·건수·전송 여부·제외 사유
+- **platform-db 호스트 포트(15432) 제거** — DB 툴 입구는 게이트웨이 하나(architecture 3-4·7-2). `.env.example`의 `PLATFORM_DB_PORT` 삭제, README 서비스 표·2-2 갱신
+- **E2E `e2e/test_db_gateway.py`**: 관리자 화면 API로 토큰 발급 → 비TLS 거부 → 게이트웨이 접속(공용 계정 확인) → 리터럴 조회·목록 조회 → 원장에 LOGIN + READ 2건(정규화 SQL `… = $1`, `MEMBER_BASIC`, 테이블·컬럼, 건수 3, 미특정, 지문) 도착, 리터럴·토큰 값은 원장에 없음 → 담당자 접속기록 검색에서 접근 경로 "DB"로 보임
+- 게이트웨이 테스트 46개(신규 `test_statements.py` 18개: 정규화·원문 분리, 확장 질의 매개변수, 데이터 유형 5종, 업무 외 테이블, COPY=DOWNLOAD, 기록 제외 3종 원문 보관, 사용자 함수·CALL·DO, 실패 기록, 한 문자열 여러 문장, 오류 뒤 미실행 문장 무기록, 이름 있는 문장 재사용, 기록 실패 시 오류 변환·연결 종료). 테스트 하네스 종료 순서 수정(남은 연결 작업 취소 후 루프 정지)
+
+**결정사항**
+- 구현 중 정한 세부(설계에 없던 것, 다른 문서 영향 없음): COPY FROM=CREATE, SQL 수준 `EXECUTE`(준비된 문장 실행)=안을 볼 수 없는 실행과 같게, 파서 실패 문장=보수적 전송, fastpath 함수 호출=연결 종료, EXPLAIN=안의 문장 기준
+
+**설계 변경**
+- 없음 (위 세부는 architecture 3-4 "수행업무 매핑"의 구현 세부 — Cowork 동기화 때 표에 덧붙일지 판단 요청)
+
+**미결·이슈**
+- **②(회원번호 추출) 전이라 모든 DB 개인정보 처리가 "정보주체 미특정"** — 설계상 ① 범위(게이트 B 기준에 회원번호 없음)
+- 파서·정규화는 PG18 문법 기준 — PG16에서 실행되는 SQL은 모두 읽을 수 있다(10/06 실측)
+- 원문 저장소가 DB 툴 메타데이터 조회까지 모두 쌓는다(DBeaver 접속 1회 = 수십 건) — 열람 도구·보관 기간·파기는 v0.2(architecture 8-6)
+- 기존 로컬 스택: 병합 후 `docker compose up -d --build` 하면 platform-db가 포트 없이 다시 만들어진다(데이터 볼륨 유지). 호스트에서 15432로 붙던 DBeaver 설정은 더 이상 동작하지 않음 — 게이트웨이(16432)로
+
+**다음 할 일**
+- 게이트 B 판단(사용자): 3b 병합으로 구현 순서 ① 완료 → ②(회원번호 추출) 진행 여부
+- Cowork 동기화: 10/06 설계 변경(사용자 함수 매핑) + 위 세부
+
+---
+
 ## 2026-10-06 (2) — 기능 레이어 8(2티어) 구현 순서 ① PR 3a: db-gateway 중계·인증
 
 **한 일**

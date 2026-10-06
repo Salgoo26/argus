@@ -17,7 +17,7 @@ from conftest import connect, make_token
 
 
 def _logins(store) -> list[dict]:
-    return [row["payload"] for row in store.outbox_rows()]
+    return [r["payload"] for r in store.outbox_rows() if r["payload"]["action"] == "LOGIN"]
 
 
 def _raw_for(store, event: dict) -> dict:

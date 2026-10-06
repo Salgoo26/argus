@@ -108,6 +108,14 @@ class Store:
             conn.execute("ROLLBACK")
             raise
 
+    def record_raw(self, raw: dict) -> None:
+        """Argus에 보내지 않는 문장(기록 제외 대상)도 원문은 남긴다 (architecture 3-4)"""
+        conn = self._conn()
+        conn.execute(
+            "INSERT INTO raw_record (ref, created_at, record, fingerprint) VALUES (?, ?, ?, ?)",
+            (raw["event_id"], raw["occurred_at"], canonical_json(raw), fingerprint(raw)),
+        )
+
     # ── 전송 버퍼 (sender.py) ──
 
     def due(self, limit: int, now: float) -> list[PendingEvent]:
