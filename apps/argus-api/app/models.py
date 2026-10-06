@@ -101,6 +101,7 @@ detection = Table(
     Column("rule_version", Integer, nullable=False),
     Column("rule_snapshot", JSONB, nullable=False),
     Column("source_system_id", SmallInteger, nullable=False),
+    Column("access_path", String(8), nullable=False),  # 탐지건 하나 = 경로 하나 (policy 1-5)
     Column("actor_login_id", String(64), nullable=False),
     Column("group_bucket", String(64), nullable=False),
     Column("severity", String(8), nullable=False),

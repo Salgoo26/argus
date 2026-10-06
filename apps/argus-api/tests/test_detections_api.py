@@ -5,7 +5,7 @@ from datetime import UTC, datetime
 
 import pytest
 from fastapi.testclient import TestClient
-from sqlalchemy import insert, select, text
+from sqlalchemy import insert, select, text, update
 
 from app.auth.passwords import hash_password
 from app.detection.batch import run_batch
@@ -413,3 +413,18 @@ def test_tickets_are_optional(app_engine, as_user):
     assert act(as_user("ops_park"), case, "submit", content="소명").status_code == 200
     [round1] = as_user("officer").get(f"/api/detections/{case}").json()["explanations"]
     assert round1["tickets"] == []
+
+
+def test_cases_show_and_filter_by_access_path(app_engine, admin_engine, as_user):
+    # 탐지건마다 경로(화면 경유 APP / DB 직접 DB)를 보여 주고 경로로 거른다 (policy 1-5)
+    app_case = detect(app_engine, actor="ops_park")
+    with admin_engine.begin() as conn:
+        conn.execute(update(detection).where(detection.c.id == app_case).values(access_path="DB"))
+    other = detect(app_engine, actor="mkt_lee")
+    officer = as_user("officer")
+    items = officer.get("/api/detections").json()["items"]
+    assert {i["id"]: i["access_path"] for i in items} == {app_case: "DB", other: "APP"}
+    only_db = officer.get("/api/detections", params={"access_path": "DB"}).json()["items"]
+    assert [i["id"] for i in only_db] == [app_case]
+    assert officer.get(f"/api/detections/{app_case}").json()["access_path"] == "DB"
+    assert officer.get("/api/detections", params={"access_path": "WEB"}).status_code == 400
