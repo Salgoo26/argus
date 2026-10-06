@@ -1,0 +1,47 @@
+[project]
+name = "db-gateway"
+version = "0.0.0"
+description = "DB 접근 게이트웨이(2티어) — DB 툴 ↔ 플랫폼 DB 중계 + 접속기록 (architecture 3-4)"
+requires-python = ">=3.12,<3.13"
+dependencies = [
+    "pydantic==2.13.5",
+    "pydantic-settings==2.15.0",
+    "psycopg[binary]==3.3.6",  # 계정 상태 확인용 게이트웨이 자체 연결 (operator 조회)
+    "pyjwt==2.15.1",  # DB 접속 토큰 검증
+    "scramp==1.4.17",  # 플랫폼 DB 쪽 SCRAM-SHA-256 로그인 (중계 연결은 프로토콜을 직접 다룬다)
+    "cryptography==50.0.2",  # 로컬 자체 서명 TLS 인증서 생성
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest==9.1.1",
+    "ruff==0.16.10",
+]
+
+[build-system]
+requires = ["setuptools>=84.0.0"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["app*"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+# E/W/F: 기본, I: import 정렬, B: 흔한 버그 패턴, UP: 최신 문법, S: 보안(bandit 규칙)
+select = ["E", "W", "F", "I", "B", "UP", "S"]
+
+[tool.ruff.lint.per-file-ignores]
+# 테스트: assert 허용(S101), 테스트 전용 더미 비밀번호·키 허용(S105·S106)
+"tests/**" = ["S101", "S105", "S106"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["app"]
+known-local-folder = ["conftest"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+addopts = "-ra"

@@ -29,6 +29,41 @@
 
 ---
 
+## 2026-10-06 (2) — 기능 레이어 8(2티어) 구현 순서 ① PR 3a: db-gateway 중계·인증
+
+**한 일**
+- 레포 정리: Cowork 사본 갱신 PR #41(10/05·10/06 질의·설계 변경 원본 반영) 병합
+- **새 앱 `apps/db-gateway`** (Python asyncio, 전용 이미지 — 보안 경계라 플랫폼 이미지와 분리, 비root 계정 `gateway`)
+  - `server.py`: SSLRequest → TLS 종단(비TLS는 인증 전 거부) → 평문 비밀번호 요청으로 토큰 수신 → 토큰·계정 확인 → 공용 계정으로 platform-db 연결(연결 1:1) → **LOGIN 기록 성공 후에야** DB 툴에 AuthenticationOk(fail-closed) → 양방향 중계 → 토큰 만료 시각에 연결 종료. CancelRequest는 게이트웨이가 연 연결의 키일 때만 전달. 시작 매개변수는 허용 목록만 넘김(`options`·`replication` 차단), 데이터베이스는 플랫폼 DB만
+  - `auth.py`: 토큰은 서명 먼저 검증(알고리즘 고정) → 용도(`aud`)·주인(`sub` = 입력 아이디)·만료를 따로 확인 — 서명이 유효할 때만 실패 기록에 `token_id`. 계정 상태는 `operator` 조회(별도 연결, 실패 시 거부). **없는 아이디는 Argus·원문 저장소 어디에도 남기지 않음**, 응답은 토큰 오류와 같게(계정 열거 방지)
+  - `upstream.py`: platform-db 쪽 SCRAM-SHA-256 로그인(`scramp`) — 중계 연결은 프로토콜을 직접 다뤄야 해서 드라이버 대신 메시지 수준 구현
+  - `store.py`: `gateway-data` 볼륨의 SQLite 하나에 **원문(raw_record) + 전송 버퍼(outbox)를 같은 트랜잭션**으로. 원문은 트리거로 UPDATE·DELETE 금지(append-only), 지문 = SHA-256(정렬 JSON), `raw_ref` = event_id. WAL + `synchronous=FULL`
+  - `sender.py`: platform relay 규칙 복사(출처 PLATFORM, 200 건별 판정·400 DEAD·413 분할·그 밖 PENDING 백오프 1분→1시간 무기한). 이미지를 나눠 import 대신 복사 — 규칙 변경 시 두 곳 함께 수정
+  - `tls.py`: 운영 인증서 경로가 없으면 첫 기동 때 자체 서명(EC P-256, 키 0600)을 볼륨에 생성
+  - LOGIN 원문 = 접속 정보만(아이디·IP·TLS 버전·`database`·`application_name`·결과·실패 사유·서명 유효 시 `token_id`), 토큰 값 없음 (architecture 3-4, api-spec 2-2 보완 #5)
+- compose: `db-gateway`(`127.0.0.1:${DB_GATEWAY_PORT:-16432}:6432`, platform-net + argus-net, `gateway-data` 볼륨) + `db-gateway-test`. `.env.example`에 `DB_GATEWAY_PORT`
+- CI python matrix·docker-build(runtime·dev)·Dependabot(pip·docker)에 db-gateway 추가
+- README 2-2 갱신(DBeaver 연결 표, 15432는 문장 기록 단계에서 닫힘), 서비스 표·테스트 명령. 관리자 화면 접속 주소 `localhost:16432` 표시
+- 테스트 28개(`db-gateway-test`): 실제 PostgreSQL을 플랫폼 DB로 두고 psycopg(libpq)로 접속 — 공용 계정 중계·확장 쿼리 매개변수 중계·LOGIN 기록 필드(Argus v0.5 형식)·원문 지문 대조·토큰 값 미기록 / 비TLS 거부(기록 없음) / 실패 6종(위조·용도·남의 토큰·만료·퇴직·잠금) 기록과 `token_id` 유무 / 없는 아이디 무기록 / 다른 DB 거부 / 기록 실패·계정 조회 실패 시 접속 거부 / 토큰 만료 시 연결 종료 / 버퍼 원자성·append-only·전송 응답별 처리
+- **로컬 스택 확인**: 토큰으로 게이트웨이 접속 → `current_user = platform_owner`(공용 계정), Argus 원장에 `access_path=DB, action=LOGIN, actor=ops_park, db_user=platform_owner` + 지문 도착
+
+**결정사항**
+- 게이트웨이 포트 `16432`(사용자 결정 — 15432 직통 포트와 구분해 예전 DBeaver 설정이 게이트웨이로 잘못 들어가는 혼동 방지)
+- PR 3을 3a(중계·인증·LOGIN)·3b(문장 기록·직통 포트 닫기)로 나눔(사용자 동의). 게이트 B 판단 = 3b 병합
+- **사용자 함수·프로시저·`DO`·`CALL` 매핑(3b에서 구현)**: 수행업무 — `SELECT 사용자함수()` = `READ`, `CALL`·`DO` = `UPDATE`(내부에서 변경 가능) / 데이터 유형 = `MEMBER_BASIC`(게이트웨이가 내부를 볼 수 없어 개인정보 처리로 가정 — `NONE`이면 미특정 룰에도 안 걸리고, `PAYMENT`면 결제수단 룰 오탐) / `subject_unresolved = true` (사용자 결정, 추천안)
+
+**설계 변경**
+- **사용자 함수·`DO`·`CALL`의 수행업무·데이터 유형 매핑 확정**(위 결정) — architecture 3-4 "기록 제외"의 "구현 시 확정" 항목. 영향 문서: architecture 3-4(Cowork 반영)
+
+**미결·이슈**
+- 로컬 확인 중 **argus-api가 10/02 이미지로 떠 있어** 첫 LOGIN 1건이 `UNKNOWN_CONTEXT_KEY`로 거부 → 게이트웨이 버퍼에 DEAD로 남음(로컬 볼륨, 재처리 도구 없음 — api-spec 7절 미결 "DEAD 재처리 도구"와 같은 과제). 기존 스택은 PR 병합 후 `docker compose up -d --build`로 갱신해야 함 — README에 이미 안내됨
+- 게이트웨이 원문 저장소 열람 도구·파기는 v0.2(architecture 8-6)
+
+**다음 할 일**
+- PR 3b: 문장 기록 — `pglast` 정규화·테이블·컬럼(RowDescription + 카탈로그 매핑)·건수·수행업무/데이터 유형·기록 제외(사용자 함수·`DO`·`CALL` 예외)·이름 있는 문장 캐시·바이너리 매개변수 해석·완료 신호 전 기록(fail-closed), platform-db 호스트 포트 닫기, E2E에 게이트웨이 시나리오
+
+---
+
 ## 2026-10-06 — 기능 레이어 8(2티어) 착수 확인 3가지 실측 (CLAUDE.md 6절)
 
 **한 일**

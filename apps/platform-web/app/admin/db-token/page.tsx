@@ -104,7 +104,10 @@ export default function AdminDbTokenPage() {
               필수 — DBeaver는 Driver properties에서 <span className="mono">sslmode=require</span>
             </dd>
             <dt>접속 주소</dt>
-            <dd>README의 &ldquo;2-2. DB 직접 접속 (2티어)&rdquo; 참고</dd>
+            <dd>
+              <span className="mono">localhost:16432</span> (DB 게이트웨이) · 데이터베이스는 플랫폼 DB만 — README
+              &ldquo;2-2. DB 직접 접속 (2티어)&rdquo; 참고
+            </dd>
           </dl>
         </section>
       </main>

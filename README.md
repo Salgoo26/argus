@@ -121,13 +121,24 @@ http://localhost:3000 — 가상 쇼핑몰의 고객 화면. Argus 시연용이 
 
 ### 2-2. DB 직접 접속 (2티어) — 구현 중
 
-DBeaver 같은 DB 툴의 직접 접속도 접속기록으로 남기는 기능(기능 레이어 8, architecture 3-4). DB 툴은 **DB 게이트웨이**로만 접속하고, 게이트웨이가 공용 계정으로 플랫폼 DB에 중계하며 SQL마다 실사용자를 붙여 Argus로 보낸다.
+DBeaver 같은 DB 툴의 직접 접속도 접속기록으로 남기는 기능(기능 레이어 8, architecture 3-4). DB 툴은 **DB 게이트웨이**(`db-gateway`)로만 접속하고, 게이트웨이가 공용 계정으로 플랫폼 DB에 중계하며 실사용자를 붙여 Argus로 보낸다.
 
 1. 관리자 화면 `/admin/db-token`에서 **DB 접속 토큰** 발급 — 1시간 유효(연장 없음), 화면에 한 번만 표시(서버에 토큰 값 저장 안 함)
-2. DB 툴 설정: 사용자 이름 = **본인 플랫폼 아이디**, 비밀번호 = 토큰, SSL 필수(DBeaver는 Driver properties에 `sslmode=require`)
+2. DB 툴 연결 설정 (DBeaver → 새 연결 → PostgreSQL)
 
-> 게이트웨이(`db-gateway`)는 다음 단계에서 추가된다. 그전까지 `127.0.0.1:15432`의 platform-db 직통 포트는 **기록되지 않는 경로**이며, 게이트웨이가 들어오면서 닫힌다.
+   | 항목 | 값 |
+   |---|---|
+   | Host / Port | `localhost` / `16432` (게이트웨이) |
+   | Database | `.env`의 `PLATFORM_DB_NAME` — 다른 DB는 거부 |
+   | Username | **본인 플랫폼 아이디** (예: `ops_park`) |
+   | Password | 발급한 토큰 |
+   | SSL | 필수 — Driver properties에 `sslmode=require` (TLS가 아니면 인증 전에 거부) |
 
+- DB에는 공용 계정으로 붙는다(`select current_user` → 플랫폼 앱 계정). 누가 접속했는지는 게이트웨이가 Argus 원장에 남긴다: 접속 성공·실패가 `LOGIN`(접근 경로 "DB")으로 기록되고, 실패 사유·접속 정보 원문은 게이트웨이 볼륨 `gateway-data`에만 남는다(토큰 값은 어디에도 저장하지 않음)
+- 토큰 만료 시각이 되면 게이트웨이가 연결을 끊는다. 퇴직·잠금 계정은 토큰이 있어도 접속할 수 없다
+- 인증서는 처음 기동할 때 만드는 **자체 서명**이라 `sslmode=require`(암호화만, 서버 검증 없음)로 접속한다 — 운영 배포 때 교체(architecture 8-6)
+
+> **아직 SQL 문장은 기록하지 않는다** — 다음 단계(문장 기록)에서 추가되며, 그때 `127.0.0.1:15432`의 platform-db 직통 포트(기록되지 않는 경로)도 닫힌다.
 
 ### 3. 자동 검증 (E2E)
 
@@ -155,7 +166,8 @@ bash scripts/e2e.sh
 | platform-migrate | — | 기동 시 1회 실행: 플랫폼 Alembic 마이그레이션 후 종료 |
 | platform-seed | — | 기동 시 1회 실행: 가상 회원 500명·취급자 5명(비어 있을 때만), 동의 이력이 없는 회원에게 가입 시점 동의 이력, 주문이 없으면 가상 주문 300건·환불계좌 60개(암호화), 문의가 없으면 가상 문의 40건(⅔ 답변 완료), 담당자 플랫폼 계정 `officer`가 없으면 생성 후 종료 |
 | platform-api | `127.0.0.1:18001` | 고객 API `/shop/*`(접속기록 대상 아님), 관리자 로그인 `POST /admin/auth/login`, 회원 목록 `GET /admin/members`, CSV `GET /admin/members/export`, DB 접속 토큰 발급 `POST /admin/db-tokens`(접속기록 제외), API 문서 `/docs`. 관리자 라우트 요청은 접속기록으로 outbox에 적재 |
-| platform-relay | — | outbox → Argus 전송(HMAC 서명). 2초 주기, 실패 시 1분→최대 1시간 백오프. 플랫폼 쪽에서 유일하게 Argus 네트워크에 붙는다 |
+| platform-relay | — | outbox → Argus 전송(HMAC 서명). 2초 주기, 실패 시 1분→최대 1시간 백오프 |
+| db-gateway | `127.0.0.1:16432` | **DB 접근 게이트웨이(2티어)** — DB 툴 ↔ platform-db 중계. TLS 필수, DB 접속 토큰 인증, 접속기록은 자체 버퍼(`gateway-data` 볼륨)에서 Argus로 전송(relay와 같은 재시도 규칙). platform-relay와 함께 플랫폼 쪽에서 Argus 네트워크에 붙는 컨테이너 |
 
 - 소명 첨부 파일은 Argus 전용 볼륨 `argus-attachments`에 저장된다(argus-api만 붙음). `docker compose down -v`로 DB와 함께 지워진다.
 - 포트는 호스트 루프백(`127.0.0.1`)에만 열린다. 두 DB는 도커 네트워크도 분리되어 있어 플랫폼 쪽 컨테이너에서 argus-db에 접근할 수 없다.
@@ -180,6 +192,7 @@ docker compose exec argus-api python -m app.scripts.users unlock ops_park       
 docker compose run --rm argus-api-test                           # pytest
 docker compose run --rm argus-api-test ruff check --no-cache .   # lint
 docker compose run --rm platform-api-test                        # 플랫폼도 같은 방식
+docker compose run --rm db-gateway-test                          # DB 게이트웨이 (임시 DB를 플랫폼 DB로 삼아 실제 접속)
 ```
 
 ### 중지
