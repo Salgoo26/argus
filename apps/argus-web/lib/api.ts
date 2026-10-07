@@ -207,3 +207,57 @@ export type AccessLogPage = {
   total: number;
   period: { from: string; to: string };
 };
+
+// ── 점검 보고서 (기능 레이어 9) — 생성 시점의 스냅샷 ──
+export type ReportScope = "ALL" | "APP" | "DB";
+export type ReportCase = {
+  id: number;
+  rule_name: string;
+  severity: "HIGH" | "MEDIUM" | "LOW";
+  status: Status;
+  round: number;
+  actor_login_id: string;
+  actor_name: string | null;
+  first_occurred_at: string;
+  log_count: number;
+  subject_count_sum: number;
+  distinct_subject_count: number;
+  subjects: string[]; // 마스킹 값 앞 몇 개만 — 화면에서 "외 N명"
+};
+export type ReportSection = {
+  logs: {
+    total: number;
+    actors: number;
+    failures: number;
+    by_action: Record<string, number>;
+    by_category: Record<string, number>;
+    subject_unresolved: number;
+  };
+  detections: {
+    total: number;
+    by_severity: Record<string, number>;
+    by_status: Record<string, number>;
+    by_rule: { name: string; count: number }[];
+    escalated: number;
+  };
+  explanations: { requested: number; submitted: number; approved: number; rejected: number };
+  cases: ReportCase[];
+};
+export type ReportSummary = {
+  period: { from: string; to: string };
+  scope: ReportScope;
+  integrity: { ok: boolean; checked: number; broken_at: number | null };
+  patrol: { runs: number; success: number; failed: number; last_success_at: string | null };
+  paths: Partial<Record<"APP" | "DB", ReportSection>>;
+};
+export type ReportItem = {
+  id: number;
+  period_from: string;
+  period_to: string;
+  scope: ReportScope;
+  escalated_count: number;
+  unmasked: boolean;
+  generated_by: string;
+  generated_at: string;
+};
+export type Report = ReportItem & { summary: ReportSummary };
