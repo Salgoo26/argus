@@ -1,6 +1,6 @@
 # DB 스키마 (Argus / 플랫폼)
 
-> 작성일: 2026-09-23 / v0.2 (2026-09-23 개정 — 요구사항 전수 대조 후 6개 테이블·다수 컬럼 추가) / **v0.3 (2026-09-29 개정 — 구현 M1 반영: 해시체인 정규화 규칙 v1 확정, DB 계정 구조·권한 확정, 알려진 한계 명시)** (2026-09-30 보완 — A5 초기 해시 주석) / **v0.4 (2026-10-01 개정 — 구현 M3 반영: 탐지 날짜 KST 기준, 해석 불가 룰 시 순찰 실패, 빈 순찰 기록, 순찰 상한, `log_summary` 잘림 표시)** (2026-10-01 보완 — 구현 M4: `detection_rule.auto_request`, `explanation.requested_by` NULL 허용, 자동 소명 요청, A5 조회 범위) / **v0.5 (2026-10-02 — 기능 레이어 1·4·6·7 반영: 룰 평가 대상, 명부 미등록 처리, `min_baseline`, 집계 윈도우 1회 판단, 룰 변경 이력 운영, 결제수단 재설계, 고객 잠금 컬럼, 탈퇴 즉시 파기)** / **v0.6 (2026-10-02 — 기능 레이어 7 구현 반영: `payment`·`refund_account` 확정, 탈퇴 분리보관 실제 절차, 소명 첨부 권한·무결성, `explanation.ticket_ids`, 동의 항목 `AGE_OVER_14`)** / **v0.7 (2026-10-05 — 기능 레이어 8(2티어) 설계 확정: 플랫폼 `db_access_token` 발급 기록, 5절 대조표 DB 직접 접근 행, `detection.access_path`·진행 중 탐지건 유니크 키에 경로 추가(정책정의서 1-5 경로 구분 원칙) — 구현 시 마이그레이션, 기존 행은 `APP`)**
+> 작성일: 2026-09-23 / v0.2 (2026-09-23 개정 — 요구사항 전수 대조 후 6개 테이블·다수 컬럼 추가) / **v0.3 (2026-09-29 개정 — 구현 M1 반영: 해시체인 정규화 규칙 v1 확정, DB 계정 구조·권한 확정, 알려진 한계 명시)** (2026-09-30 보완 — A5 초기 해시 주석) / **v0.4 (2026-10-01 개정 — 구현 M3 반영: 탐지 날짜 KST 기준, 해석 불가 룰 시 순찰 실패, 빈 순찰 기록, 순찰 상한, `log_summary` 잘림 표시)** (2026-10-01 보완 — 구현 M4: `detection_rule.auto_request`, `explanation.requested_by` NULL 허용, 자동 소명 요청, A5 조회 범위) / **v0.5 (2026-10-02 — 기능 레이어 1·4·6·7 반영: 룰 평가 대상, 명부 미등록 처리, `min_baseline`, 집계 윈도우 1회 판단, 룰 변경 이력 운영, 결제수단 재설계, 고객 잠금 컬럼, 탈퇴 즉시 파기)** / **v0.6 (2026-10-02 — 기능 레이어 7 구현 반영: `payment`·`refund_account` 확정, 탈퇴 분리보관 실제 절차, 소명 첨부 권한·무결성, `explanation.ticket_ids`, 동의 항목 `AGE_OVER_14`)** / **v0.7 (2026-10-05 — 기능 레이어 8(2티어) 설계 확정: 플랫폼 `db_access_token` 발급 기록, 5절 대조표 DB 직접 접근 행, `detection.access_path`·진행 중 탐지건 유니크 키에 경로 추가(정책정의서 1-5 경로 구분 원칙) — 구현 시 마이그레이션, 기존 행은 `APP`)** / **2026-10-06 — 3-6 DB 직접 기본 룰 시드 3개, `detection.access_path` 마이그레이션 0012 구현 반영**
 > 관련 문서: [[아키텍처_설계서.md]], [[API명세서_시스템간.md]], [[정책정의서.md]], [[액터별_플로우.md]], [[요구사항정의서.md]]
 > DBMS: PostgreSQL 16 (플랫폼 DB / Argus DB 별도 인스턴스)
 > 표기: **[S]** = Walking Skeleton에 필요한 테이블. 컬럼은 전체를 정의하되 Skeleton에서는 [S] 테이블만 생성한다.
@@ -262,7 +262,7 @@ CREATE TABLE detection (
     rule_version       int          NOT NULL,
     rule_snapshot      jsonb        NOT NULL,     -- 탐지 당시 룰 전체 (판단 근거 보존)
     source_system_id   smallint     NOT NULL REFERENCES source_system(id),
-    access_path        varchar(8)   NOT NULL DEFAULT 'APP' CHECK (access_path IN ('APP','DB')),  -- (2026-10-05) 한 탐지건 = 한 경로. 룰이 ALL이어도 경로별로 따로 생성 — 정책정의서 1-5
+    access_path        varchar(8)   NOT NULL DEFAULT 'APP' CHECK (access_path IN ('APP','DB')),  -- (2026-10-05) 한 탐지건 = 한 경로. 룰이 ALL이어도 경로별로 따로 생성 — 정책정의서 1-5 / 마이그레이션 0012로 구현(2026-10-06, 기존 행 APP)
     actor_login_id     varchar(64)  NOT NULL,
     group_bucket       varchar(64)  NOT NULL,     -- EVENT: '2026-09-15'(occurred_at의 KST 날짜, v0.4) / AGGREGATE: 윈도우 시작 시각
     severity           varchar(8)   NOT NULL,
@@ -568,7 +568,7 @@ GRANT SELECT, DELETE ON access_log TO argus_purge;  -- 파기 배치 전용
 - 형식 규칙: 키 집합 정확히 일치, EVENT 룰에 집계 스펙 금지, RATIO는 월 윈도우 + `PREV_MONTH_SAME_PERIOD`만.
 - 윈도우는 **KST 고정 구간**(매시 정각·0시·1일), 그룹 키 = 윈도우 시작 시각(`2026-09-15T14:00+09:00`). 전월 동기 = 전월 1일부터 같은 경과 시간(전월이 짧으면 전월 말에서 자름).
 
-**기본 룰 시드** (정책정의서 1-3절 → JSON, 모두 `access_path='APP'`)
+**기본 룰 시드** (정책정의서 1-3절 → JSON. 아래 7개는 `access_path='APP'`, 그 아래 3개는 `access_path='DB'`)
 
 | 룰 | type | condition | aggregate | severity | Skeleton |
 |---|---|---|---|---|---|
@@ -579,6 +579,11 @@ GRANT SELECT, DELETE ON access_log TO argus_purge;  -- 파기 배치 전용
 | 대량 조회 | AGGREGATE | `action=READ` | 1h / LOG_COUNT / ABSOLUTE / 100 | HIGH | |
 | 전월 대비 급증 | AGGREGATE | `action=READ` | 1mo / LOG_COUNT / RATIO / 2.0 / `min_baseline` 20 | MEDIUM | |
 | **퇴직자 계정 접속** | EVENT | `actor_terminated_at_or_before=true` | — | HIGH | (6절 #2 제안) |
+| DB 직접 야간 접근 (`DB`) | EVENT | `data_category∈{MEMBER_BASIC,ORDER,INQUIRY,PAYMENT} ∧ occurred_time between 22:00~06:00` | — | HIGH | |
+| DB 직접 주말 접근 (`DB`) | EVENT | `data_category∈{MEMBER_BASIC,ORDER,INQUIRY,PAYMENT} ∧ occurred_weekday∈{SAT,SUN}` | — | MEDIUM | |
+| DB 직접 전월 대비 급증 (`DB`) | AGGREGATE | `data_category∈{MEMBER_BASIC,ORDER,INQUIRY,PAYMENT}` | 1mo / LOG_COUNT / RATIO / 2.0 / `min_baseline` 20 | MEDIUM | |
+
+> **DB 직접 기본 룰 3개 (2026-10-06, 구현 순서 ③-1 · 마이그레이션 0012)**: 시드와 룰 변경 이력을 함께 넣었다. 개인정보 데이터 유형만 조건으로 두어 `LOGIN`(대상 데이터 `NONE`)·업무 외 테이블은 탐지하지 않는다. 퇴직자 룰은 `APP`에만 둔다. 근거는 정책정의서 1-3 "2단계 룰".
 
 ### 3-7. 탐지 배치의 데이터 흐름 (F-04)
 
@@ -832,7 +837,7 @@ CREATE TABLE destruction_history (
 | LOG-15 시간차 | 계산 |
 | LOG-16 이메일 알림 | **`notification.channel='EMAIL'`** |
 | LOG-17 Argus 자체 기록 | `access_log` (`source_system='ARGUS'`) |
-| 2단계 DB 직접 접근 (기능 레이어 8, 2026-10-05) | `access_path='DB'` + `context`에 **정규화 SQL·DB 계정·테이블·컬럼·건수·원문 참조·지문·정보주체 미특정·토큰 ID**(API명세서 2-3 v0.5 — 원문 SQL은 Argus에 저장하지 않음). 실사용자는 `actor_login_id`(토큰 주인 = 플랫폼 아이디). 플랫폼 쪽은 **`db_access_token` 발급 기록**(4절) |
+| 2단계 DB 직접 접근 (기능 레이어 8, 2026-10-05) | `access_path='DB'` + `context`에 **정규화 SQL·DB 계정·테이블·컬럼·건수·원문 참조·지문·정보주체 미특정·토큰 ID**(API명세서 2-3 v0.5 — 원문 SQL은 Argus에 저장하지 않음). 실사용자는 `actor_login_id`(토큰 주인 = 플랫폼 아이디). 플랫폼 쪽은 **`db_access_token` 발급 기록**(4절). 탐지는 `detection.access_path`(0012)로 경로별, DB 기본 룰 3개(3-6 시드). **정보주체 미특정은 현재 모든 DB 기록에 해당**(회원번호 추출 보류, 2026-10-06) |
 
 ---
 
