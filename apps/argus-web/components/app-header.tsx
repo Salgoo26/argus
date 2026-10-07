@@ -39,6 +39,7 @@ const OFFICER_MENU = [
   { href: "/detections", label: "탐지건" },
   { href: "/access-logs", label: "접속기록" },
   { href: "/rules", label: "룰" },
+  { href: "/reports", label: "점검 보고서" },
 ];
 
 export function AppHeader({ me }: { me: Me | null }) {

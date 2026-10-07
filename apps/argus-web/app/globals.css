@@ -629,3 +629,43 @@ tr.clickable {
   margin: 6px 0 0;
   padding-left: 18px;
 }
+
+/* ── 점검 보고서 (기능 레이어 9) — 화면 그대로 인쇄 / PDF로 저장 ── */
+
+.report-meta {
+  margin-bottom: 8px;
+}
+
+.report-note {
+  font-size: 12px;
+  margin: 8px 0 16px;
+}
+
+.report-h3 {
+  font-size: 14px;
+  margin: 16px 0 8px;
+}
+
+@media print {
+  .no-print {
+    display: none !important;
+  }
+
+  :root {
+    background: #ffffff;
+  }
+
+  .card {
+    box-shadow: none;
+    border: 1px solid var(--border);
+  }
+
+  /* 경로 섹션은 새 쪽에서 시작 — 경로별로 떼어 보고할 수 있게 */
+  .report-section {
+    break-before: page;
+  }
+
+  .table-wrap {
+    overflow: visible;
+  }
+}
