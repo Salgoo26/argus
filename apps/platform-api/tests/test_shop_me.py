@@ -1,5 +1,6 @@
 """마이페이지 — 열람·정정, 비밀번호 변경, 선택 동의 철회 이력, 탈퇴 즉시 파기"""
 
+import pytest
 from sqlalchemy import func, select
 
 from app.auth.tokens import CUSTOMER
@@ -20,7 +21,7 @@ def test_me_requires_login(client):
 
 
 def test_me_shows_profile_and_current_consents(client):
-    signup(client, phone="010-0000-1234", address="서울특별시 가상구 가상로 1")
+    signup(client)
 
     me = client.get("/shop/me").json()
 
@@ -46,6 +47,31 @@ def test_update_profile(client):
     assert res.status_code == 200
     body = res.json()
     assert (body["name"], body["phone"], body["address"]) == ("새이름", "010-9999-0000", None)
+
+
+@pytest.mark.parametrize(
+    "phone",
+    ["", "   ", None, "02-123-4567"],
+    ids=["empty", "blank", "null", "landline"],
+)
+def test_phone_cannot_be_cleared_or_invalid(client, phone):
+    """휴대폰은 필수 (2026-10-07) — 정정은 되지만 지울 수는 없다"""
+    signup(client)
+    res = client.patch("/shop/me", json={"name": "구매자", "phone": phone})
+    assert res.status_code == 400
+    assert client.patch("/shop/me", json={"name": "구매자"}).status_code == 400
+    assert client.get("/shop/me").json()["phone"] == "010-0000-1234"
+
+
+def test_email_cannot_be_changed(client, engine):
+    """이메일은 로그인 아이디 — 정정 대상 아님(소유 확인 수단이 없음, policy 4-3). 보내도 무시"""
+    signup(client)
+    res = client.patch(
+        "/shop/me", json={"name": "구매자", "phone": "010-0000-1234", "email": "new@example.com"}
+    )
+    assert res.status_code == 200 and res.json()["email"] == "buyer@example.com"
+    with engine.connect() as conn:
+        assert conn.execute(select(member.c.email)).scalar_one() == "buyer@example.com"
 
 
 def test_change_password(client):

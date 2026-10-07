@@ -120,17 +120,26 @@ export default function MyPage() {
       <section className="card">
         <h2 className="card-title">내 정보</h2>
         <form className="stack" onSubmit={saveProfile}>
+          {/* 이메일은 로그인 아이디라 정정 대상이 아니다 (이메일 인증이 없어 소유 확인 수단이 없음, policy 4-3) */}
+          <div className="field">
+            <label htmlFor="email">이메일 (로그인 아이디)</label>
+            <input id="email" value={me.email} readOnly disabled />
+            <span className="hint">로그인 아이디라 바꿀 수 없습니다</span>
+          </div>
           <div className="field">
             <label htmlFor="name">이름</label>
             <input id="name" name="name" defaultValue={me.name} required maxLength={50} />
           </div>
           <div className="field">
-            <label htmlFor="phone">휴대전화번호 (선택)</label>
+            <label htmlFor="phone">휴대전화번호</label>
             <input
               id="phone"
               name="phone"
+              type="tel"
+              autoComplete="tel"
               defaultValue={me.phone ?? ""}
               placeholder="010-0000-0000"
+              required
               maxLength={20}
             />
           </div>

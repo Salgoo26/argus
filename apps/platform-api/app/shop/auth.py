@@ -1,5 +1,9 @@
 """고객 회원가입·로그인·로그아웃 (PLT-01, PLT-02)
 
+가입 항목 (2026-10-07 플랫폼 보강, policy 4-3): 이메일(아이디)·비밀번호·이름·휴대폰 — 모두 필수.
+생년월일·성별은 쓸 목적이 없어 선택으로도 받지 않는다(최소수집 §16①). 주소는 회원 정보가 아니라
+배송지(마이페이지에서 등록)다. 요청에 다른 칸이 와도 모델에 없으면 버려진다.
+
 회원가입: 필수 동의(이용약관·개인정보 수집이용·만 14세 이상)가 모두 있어야 가입된다.
 선택 동의(마케팅)는 하지 않아도 가입된다 — 선택 항목 미동의를 이유로 가입을 거부하지 않는다
 (PIPA §22⑤). 동의·미동의 모두 member_consent에 항목·버전·시각·IP로 남긴다.
@@ -22,7 +26,7 @@ from app.config import Settings
 from app.errors import ApiError
 from app.models import consent_item, member, member_consent
 from app.shop.deps import client_ip
-from app.shop.validation import Address, Email, Name, NewPassword, Password, Phone
+from app.shop.validation import Email, Name, NewPassword, Password, Phone
 
 router = APIRouter(prefix="/shop")
 
@@ -34,8 +38,7 @@ class SignupRequest(BaseModel):
     email: Email
     password: NewPassword
     name: Name
-    phone: Phone = None
-    address: Address = None
+    phone: Phone
     # 항목 코드 → 동의 여부. 빠진 항목은 미동의
     consents: dict[str, bool]
 
@@ -96,7 +99,6 @@ def signup(body: SignupRequest, request: Request, response: Response) -> dict:
                         password_hash=hash_password(body.password),
                         name=body.name,
                         phone=body.phone,
-                        address=body.address,
                     )
                     .returning(member.c.id)
                 ).scalar_one()

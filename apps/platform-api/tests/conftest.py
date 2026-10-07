@@ -162,6 +162,7 @@ def signup(client, email: str = "buyer@example.com", **overrides):
         "email": email,
         "password": CUSTOMER_PASSWORD,
         "name": "구매자",  # 가상
+        "phone": "010-0000-1234",  # 가상 (가입 필수 — 2026-10-07)
         "consents": {**REQUIRED_CONSENTS, "MARKETING": False},
     }
     body.update(overrides)

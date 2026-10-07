@@ -4,7 +4,7 @@ from datetime import UTC, datetime, timedelta
 
 import jwt
 import pytest
-from sqlalchemy import func, select, update
+from sqlalchemy import func, inspect, select, update
 
 from app.auth.tokens import ADMIN, CUSTOMER, issue_token
 from app.models import member, member_consent
@@ -63,7 +63,15 @@ def test_signup_records_every_consent_with_version_time_and_ip(client, engine):
         "PRIVACY_REQUIRED": True,
         "TOS": True,
     }
-    assert all(r["item_version"] == "v1" and r["acted_at"] for r in rows)
+    # 동의 당시 버전 — 개인정보 수집·이용 동의는 가입 항목 변경으로 v2 (0006)
+    versions = {r["item_code"]: r["item_version"] for r in rows}
+    assert versions == {
+        "AGE_OVER_14": "v1",
+        "MARKETING": "v1",
+        "PRIVACY_REQUIRED": "v2",
+        "TOS": "v1",
+    }
+    assert all(r["acted_at"] for r in rows)
     assert all(str(r["client_ip"]) == TEST_CLIENT_ADDR[0] for r in rows)
 
 
@@ -106,13 +114,56 @@ def test_duplicate_email_is_rejected_case_insensitively(client):
         {"email": "not-an-email"},
         {"name": "   "},
         {"phone": "02-123-4567"},  # 휴대전화 형식 아님
+        {"phone": ""},  # 휴대폰 필수 (2026-10-07)
+        {"phone": None},
         {"consents": {**REQUIRED_CONSENTS, "UNKNOWN": True}},
     ],
-    ids=["short", "one-kind", "email", "blank-name", "phone", "unknown-consent"],
+    ids=[
+        "short",
+        "one-kind",
+        "email",
+        "blank-name",
+        "phone",
+        "no-phone",
+        "null-phone",
+        "unknown-consent",
+    ],
 )
 def test_invalid_signup_input_is_rejected(client, engine, overrides):
     assert signup(client, **overrides).status_code == 400
     assert _member_count(engine) == 0
+
+
+def test_signup_without_phone_field_is_rejected(client, engine):
+    body = {
+        "email": "buyer@example.com",
+        "password": CUSTOMER_PASSWORD,
+        "name": "구매자",
+        "consents": REQUIRED_CONSENTS,
+    }
+    assert client.post("/shop/auth/signup", json=body).status_code == 400
+    assert _member_count(engine) == 0
+
+
+def test_signup_collects_only_the_required_items(client, engine):
+    """생년월일·성별·주소는 받지 않는다 (policy 4-3 최소수집) — 보내도 저장할 칸이 없다"""
+    res = signup(client, birth_date="1990-01-01", gender="F", address="서울특별시 가상구 가상로 1")
+    assert res.status_code == 201
+    columns = {c["name"] for c in inspect(engine).get_columns("member")}
+    assert not columns & {"birth_date", "birthday", "gender", "sex"}
+    with engine.connect() as conn:
+        row = conn.execute(select(member)).mappings().one()
+    assert row["address"] is None
+    assert "1990" not in str(dict(row))
+
+
+def test_privacy_consent_lists_phone(client):
+    """§15②2호 — 동의받을 때 알리는 항목 = 실제 수집 항목. 문안이 바뀌면 버전도 바뀐다"""
+    items = {i["code"]: i for i in client.get("/shop/consent-items").json()}
+    privacy = items["PRIVACY_REQUIRED"]
+    assert privacy["version"] == "v2"
+    assert "휴대전화번호" in privacy["items"].split("/")[0]  # 가입 시 필수 항목 쪽
+    assert "생년월일" not in privacy["items"] and "성별" not in privacy["items"]
 
 
 def test_phone_is_normalized(client, engine):

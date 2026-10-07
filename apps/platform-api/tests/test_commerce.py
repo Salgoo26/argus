@@ -41,6 +41,12 @@ def _register_account(client, number: str = ACCOUNT):
     )
 
 
+def _set_address(client):
+    """회원 주소 (탈퇴 분리보관에 담기지 않는지 보려고)"""
+    profile = {"name": "구매자", "phone": "010-0000-1234", "address": "서울특별시 가상구 가상로 1"}
+    assert client.patch("/shop/me", json=profile).status_code == 200
+
+
 def _buy(client, product_id: int = 1, card: str = "하늘카드"):
     return client.post("/shop/orders", json={"product_id": product_id, "card_company": card})
 
@@ -253,7 +259,8 @@ def test_admin_commerce_routes_require_login(client):
 
 
 def test_withdraw_retains_order_records_and_destroys_the_rest(client, engine):
-    signup(client, phone="010-0000-1234", address="서울특별시 가상구 가상로 1")
+    signup(client)
+    _set_address(client)
     _buy(client)
     _register_account(client)
 

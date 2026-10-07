@@ -35,12 +35,11 @@ def _new_password(value: str) -> str:
     return value
 
 
-def _phone(value: str | None) -> str | None:
-    if value is None or not value.strip():
-        return None
-    digits = value.strip().replace("-", "")
-    if not _PHONE.match(value.strip()):
+def _phone(value: str) -> str:
+    value = value.strip()
+    if not _PHONE.match(value):
         raise ValueError("invalid phone")
+    digits = value.replace("-", "")
     return f"{digits[:3]}-{digits[3:-4]}-{digits[-4:]}"
 
 
@@ -59,5 +58,6 @@ Email = Annotated[str, Field(min_length=3, max_length=255), AfterValidator(_emai
 Password = Annotated[str, Field(min_length=1, max_length=256)]
 NewPassword = Annotated[str, Field(max_length=256), AfterValidator(_new_password)]
 Name = Annotated[str, Field(min_length=1, max_length=50), AfterValidator(_name)]
-Phone = Annotated[str | None, Field(default=None, max_length=20), AfterValidator(_phone)]
+# 휴대폰은 필수 (2026-10-07 플랫폼 보강, policy 4-3) — 주문·배송 연락용. 빈 값은 형식 오류로 거부
+Phone = Annotated[str, Field(min_length=1, max_length=20), AfterValidator(_phone)]
 Address = Annotated[str | None, Field(default=None, max_length=255), AfterValidator(_optional_text)]
