@@ -14,8 +14,8 @@ from fastapi.routing import APIRoute
 
 API_PREFIX = "/api"
 
-# Argus 자체 기록에서 쓰는 코드값 (api-spec 2-3·2-7). UNMASK·EXPORT는 해당 기능을 만들 때 추가
-ACTIONS = frozenset({"LOGIN", "READ"})
+# Argus 자체 기록에서 쓰는 코드값 (api-spec 2-3·2-7). UNMASK는 해당 기능을 만들 때 추가(v0.2)
+ACTIONS = frozenset({"LOGIN", "READ", "EXPORT"})  # EXPORT = 점검 보고서 생성 (기능 레이어 9)
 DATA_CATEGORIES = frozenset({"NONE", "ACCESS_LOG"})
 
 _SPEC_ATTR = "__access_log__"
