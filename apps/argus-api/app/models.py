@@ -215,3 +215,20 @@ explanation_attachment = Table(
     Column("sha256", CHAR(64), nullable=False),
     Column("uploaded_at", DateTime(timezone=True), nullable=False),
 )
+
+# 점검 보고서 이력 (LOG-09, 0013) — v0.1은 마스킹 보고서만, 파일 대신 집계 스냅샷
+inspection_report = Table(
+    "inspection_report",
+    metadata,
+    Column("id", BigInteger, primary_key=True),
+    Column("period_from", DateTime(timezone=True), nullable=False),
+    Column("period_to", DateTime(timezone=True), nullable=False),
+    Column("scope", JSONB),
+    Column("summary", JSONB, nullable=False),
+    Column("escalated_count", Integer, nullable=False),
+    Column("unmasked", Boolean, nullable=False),
+    Column("unmask_reason", Text),
+    Column("file_path", String(500)),
+    Column("generated_by", BigInteger, nullable=False),
+    Column("generated_at", DateTime(timezone=True), nullable=False),
+)

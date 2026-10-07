@@ -58,3 +58,10 @@ def record_target(detection_id: int) -> None:
     record = _current.get()
     if record is not None:
         record.context = {"target": {"detection_id": detection_id}}
+
+
+def record_report(report_id: int) -> None:
+    """점검 보고서 생성·열람 — 어떤 보고서였는지 (api-spec 2-3 context.report_id)"""
+    record = _current.get()
+    if record is not None:
+        record.context = {"report_id": report_id}

@@ -11,6 +11,7 @@
 from app.agent.context import (
     record_actor,
     record_query_keys,
+    record_report,
     record_subject_count,
     record_target,
 )
@@ -21,6 +22,7 @@ __all__ = [
     "access_log_exempt",
     "record_actor",
     "record_query_keys",
+    "record_report",
     "record_subject_count",
     "record_target",
 ]
