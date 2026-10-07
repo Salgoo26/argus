@@ -4,6 +4,7 @@ import { useRouter } from "next/navigation";
 import { type FormEvent, useCallback, useEffect, useState } from "react";
 
 import { RefundAccountCard } from "@/components/refund-account-card";
+import { ShippingAddressCard } from "@/components/shipping-address-card";
 import {
   ApiError,
   api,
@@ -47,7 +48,6 @@ export default function MyPage() {
         body: JSON.stringify({
           name: form.get("name"),
           phone: form.get("phone"),
-          address: form.get("address"),
         }),
       });
       setMe(updated);
@@ -143,10 +143,6 @@ export default function MyPage() {
               maxLength={20}
             />
           </div>
-          <div className="field">
-            <label htmlFor="address">주소 (선택)</label>
-            <input id="address" name="address" defaultValue={me.address ?? ""} maxLength={255} />
-          </div>
           <div>
             <button className="btn btn-primary" type="submit">
               저장
@@ -198,6 +194,8 @@ export default function MyPage() {
         </div>
         <p className="hint">필수 동의는 서비스 이용의 전제라 철회 대신 회원 탈퇴로 처리합니다.</p>
       </section>
+
+      <ShippingAddressCard />
 
       <RefundAccountCard />
 

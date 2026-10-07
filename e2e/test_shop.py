@@ -44,6 +44,22 @@ def test_customer_signup_mypage_withdraw():
     )
     assert edited.status_code == 200
     assert (edited.json()["name"], edited.json()["email"]) == ("가상고객2", email)
+    assert "address" not in edited.json()  # 주소는 회원 정보가 아니라 배송지
+
+    # 배송지: 첫 배송지는 기본, 두 번째를 기본으로 바꾸면 기본은 하나
+    home = {
+        "label": "집",
+        "recipient": "가상고객",
+        "phone": "010-0000-0001",
+        "zip_code": "90001",
+        "address": "가상시 가상구 가상로 1",
+    }
+    added = shop.post("/api/shop/me/addresses", json=home)
+    assert added.status_code == 201, added.text
+    office = shop.post("/api/shop/me/addresses", json={**home, "label": "회사"}).json()["items"]
+    office_id = next(a["id"] for a in office if a["label"] == "회사")
+    items = shop.post(f"/api/shop/me/addresses/{office_id}/default").json()["items"]
+    assert [a["label"] for a in items if a["is_default"]] == ["회사"]
 
     # 고객 세션 토큰으로는 관리자 API가 열리지 않는다 (토큰 용도 분리)
     admin_try = Browser(PLATFORM_URL, "platform_session")

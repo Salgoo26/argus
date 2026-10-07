@@ -20,6 +20,7 @@ from app.errors import install_error_handlers
 from app.inquiries.router import router as inquiries_router
 from app.members.router import router as members_router
 from app.orders.router import router as orders_router
+from app.shop.addresses import router as shop_addresses_router
 from app.shop.auth import router as shop_auth_router
 from app.shop.inquiries import router as shop_inquiries_router
 from app.shop.me import router as shop_me_router
@@ -49,6 +50,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     # 고객 화면 API — /admin이 아니라 Agent가 기록하지 않는다 (CLAUDE.md 3절 #4)
     app.include_router(shop_auth_router)
     app.include_router(shop_me_router)
+    app.include_router(shop_addresses_router)
     app.include_router(shop_orders_router)
     app.include_router(shop_refund_router)
     app.include_router(shop_inquiries_router)

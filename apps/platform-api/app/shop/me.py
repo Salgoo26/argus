@@ -1,5 +1,7 @@
 """마이페이지 — 내 정보 열람·정정, 비밀번호 변경, 선택 동의 철회·재동의, 탈퇴 (PLT-03)
 
+주소는 회원 정보가 아니라 배송지다(여러 개 — shop/addresses.py, 2026-10-07).
+
 정보주체의 권리(PIPA §35 열람, §36 정정, §37 처리정지·동의 철회)를 화면에서 바로 행사하게 한다.
 고객 본인 행위라 접속기록 대상이 아니다 (CLAUDE.md 3절 #4).
 """
@@ -13,7 +15,7 @@ from app.auth.tokens import CUSTOMER, clear_session_cookie
 from app.errors import ApiError
 from app.models import consent_item, member, member_consent
 from app.shop.deps import CurrentMember, client_ip
-from app.shop.validation import Address, Name, NewPassword, Password, Phone
+from app.shop.validation import Name, NewPassword, Password, Phone
 from app.shop.withdrawal import destroy_member
 
 router = APIRouter(prefix="/shop/me")
@@ -24,7 +26,6 @@ class ProfileUpdate(BaseModel):
 
     name: Name
     phone: Phone
-    address: Address = None
 
 
 class PasswordChange(BaseModel):
@@ -92,7 +93,6 @@ def _profile(conn, member_id: int) -> dict:
                 member.c.email,
                 member.c.name,
                 member.c.phone,
-                member.c.address,
                 member.c.created_at,
             ).where(member.c.id == member_id)
         )
@@ -113,9 +113,7 @@ def update_me(body: ProfileUpdate, request: Request, me: CurrentMember) -> dict:
     """정정 (§36). 이메일은 로그인 아이디라 바꾸지 않는다"""
     with request.app.state.engine.begin() as conn:
         conn.execute(
-            update(member)
-            .where(member.c.id == me.id)
-            .values(name=body.name, phone=body.phone, address=body.address)
+            update(member).where(member.c.id == me.id).values(name=body.name, phone=body.phone)
         )
         return _profile(conn, me.id)
 

@@ -22,7 +22,8 @@ router = APIRouter(prefix="/admin/members")
 
 KST = timezone(timedelta(hours=9))  # 한국은 서머타임이 없어 고정 오프셋으로 충분
 EXPORT_MAX_ROWS = 10_000
-CSV_COLUMNS = ("id", "name", "email", "phone", "address", "joined_at")
+# 주소는 회원 정보가 아니라 배송지(2026-10-07) — 회원 목록 파일에는 담지 않는다
+CSV_COLUMNS = ("id", "name", "email", "phone", "joined_at")
 # 엑셀이 수식으로 해석하는 시작 문자 (OWASP "CSV Injection")
 _FORMULA_PREFIXES = ("=", "+", "-", "@", "\t", "\r")
 
@@ -80,7 +81,6 @@ def export_members(
         member.c.name,
         member.c.email,
         member.c.phone,
-        member.c.address,
         member.c.created_at,
     ).where(member.c.status == "ACTIVE")
     if joined_from is not None:
@@ -97,9 +97,9 @@ def export_members(
     buffer = io.StringIO()
     writer = csv.writer(buffer)
     writer.writerow(CSV_COLUMNS)
-    for member_id, name, email, phone, address, created_at in rows:
+    for member_id, name, email, phone, created_at in rows:
         joined_at = created_at.astimezone(KST).isoformat(timespec="seconds")
-        writer.writerow([member_id, *map(_csv_safe, (name, email, phone, address)), joined_at])
+        writer.writerow([member_id, *map(_csv_safe, (name, email, phone)), joined_at])
 
     filename = f"members_{datetime.now(UTC).astimezone(KST):%Y%m%d_%H%M%S}.csv"
     return Response(
@@ -118,7 +118,6 @@ def _member_or_404(conn, member_id: int):
                 member.c.name,
                 member.c.email,
                 member.c.phone,
-                member.c.address,
                 member.c.status,
                 member.c.created_at,
             ).where(member.c.id == member_id)
@@ -134,7 +133,11 @@ def _member_or_404(conn, member_id: int):
 @router.get("/{member_id}")
 @access_log(action="READ", data_category="MEMBER_BASIC")
 def get_member(member_id: int, request: Request, _operator: CurrentOperator) -> dict:
-    """회원 상세 (PLT-11) — 환불계좌는 끝 4자리만. 전체 번호는 아래 별도 조회(결제수단)"""
+    """회원 상세 (PLT-11) — 환불계좌는 끝 4자리만. 전체 번호는 아래 별도 조회(결제수단)
+
+    배송지는 싣지 않는다 — 배송지 마스킹·전체 보기는 v0.2 (db-schema 4절 플랫폼 보강).
+    배송 업무에 필요한 주소는 주문 상세(주문에 복사된 배송 정보)에서 본다
+    """
     # 대상이 정해진 조회는 업무 로직보다 먼저 기록 — 없는 회원이어도 "누구를 보려 했는지"가 남는다
     record_subjects([member_id])
     with request.app.state.engine.connect() as conn:

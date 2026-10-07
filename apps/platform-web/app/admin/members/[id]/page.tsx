@@ -21,7 +21,6 @@ type MemberDetail = {
   name: string;
   email: string;
   phone: string | null;
-  address: string | null;
   status: string;
   created_at: string;
   refund_account: RefundAccountView;
@@ -95,8 +94,6 @@ export default function MemberDetailPage() {
                 <dd>{member.email}</dd>
                 <dt>연락처</dt>
                 <dd>{member.phone ?? "-"}</dd>
-                <dt>주소</dt>
-                <dd>{member.address ?? "-"}</dd>
                 <dt>가입일</dt>
                 <dd>{formatDate(member.created_at)}</dd>
               </dl>

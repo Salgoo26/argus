@@ -37,8 +37,8 @@ export default function PrivacyPage() {
           </tr>
           <tr>
             <td>선택</td>
-            <td>주소</td>
-            <td>마이페이지에서 입력 시</td>
+            <td>배송지(배송지 이름, 받는 사람, 휴대전화번호, 우편번호, 주소)</td>
+            <td>마이페이지에서 등록 시</td>
           </tr>
           <tr>
             <td>주문 시</td>

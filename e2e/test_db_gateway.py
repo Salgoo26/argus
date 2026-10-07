@@ -62,6 +62,10 @@ def test_db_tool_access_reaches_argus_ledger(officer):
             cur.execute(f"SELECT id, name, email FROM member WHERE email = '{LITERAL}'")  # noqa: S608
             assert cur.fetchall() == []
         rows = conn.execute("SELECT id, name FROM member ORDER BY id LIMIT 3").fetchall()
+        # 배송지(2026-10-07 신규 테이블)도 회원 기본정보로 분류돼야 DB 직접 탐지에서 빠지지 않는다
+        conn.execute(
+            "SELECT recipient, address FROM shipping_address ORDER BY id LIMIT 2"
+        ).fetchall()
         assert len(rows) == 3
 
     def arrived():
@@ -71,18 +75,19 @@ def test_db_tool_access_reaches_argus_ledger(officer):
             " AND context->>'token_id' = %s ORDER BY id",
             (token_id,),
         )
-        return found if len([r for r in found if r[0] == "READ"]) >= 2 else None
+        return found if len([r for r in found if r[0] == "READ"]) >= 3 else None
 
     records = wait_until("게이트웨이 기록 원장 도착", arrived)
     assert ("LOGIN", "SUCCESS") in {(r[0], r[1]) for r in records}
     reads = [r for r in records if r[0] == "READ"]
-    literal_read, listing = reads[0], reads[1]
+    literal_read, listing, shipping = reads[0], reads[1], reads[2]
     assert literal_read[4]["sql_normalized"].endswith("WHERE email = $1")
     assert listing[2] == "MEMBER_BASIC" and listing[3] == 3
     assert listing[4]["tables"] == ["member"]
     assert listing[4]["columns"] == ["member.id", "member.name"]
     assert listing[4]["row_count"] == 3 and listing[4]["subject_unresolved"] is True
     assert listing[4]["raw_fingerprint"].startswith("sha256:")
+    assert shipping[2] == "MEMBER_BASIC" and shipping[4]["tables"] == ["shipping_address"]
     # 리터럴·토큰 값은 원장 어디에도 없다
     assert LITERAL not in str(records) and token not in str(records)
 

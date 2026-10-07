@@ -43,10 +43,11 @@ def test_shop_responses_are_not_cached(client):
 
 def test_update_profile(client):
     signup(client)
-    res = client.patch("/shop/me", json={"name": "새이름", "phone": "01099990000", "address": "  "})
+    res = client.patch("/shop/me", json={"name": "새이름", "phone": "01099990000"})
     assert res.status_code == 200
     body = res.json()
-    assert (body["name"], body["phone"], body["address"]) == ("새이름", "010-9999-0000", None)
+    assert (body["name"], body["phone"]) == ("새이름", "010-9999-0000")
+    assert "address" not in body  # 주소는 배송지로 (shop/addresses.py)
 
 
 @pytest.mark.parametrize(

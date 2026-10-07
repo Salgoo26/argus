@@ -11,7 +11,9 @@ from typing import Annotated
 from pydantic import AfterValidator, Field
 
 _EMAIL = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
-_PHONE = re.compile(r"^01[016789]-?\d{3,4}-?\d{4}$")
+# \d는 다른 문자권의 숫자(예: 아라비아-인도 숫자)도 받으므로 0-9로 한정
+_PHONE = re.compile(r"^01[016789]-?[0-9]{3,4}-?[0-9]{4}$")
+_ZIP_CODE = re.compile(r"^[0-9]{5}$")  # 우편번호(국가기초구역번호) 5자리
 MIN_PASSWORD_LENGTH = 10
 
 
@@ -54,10 +56,23 @@ def _name(value: str) -> str:
     return value
 
 
+def _zip_code(value: str) -> str:
+    value = value.strip()
+    if not _ZIP_CODE.match(value):
+        raise ValueError("invalid zip code")
+    return value
+
+
 Email = Annotated[str, Field(min_length=3, max_length=255), AfterValidator(_email)]
 Password = Annotated[str, Field(min_length=1, max_length=256)]
 NewPassword = Annotated[str, Field(max_length=256), AfterValidator(_new_password)]
 Name = Annotated[str, Field(min_length=1, max_length=50), AfterValidator(_name)]
 # 휴대폰은 필수 (2026-10-07 플랫폼 보강, policy 4-3) — 주문·배송 연락용. 빈 값은 형식 오류로 거부
 Phone = Annotated[str, Field(min_length=1, max_length=20), AfterValidator(_phone)]
-Address = Annotated[str | None, Field(default=None, max_length=255), AfterValidator(_optional_text)]
+# 배송지 (기능 레이어 7-4 ②) — 받는 사람은 Name, 연락처는 Phone과 같은 규칙
+Label = Annotated[str, Field(min_length=1, max_length=30), AfterValidator(_name)]
+ZipCode = Annotated[str, Field(min_length=5, max_length=10), AfterValidator(_zip_code)]
+AddressLine = Annotated[str, Field(min_length=1, max_length=255), AfterValidator(_name)]
+AddressDetail = Annotated[
+    str | None, Field(default=None, max_length=100), AfterValidator(_optional_text)
+]

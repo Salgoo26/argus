@@ -7,7 +7,7 @@ import pytest
 from sqlalchemy import func, inspect, select, update
 
 from app.auth.tokens import ADMIN, CUSTOMER, issue_token
-from app.models import member, member_consent
+from app.models import member, member_consent, shipping_address
 
 from conftest import (
     CUSTOMER_PASSWORD,
@@ -150,11 +150,12 @@ def test_signup_collects_only_the_required_items(client, engine):
     res = signup(client, birth_date="1990-01-01", gender="F", address="서울특별시 가상구 가상로 1")
     assert res.status_code == 201
     columns = {c["name"] for c in inspect(engine).get_columns("member")}
-    assert not columns & {"birth_date", "birthday", "gender", "sex"}
+    # 주소는 회원 정보가 아니라 배송지 (0007) — member에 칸이 없고, 가입으로 배송지도 안 생긴다
+    assert not columns & {"birth_date", "birthday", "gender", "sex", "address"}
     with engine.connect() as conn:
         row = conn.execute(select(member)).mappings().one()
-    assert row["address"] is None
-    assert "1990" not in str(dict(row))
+        assert conn.execute(select(func.count()).select_from(shipping_address)).scalar_one() == 0
+    assert "1990" not in str(dict(row)) and "가상로" not in str(dict(row))
 
 
 def test_privacy_consent_lists_phone(client):

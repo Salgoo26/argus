@@ -26,7 +26,6 @@ def _add_members(engine, count: int) -> None:
             "password_hash": "unusable",
             "name": f"회원{n}",  # 가상
             "phone": f"010-0000-{n:04d}",
-            "address": "서울특별시 가상구 가상로 1",
         }
         for n in range(1, count + 1)
     ]

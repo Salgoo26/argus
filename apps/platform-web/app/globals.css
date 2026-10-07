@@ -607,3 +607,20 @@ textarea {
   background: var(--bg);
   user-select: all;
 }
+
+/* 배송지 목록 (마이페이지·주문) */
+.address-list {
+  list-style: none;
+  margin: 0 0 12px;
+  padding: 0;
+}
+
+.address-item {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 0;
+  border-bottom: 1px solid var(--border);
+}

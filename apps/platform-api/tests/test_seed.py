@@ -3,12 +3,17 @@
 from sqlalchemy import func, select
 
 from app.auth.passwords import verify_password
-from app.models import member, member_consent, operator, outbox
+from app.models import member, member_consent, operator, outbox, shipping_address
 from app.scripts.seed import FIRST_MEMBER_ID, SEED_OPERATORS, backfill_consents, seed
 
 from conftest import TEST_PASSWORD
 
 MEMBERS = 30  # 테스트는 작게 — 로직은 500명과 같다
+_PEOPLE = (
+    select(member.c.id, member.c.name, shipping_address.c.address, shipping_address.c.zip_code)
+    .join(shipping_address, shipping_address.c.member_id == member.c.id)
+    .order_by(member.c.id)
+)
 
 
 def _seed(engine) -> bool:
@@ -26,24 +31,36 @@ def test_seed_creates_fictional_members(engine):
     # 실존 주소·번호와 겹치지 않는 형식 (CLAUDE.md 3절 #2)
     assert all(r["email"].endswith("@example.com") for r in rows)
     assert all(r["phone"].startswith("010-0000-") for r in rows)
-    assert all(r["name"] and r["address"] for r in rows)
+    assert all(r["name"] for r in rows)
     # 고객 로그인은 범위 밖 — 알려진 비밀번호로는 로그인되지 않는다
     assert not verify_password(rows[0]["password_hash"], TEST_PASSWORD)
+
+
+def test_seed_members_have_one_default_shipping_address(engine):
+    _seed(engine)
+    with engine.connect() as conn:
+        rows = conn.execute(select(shipping_address)).mappings().all()
+        names = dict(conn.execute(select(member.c.id, member.c.name)).all())
+    assert len(rows) == MEMBERS and all(r["is_default"] for r in rows)
+    assert {r["member_id"] for r in rows} == set(names)
+    assert all(r["recipient"] == names[r["member_id"]] and r["address"] for r in rows)
+    # 실재하지 않는 우편번호 대역(9로 시작)
+    assert all(r["zip_code"].startswith("9") and len(r["zip_code"]) == 5 for r in rows)
 
 
 def test_seed_is_reproducible(engine):
     _seed(engine)
     with engine.connect() as conn:
-        first = conn.execute(select(member.c.id, member.c.name, member.c.address)).all()
+        first = conn.execute(_PEOPLE).all()
     with engine.begin() as conn:
         conn.exec_driver_sql(
             "TRUNCATE operator, member, member_consent, outbox, orders, payment, refund_account,"
-            " inquiry, db_access_token"
+            " shipping_address, inquiry, db_access_token"
             " RESTART IDENTITY"
         )
     _seed(engine)
     with engine.connect() as conn:
-        second = conn.execute(select(member.c.id, member.c.name, member.c.address)).all()
+        second = conn.execute(_PEOPLE).all()
     assert first == second  # 누가 몇 번 실행해도 같은 회원이 같은 id로
 
 

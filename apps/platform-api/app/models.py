@@ -46,7 +46,6 @@ member = Table(
     Column("password_hash", String(255), nullable=False),
     Column("name", String(50), nullable=False),
     Column("phone", String(20)),
-    Column("address", String(255)),
     Column("status", String(16), nullable=False),
     Column("created_at", DateTime(timezone=True), nullable=False),
     Column("withdrawn_at", DateTime(timezone=True)),
@@ -184,4 +183,21 @@ db_access_token = Table(
     Column("issued_at", DateTime(timezone=True), nullable=False),
     Column("expires_at", DateTime(timezone=True), nullable=False),
     Column("issued_ip", INET, nullable=False),
+)
+
+# 배송지 — 회원별 여러 개, 기본 배송지 1개 (기능 레이어 7-4 ②, 0007)
+shipping_address = Table(
+    "shipping_address",
+    metadata,
+    Column("id", BigInteger, primary_key=True),
+    Column("member_id", BigInteger, ForeignKey("member.id"), nullable=False),
+    Column("label", String(30), nullable=False),
+    Column("recipient", String(50), nullable=False),
+    Column("phone", String(20)),
+    Column("zip_code", String(5)),
+    Column("address", String(255), nullable=False),
+    Column("address_detail", String(100)),
+    Column("is_default", Boolean, nullable=False),
+    Column("created_at", DateTime(timezone=True), nullable=False),
+    Column("updated_at", DateTime(timezone=True), nullable=False),
 )

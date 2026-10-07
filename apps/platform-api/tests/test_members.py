@@ -21,7 +21,6 @@ def _add_members(engine, count: int, **overrides) -> None:
             "password_hash": "unusable",
             "name": f"회원{n}",  # 가상
             "phone": f"010-0000-{n:04d}",
-            "address": "서울특별시 가상구 가상로 1",
             "created_at": KST_MIDNIGHT_0915 + timedelta(hours=n),
         }
         | overrides
@@ -79,10 +78,16 @@ def test_export_120_members_as_csv(logged_in, engine):
     assert res.headers["cache-control"] == "no-store"
     assert res.content.startswith(b"\xef\xbb\xbf")  # 엑셀 한글 인식용 BOM
     rows = _csv_rows(res)
-    assert rows[0] == ["id", "name", "email", "phone", "address", "joined_at"]
+    assert rows[0] == [
+        "id",
+        "name",
+        "email",
+        "phone",
+        "joined_at",
+    ]  # 주소는 배송지 — 회원 파일에 없음
     assert len(rows) == 1 + 120
     assert rows[1][2] == "user0001@example.com"
-    assert rows[1][5].endswith("+09:00")  # 가입일은 한국 시각으로
+    assert rows[1][4].endswith("+09:00")  # 가입일은 한국 시각으로
 
 
 def test_export_filters_by_joined_date_in_kst(logged_in, engine):
@@ -121,12 +126,11 @@ def test_export_neutralizes_formula_cells(logged_in, engine):
                 email="evil@example.com",
                 password_hash="unusable",
                 name='=HYPERLINK("http://attacker.example","click")',
-                address="+1+1",
                 phone="-2",
             )
         )
     [row] = _csv_rows(logged_in.get("/admin/members/export"))[1:]
-    assert row[1].startswith("'=") and row[3] == "'-2" and row[4] == "'+1+1"
+    assert row[1].startswith("'=") and row[3] == "'-2"
 
 
 @pytest.mark.parametrize("params", [{"limit": 0}, {"limit": 10_001}, {"joined_from": "2026-13-01"}])
