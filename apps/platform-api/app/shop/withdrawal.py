@@ -8,11 +8,11 @@ db-schema 4-1은 "상태 변경 → 파기 배치"였지만 파기 배치는 v0.
 1. 법정 보존 대상만 retained_member_record로 분리보관 (PIPA §21③)
    - 대금결제·재화 공급 기록 5년 (전자상거래법 시행령 §6①3호) — 주문이 있을 때만
    - data에는 보존 목적에 필요한 최소 항목만: 주문번호·상품·금액·일시·PG 거래번호·카드사와
-     분쟁 시 본인 확인용 이름·연락처. 비밀번호·주소·환불계좌는 담지 않는다
+     분쟁 시 본인 확인용 이름·연락처. 비밀번호·배송지 목록·환불계좌는 담지 않는다
    - 소비자 불만·분쟁 처리 기록 3년 (같은 조 4호) — 1:1 문의가 있을 때만. 문의 제목·본문·답변을
      분리보관 테이블로 **옮기고** 운영 테이블(inquiry)의 내용은 지운다 — 본문에 개인정보가 있을 수
      있어, 회원과의 연결만 끊고 남겨 두면 분리보관이 아니라 방치가 된다
-2. 회원을 참조하는 개인정보 삭제(환불계좌·동의 이력) → 회원 행 삭제.
+2. 회원을 참조하는 개인정보 삭제(환불계좌·배송지·동의 이력) → 회원 행 삭제.
    orders·inquiry의 member_id는 FK ON DELETE SET NULL로 끊겨 개인과 연결되지 않는 기록이 된다
 3. destruction_history에 파기 이력 (개인정보 자체는 기록하지 않음)
 """
@@ -31,6 +31,7 @@ from app.models import (
     product,
     refund_account,
     retained_member_record,
+    shipping_address,
 )
 
 PAYMENT_RETENTION = timedelta(days=365 * 5)
@@ -159,6 +160,8 @@ def destroy_member(conn: Connection, member_id: int) -> None:
     _retain_inquiries(conn, profile, now)
 
     conn.execute(delete(refund_account).where(refund_account.c.member_id == member_id))
+    # 배송지는 보존 대상이 아니다 — 주문에 복사된 배송 정보만 PAYMENT_5Y로 남는다(db-schema 4-1)
+    conn.execute(delete(shipping_address).where(shipping_address.c.member_id == member_id))
     # 동의 이력도 함께 파기 — 탈퇴로 동의 자체가 실효된다 (db-schema 4-1 "동의 이력" 주석)
     conn.execute(delete(member_consent).where(member_consent.c.member_id == member_id))
     conn.execute(delete(member).where(member.c.id == member_id))

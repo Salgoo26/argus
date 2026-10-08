@@ -38,6 +38,7 @@ const MESSAGES: Record<string, string> = {
   REQUIRED_CONSENT: "필수 동의는 철회할 수 없습니다. 원하지 않으면 회원 탈퇴를 이용하세요.",
   WRONG_PASSWORD: "비밀번호가 일치하지 않습니다.",
   NOT_FOUND: "대상을 찾을 수 없습니다.",
+  ADDRESS_LIMIT: "배송지는 최대 10개까지 등록할 수 있습니다.",
 };
 
 export function errorMessage(error: unknown): string {
@@ -63,7 +64,6 @@ export type Customer = {
   email: string;
   name: string;
   phone: string | null;
-  address: string | null;
   created_at: string;
   consents: Consent[];
 };
@@ -101,6 +101,26 @@ export function passwordProblem(value: string): string | null {
     return "비밀번호는 10자 이상, 영문·숫자·특수문자 중 2종류 이상이어야 합니다.";
   }
   return null;
+}
+
+// ── 배송지 (기능 레이어 7-4 ②) ─────────────────────────────
+
+export type ShippingAddress = {
+  id: number;
+  label: string;
+  recipient: string;
+  phone: string | null; // 예전 회원 주소에서 옮겨 온 배송지는 비어 있을 수 있다
+  zip_code: string | null;
+  address: string;
+  address_detail: string | null;
+  is_default: boolean;
+};
+
+export type ShippingAddressList = { items: ShippingAddress[]; max: number };
+
+export function fullAddress(a: Pick<ShippingAddress, "zip_code" | "address" | "address_detail">) {
+  const zip = a.zip_code ? `(${a.zip_code}) ` : "";
+  return `${zip}${a.address}${a.address_detail ? ` ${a.address_detail}` : ""}`;
 }
 
 // ── 주문·결제(PG 목업)·환불계좌 ───────────────────────────

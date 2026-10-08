@@ -1,7 +1,7 @@
 """시드 데이터 — python -m app.scripts.seed (compose의 platform-seed가 기동 시 실행)
 
 모든 데이터는 가상이다 (CLAUDE.md 3절 #2, README):
-- 이름·주소: Faker ko_KR의 무작위 조합
+- 이름·주소(기본 배송지): Faker ko_KR의 무작위 조합, 우편번호는 9로 시작하는 가상 번호
 - 이메일: example.com — 인터넷 표준(RFC 2606)이 예시용으로 예약한 도메인이라 실존 주소가 될 수 없다
 - 전화번호: 010-0000-XXXX — 가운데를 0000으로 고정해 실존 번호와 겹치지 않게
 - 회원 비밀번호: 아무도 모르는 무작위 해시 하나를 공유 — 시드 회원으로는 로그인할 수 없다
@@ -38,6 +38,7 @@ from app.models import (
     payment,
     product,
     refund_account,
+    shipping_address,
 )
 from app.outbox import enqueue, handler_event
 from app.scripts.baseline import baseline_events
@@ -82,18 +83,42 @@ def seed(conn: Connection, operator_password: str, member_count: int = MEMBER_CO
         {"last": FIRST_MEMBER_ID - 1},
     )
     shared_hash = unusable_password_hash()
-    conn.execute(
-        insert(member),
+    # Faker 호출 순서(이름 → 주소)를 회원마다 그대로 — 순서가 바뀌면 같은 시드로도 다른 회원이 된다
+    people = []
+    for n in range(1, member_count + 1):
+        name, address = fake.name(), fake.address()
+        created_at = now - timedelta(seconds=rng.randint(0, 365 * 24 * 3600))
+        people.append((n, name, address, created_at))
+    member_ids = conn.execute(
+        insert(member).returning(member.c.id, sort_by_parameter_order=True),
         [
             {
                 "email": f"user{n:04d}@example.com",
                 "password_hash": shared_hash,
-                "name": fake.name(),
+                "name": name,
                 "phone": f"010-0000-{n:04d}",
-                "address": fake.address(),
-                "created_at": now - timedelta(seconds=rng.randint(0, 365 * 24 * 3600)),
+                "created_at": created_at,
             }
-            for n in range(1, member_count + 1)
+            for n, name, _, created_at in people
+        ],
+    ).scalars()
+    # 주소는 회원 정보가 아니라 배송지 (2026-10-07) — 회원마다 기본 배송지 1개.
+    # 우편번호는 가상(회원 번호에서 만든 5자리), 받는 사람·연락처는 회원 본인
+    conn.execute(
+        insert(shipping_address),
+        [
+            {
+                "member_id": member_id,
+                "label": "집",
+                "recipient": name,
+                "phone": f"010-0000-{n:04d}",
+                "zip_code": f"{90000 + n:05d}",
+                "address": address,
+                "is_default": True,
+                "created_at": created_at,
+                "updated_at": created_at,
+            }
+            for member_id, (n, name, address, created_at) in zip(member_ids, people, strict=True)
         ],
     )
 

@@ -35,6 +35,8 @@ TABLE_CATEGORY = {
     "member": "MEMBER_BASIC",
     "member_consent": "MEMBER_BASIC",
     "retained_member_record": "MEMBER_BASIC",
+    # 배송지 (2026-10-07, 플랫폼 0007) — 빠지면 NONE이 되어 DB 직접 접근 탐지에서 누락된다
+    "shipping_address": "MEMBER_BASIC",
     "inquiry": "INQUIRY",
     "orders": "ORDER",
     "payment": "ORDER",  # PG 거래 정보

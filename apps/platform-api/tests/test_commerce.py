@@ -15,6 +15,7 @@ from app.models import (
     payment,
     refund_account,
     retained_member_record,
+    shipping_address,
 )
 
 from conftest import (
@@ -42,9 +43,15 @@ def _register_account(client, number: str = ACCOUNT):
 
 
 def _set_address(client):
-    """회원 주소 (탈퇴 분리보관에 담기지 않는지 보려고)"""
-    profile = {"name": "구매자", "phone": "010-0000-1234", "address": "서울특별시 가상구 가상로 1"}
-    assert client.patch("/shop/me", json=profile).status_code == 200
+    """배송지 (탈퇴 시 지워지고 분리보관 목록에 담기지 않는지 보려고)"""
+    address = {
+        "label": "집",
+        "recipient": "구매자",
+        "phone": "010-0000-1234",
+        "zip_code": "90001",
+        "address": "서울특별시 가상구 가상로 1",
+    }
+    assert client.post("/shop/me/addresses", json=address).status_code == 201
 
 
 def _buy(client, product_id: int = 1, card: str = "하늘카드"):
@@ -269,6 +276,7 @@ def test_withdraw_retains_order_records_and_destroys_the_rest(client, engine):
     with engine.connect() as conn:
         assert conn.execute(select(func.count()).select_from(member)).scalar_one() == 0
         assert conn.execute(select(func.count()).select_from(refund_account)).scalar_one() == 0
+        assert conn.execute(select(func.count()).select_from(shipping_address)).scalar_one() == 0
         # 주문은 남지만 누구의 것인지 끊긴다 (FK ON DELETE SET NULL)
         assert conn.execute(select(orders.c.member_id)).scalar_one() is None
         retained = conn.execute(select(retained_member_record)).mappings().one()
