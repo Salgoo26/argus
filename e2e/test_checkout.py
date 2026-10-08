@@ -16,7 +16,7 @@ import psycopg
 from conftest import PLATFORM_URL, Browser, platform_login, wait_until
 
 PASSWORD = "e2e-buyer-pass-4"  # noqa: S105 — 테스트 전용 더미 값, 매번 새 가상 계정
-# 가상 카드번호 — Luhn 검사만 통과하는 실존하지 않는 번호. scripts/e2e.sh의 로그 검사와 같은 값
+# 가상 카드번호 (실존하지 않는 번호). scripts/e2e.sh의 로그 검사와 같은 값
 CARD = "1234567890123452"
 CARD_FORMS = (CARD, "1234-5678-9012-3452")
 STREET = "가상시 가상구 결제로 4"

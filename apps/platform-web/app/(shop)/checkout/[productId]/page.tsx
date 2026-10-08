@@ -18,7 +18,7 @@ import {
 // 주문·결제 (PLT-04·05, 기능 레이어 7-4 ③)
 // - 로그인 필수: 비로그인이면 로그인 화면으로 보내고, 로그인 뒤 이 상품으로 돌아온다
 // - 등록한 배송지 중 하나를 고른다 (없으면 마이페이지 등록 안내). 주문에는 그 시점 값이 복사된다
-// - 결제는 가상 PG 결제창. 카드번호·유효기간은 **이 브라우저 안에서 형식만 확인하고 서버로 보내지 않는다**
+// - 결제는 가상 PG 결제창. 카드번호·유효기간은 입력만 받고(검사 없음) **서버로 보내지 않는다**
 //   (실제로도 카드번호는 PG사만 받는다). 서버로 가는 것은 상품·배송지·카드사뿐 — approve() 참고
 export default function CheckoutPage() {
   const { productId } = useParams<{ productId: string }>();
@@ -142,32 +142,8 @@ export default function CheckoutPage() {
 
 // ── 가상 PG 결제창 ─────────────────────────────────────────
 
-// Luhn 검사 — 카드번호 끝자리(검증 숫자)가 맞는지. 형식 확인일 뿐 실제 카드인지와는 무관
-function luhnValid(digits: string): boolean {
-  let sum = 0;
-  for (let i = 0; i < digits.length; i++) {
-    let d = Number(digits[digits.length - 1 - i]);
-    if (i % 2 === 1) {
-      d *= 2;
-      if (d > 9) d -= 9;
-    }
-    sum += d;
-  }
-  return sum % 10 === 0;
-}
-
-function cardProblem(rawNumber: string, rawExpiry: string): string | null {
-  const digits = rawNumber.replace(/[\s-]/g, "");
-  if (!/^[0-9]{15,16}$/.test(digits)) return "카드번호는 숫자 15~16자리입니다.";
-  if (!luhnValid(digits)) return "카드번호가 올바르지 않습니다 (검증 숫자 불일치).";
-  const m = /^(0[1-9]|1[0-2])\/?([0-9]{2})$/.exec(rawExpiry.trim());
-  if (!m) return "유효기간은 MM/YY 형식입니다.";
-  const now = new Date();
-  const expiry = new Date(2000 + Number(m[2]), Number(m[1]), 1); // 그 달의 다음 달 1일 0시에 만료
-  if (expiry <= now) return "유효기간이 지난 카드입니다.";
-  return null;
-}
-
+// 카드번호·유효기간은 결제 흐름을 보여 주기 위한 입력칸일 뿐 검사하지 않는다(2026-10-08 사용자 결정 —
+// 형식 검증이 이 데모의 목적이 아님). 무엇을 입력해도 승인되고, 입력값은 어디로도 보내지 않는다
 function PgWindow({
   amount,
   cards,
@@ -183,15 +159,11 @@ function PgWindow({
   // 카드번호·유효기간은 이 컴포넌트의 상태에만 있다 — <form>·name 속성을 쓰지 않아 어떤 전송에도 실리지 않는다
   const [number, setNumber] = useState("");
   const [expiry, setExpiry] = useState("");
-  const [problem, setProblem] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
 
   async function submit() {
-    const found = cardProblem(number, expiry);
-    setProblem(found);
-    if (found) return;
     setPending(true);
-    // 형식 확인을 통과했으면 바로 지운다 — 승인 요청에는 카드사만 실린다
+    // 승인을 누르면 바로 지운다 — 승인 요청에는 카드사만 실린다
     setNumber("");
     setExpiry("");
     await onApprove(card);
@@ -205,8 +177,8 @@ function PgWindow({
         가상 결제 — 실제 카드번호 입력 금지
       </div>
       <p className="hint">
-        실제 서비스라면 이 창은 PG사 화면이며 카드번호는 PG사만 받습니다. 이 데모에서도 카드번호는 이
-        브라우저에서 형식(자릿수·검증 숫자)만 확인하고 쇼핑몰 서버로 보내지 않습니다. 쇼핑몰은 승인
+        실제 서비스라면 이 창은 PG사 화면이며 카드번호는 PG사만 받습니다. 이 데모의 카드번호·유효기간
+        입력칸은 흉내일 뿐이라 검사하지 않고, 쇼핑몰 서버로 보내지도 않습니다. 쇼핑몰은 승인
         결과(카드사·거래번호·금액)만 받습니다.
       </p>
       <div className="field">
@@ -223,7 +195,7 @@ function PgWindow({
           id="pg_number"
           inputMode="numeric"
           autoComplete="off"
-          placeholder="1234-5678-9012-3452 (가상 번호 예시)"
+          placeholder="가상 번호 (검사하지 않음)"
           value={number}
           onChange={(e) => setNumber(e.target.value)}
           maxLength={19}
@@ -241,7 +213,6 @@ function PgWindow({
           maxLength={5}
         />
       </div>
-      {problem && <div className="alert-error">{problem}</div>}
       <div className="toolbar">
         <button className="btn btn-primary" onClick={submit} disabled={pending}>
           {pending ? "승인 중…" : `${won(amount)} 결제 승인`}
