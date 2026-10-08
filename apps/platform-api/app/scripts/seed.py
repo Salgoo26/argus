@@ -210,19 +210,33 @@ def seed_commerce(conn: Connection, cipher: FieldCipher) -> bool:
     if not members or not products:
         return False
 
+    # 주문의 배송 정보 = 그 회원의 기본 배송지 복사 (7-4 ③ — 실제 주문 경로와 같게)
+    shipping = {
+        r.member_id: {
+            "ship_recipient": r.recipient,
+            "ship_phone": r.phone,
+            "ship_zip_code": r.zip_code,
+            "ship_address": r.address,
+            "ship_address_detail": r.address_detail,
+        }
+        for r in conn.execute(select(shipping_address).where(shipping_address.c.is_default))
+    }
+
     rng = random.Random(SEED + 2)  # noqa: S311 — 가짜 주문 분포용, 보안 용도 아님
     now = conn.execute(select(func.now())).scalar_one()
     for _ in range(ORDER_COUNT):
         product_id, price = rng.choice(products)
         ordered_at = now - timedelta(seconds=rng.randint(3600, ORDER_HISTORY_DAYS * 24 * 3600))
+        member_id = rng.choice(members)
         order_id = conn.execute(
             insert(orders)
             .values(
-                member_id=rng.choice(members),
+                member_id=member_id,
                 product_id=product_id,
                 amount=price,
                 status="PAID",
                 ordered_at=ordered_at,
+                **shipping.get(member_id, {}),
             )
             .returning(orders.c.id)
         ).scalar_one()

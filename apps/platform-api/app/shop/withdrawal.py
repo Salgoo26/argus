@@ -7,8 +7,9 @@ db-schema 4-1은 "상태 변경 → 파기 배치"였지만 파기 배치는 v0.
 순서 (db-schema 4-1 절차를 한 트랜잭션으로):
 1. 법정 보존 대상만 retained_member_record로 분리보관 (PIPA §21③)
    - 대금결제·재화 공급 기록 5년 (전자상거래법 시행령 §6①3호) — 주문이 있을 때만
-   - data에는 보존 목적에 필요한 최소 항목만: 주문번호·상품·금액·일시·PG 거래번호·카드사와
-     분쟁 시 본인 확인용 이름·연락처. 비밀번호·배송지 목록·환불계좌는 담지 않는다
+   - data에는 보존 목적에 필요한 최소 항목만: 주문번호·상품·금액·일시·PG 거래번호·카드사·
+     **주문의 배송 정보 스냅샷**(재화 공급 기록 — 7-4 ③)과 분쟁 시 본인 확인용 이름·연락처.
+     비밀번호·배송지 목록·환불계좌는 담지 않는다. 배송 스냅샷은 옮긴 뒤 orders에서 지운다
    - 소비자 불만·분쟁 처리 기록 3년 (같은 조 4호) — 1:1 문의가 있을 때만. 문의 제목·본문·답변을
      분리보관 테이블로 **옮기고** 운영 테이블(inquiry)의 내용은 지운다 — 본문에 개인정보가 있을 수
      있어, 회원과의 연결만 끊고 남겨 두면 분리보관이 아니라 방치가 된다
@@ -22,6 +23,7 @@ from datetime import timedelta
 from sqlalchemy import Connection, case, delete, func, insert, select, update
 
 from app.models import (
+    SHIP_COLUMNS,
     destruction_history,
     inquiry,
     member,
@@ -39,6 +41,19 @@ PAYMENT_LEGAL_BASIS = "전자상거래법 시행령 §6①3호"
 DESTRUCTION_LEGAL_BASIS = "개인정보 보호법 §21①"
 
 
+def _shipping(r) -> dict | None:
+    """주문의 배송 정보 스냅샷 (재화 공급 기록, 2026-10-07). 이 기능 이전의 주문은 없음"""
+    if r.ship_address is None:
+        return None
+    return {
+        "recipient": r.ship_recipient,
+        "phone": r.ship_phone,
+        "zip_code": r.ship_zip_code,
+        "address": r.ship_address,
+        "address_detail": r.ship_address_detail,
+    }
+
+
 def _retain_orders(conn: Connection, profile, now) -> None:
     rows = conn.execute(
         select(
@@ -46,6 +61,7 @@ def _retain_orders(conn: Connection, profile, now) -> None:
             product.c.name,
             orders.c.amount,
             orders.c.ordered_at,
+            *(orders.c[c] for c in SHIP_COLUMNS),
             payment.c.pg_tid,
             payment.c.card_company,
         )
@@ -78,6 +94,7 @@ def _retain_orders(conn: Connection, profile, now) -> None:
                         "ordered_at": r.ordered_at.isoformat(),
                         "pg_tid": r.pg_tid,
                         "card_company": r.card_company,
+                        "shipping": _shipping(r),
                     }
                     for r in rows
                 ],
@@ -85,6 +102,13 @@ def _retain_orders(conn: Connection, profile, now) -> None:
             retain_until=now + PAYMENT_RETENTION,
             created_at=now,
         )
+    )
+    # 운영 테이블에는 주문 기록(상품·금액·일시·결제)만 남기고 배송 정보는 지운다 — 옮겼으므로
+    # (문의 본문과 같은 원칙: 연결만 끊고 남기면 분리보관이 아니라 방치)
+    conn.execute(
+        update(orders)
+        .where(orders.c.member_id == profile["id"])
+        .values(**dict.fromkeys(SHIP_COLUMNS))
     )
 
 

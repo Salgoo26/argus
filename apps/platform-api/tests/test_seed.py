@@ -162,6 +162,23 @@ def test_commerce_seed_has_no_card_numbers_and_encrypted_accounts(engine):
 
     assert order_count == paid > 0
     assert "card_number" not in payment.c  # PG 목업 — 카드번호 컬럼 자체가 없다
+    # 주문의 배송 정보 = 주문한 회원의 기본 배송지 복사 (7-4 ③)
+    with engine.connect() as conn:
+        mismatched = conn.execute(
+            select(func.count())
+            .select_from(
+                orders.join(shipping_address, shipping_address.c.member_id == orders.c.member_id)
+            )
+            .where(
+                shipping_address.c.is_default,
+                (orders.c.ship_address.is_distinct_from(shipping_address.c.address))
+                | (orders.c.ship_zip_code.is_distinct_from(shipping_address.c.zip_code)),
+            )
+        ).scalar_one()
+        missing = conn.execute(
+            select(func.count()).select_from(orders).where(orders.c.ship_address.is_(None))
+        ).scalar_one()
+    assert mismatched == 0 and missing == 0
     for acc in accounts:
         number = cipher.decrypt(acc["account_number_enc"], refund_account_context(acc["member_id"]))
         assert number.startswith("0000") and number.endswith(acc["account_last4"])

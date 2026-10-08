@@ -39,6 +39,9 @@ const MESSAGES: Record<string, string> = {
   WRONG_PASSWORD: "비밀번호가 일치하지 않습니다.",
   NOT_FOUND: "대상을 찾을 수 없습니다.",
   ADDRESS_LIMIT: "배송지는 최대 10개까지 등록할 수 있습니다.",
+  SHIPPING_ADDRESS_REQUIRED: "배송지를 선택하세요.",
+  SHIPPING_ADDRESS_INCOMPLETE:
+    "이 배송지는 연락처·우편번호가 비어 있습니다. 마이페이지에서 배송지를 보완해 주세요.",
 };
 
 export function errorMessage(error: unknown): string {
@@ -127,7 +130,25 @@ export function fullAddress(a: Pick<ShippingAddress, "zip_code" | "address" | "a
 
 export type Product = { id: number; name: string; price: number };
 
-export type Order = {
+// 주문의 배송 정보 — 주문할 때 고른 배송지를 복사해 둔 값 (7-4 ③). 이 기능 이전 주문·탈퇴 회원 주문은 비어 있다
+export type OrderShipping = {
+  ship_recipient: string | null;
+  ship_phone: string | null;
+  ship_zip_code: string | null;
+  ship_address: string | null;
+  ship_address_detail: string | null;
+};
+
+export function orderAddress(o: OrderShipping): string | null {
+  if (!o.ship_address) return null;
+  return fullAddress({
+    zip_code: o.ship_zip_code,
+    address: o.ship_address,
+    address_detail: o.ship_address_detail,
+  });
+}
+
+export type Order = OrderShipping & {
   id: number;
   product_name: string;
   amount: number;
@@ -162,6 +183,28 @@ export type Inquiry = {
 };
 
 export const INQUIRY_STATUS: Record<string, string> = { OPEN: "답변 대기", ANSWERED: "답변 완료" };
+
+// ── 고객 로그인 후 돌아갈 주소 (7-4 ③) ─────────────────────
+// 비로그인으로 주문하려 하면 로그인 화면 → 로그인 뒤 원래 상품(주문 화면)으로 돌아간다.
+// 관리자와 같은 원칙으로 **같은 출처의 고객 화면 경로만** 허용 — 외부 사이트·관리자 화면으로는 보내지 않는다
+const SHOP_HOME = "/";
+
+export function safeShopPath(raw: string | null): string {
+  if (!raw || !raw.startsWith("/") || raw.startsWith("//") || raw.includes("\\")) return SHOP_HOME;
+  try {
+    const url = new URL(raw, window.location.origin);
+    if (url.origin !== window.location.origin) return SHOP_HOME;
+    if (/^\/(admin|login|signup)(\/|$)/.test(url.pathname)) return SHOP_HOME;
+    return url.pathname + url.search;
+  } catch {
+    return SHOP_HOME;
+  }
+}
+
+export function shopLoginPath(): string {
+  const here = window.location.pathname + window.location.search;
+  return `/login?next=${encodeURIComponent(here)}`;
+}
 
 // ── 관리자 로그인 후 돌아갈 주소 ─────────────────────────
 // Argus 소명의 관련 티켓 링크로 /admin/inquiries/12에 왔는데 로그인이 안 돼 있으면,

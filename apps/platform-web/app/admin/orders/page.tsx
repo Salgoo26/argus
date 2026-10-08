@@ -78,7 +78,9 @@ export default function AdminOrdersPage() {
               <tbody>
                 {data?.items.map((o) => (
                   <tr key={o.id}>
-                    <td className="num">{o.id}</td>
+                    <td className="num">
+                      <Link href={`/admin/orders/${o.id}`}>{o.id}</Link>
+                    </td>
                     <td>
                       {o.member_id ? (
                         <Link href={`/admin/members/${o.member_id}`}>

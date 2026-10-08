@@ -3,7 +3,15 @@
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 
-import { ApiError, api, customerErrorMessage, formatDateTime, type Order, won } from "@/lib/api";
+import {
+  ApiError,
+  api,
+  customerErrorMessage,
+  formatDateTime,
+  type Order,
+  orderAddress,
+  won,
+} from "@/lib/api";
 
 export default function MyOrdersPage() {
   const router = useRouter();
@@ -34,6 +42,7 @@ export default function MyOrdersPage() {
                 <th className="num">금액</th>
                 <th>결제</th>
                 <th>PG 거래번호</th>
+                <th>배송지</th>
                 <th>주문 일시</th>
               </tr>
             </thead>
@@ -45,12 +54,15 @@ export default function MyOrdersPage() {
                   <td className="num">{won(o.amount)}</td>
                   <td>{o.card_company ?? "-"}</td>
                   <td className="mono">{o.pg_tid ?? "-"}</td>
+                  <td>
+                    {o.ship_recipient ? `${o.ship_recipient} · ${orderAddress(o)}` : "-"}
+                  </td>
                   <td>{formatDateTime(o.ordered_at)}</td>
                 </tr>
               ))}
               {items?.length === 0 && (
                 <tr>
-                  <td colSpan={6} className="muted">
+                  <td colSpan={7} className="muted">
                     주문 내역이 없습니다.
                   </td>
                 </tr>

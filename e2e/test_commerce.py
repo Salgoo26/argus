@@ -39,7 +39,18 @@ def test_payment_full_view_is_detected(officer):
     assert joined.status_code == 201, joined.text
     member_id = shop.get("/api/shop/me").json()["id"]
 
-    order = shop.post("/api/shop/orders", json={"product_id": 1, "card_company": "하늘카드"})
+    home = {
+        "label": "집",
+        "recipient": "가상구매자",
+        "phone": "010-0000-0003",
+        "zip_code": "90003",
+        "address": "가상시 가상구 가상로 3",
+    }
+    address_id = shop.post("/api/shop/me/addresses", json=home).json()["items"][0]["id"]
+    order = shop.post(
+        "/api/shop/orders",
+        json={"product_id": 1, "shipping_address_id": address_id, "card_company": "하늘카드"},
+    )
     assert order.status_code == 201 and order.json()["pg_tid"].startswith("MOCKPG-")
     saved = shop.request(
         "PUT",
