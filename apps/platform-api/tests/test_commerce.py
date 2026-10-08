@@ -9,6 +9,7 @@ from app.config import Settings
 from app.crypto import FieldCipher, refund_account_context
 from app.main import create_app
 from app.models import (
+    SHIP_COLUMNS,
     destruction_history,
     member,
     orders,
@@ -54,8 +55,20 @@ def _set_address(client):
     assert client.post("/shop/me/addresses", json=address).status_code == 201
 
 
+def _address_id(client) -> int:
+    """주문에 쓸 내 배송지 — 없으면 하나 등록 (7-4 ③ 주문은 배송지 필수)"""
+    items = client.get("/shop/me/addresses").json()["items"]
+    if not items:
+        _set_address(client)
+        items = client.get("/shop/me/addresses").json()["items"]
+    return items[0]["id"]
+
+
 def _buy(client, product_id: int = 1, card: str = "하늘카드"):
-    return client.post("/shop/orders", json={"product_id": product_id, "card_company": card})
+    body = {"product_id": product_id, "card_company": card}
+    if client.get("/shop/me").status_code == 200:
+        body["shipping_address_id"] = _address_id(client)
+    return client.post("/shop/orders", json=body)
 
 
 # ── 암호화 (§7②6호) ──────────────────────────────────────
@@ -101,6 +114,7 @@ def test_order_stores_pg_result_without_card_number(client, engine):
         # 화면이 금액·카드번호를 보내도 받지 않는다 — 금액은 상품 가격, 카드번호는 칸이 없음
         json={
             "product_id": 1,
+            "shipping_address_id": _address_id(client),
             "card_company": "하늘카드",
             "amount": 1,
             "card_number": "4111111111111111",
@@ -131,6 +145,7 @@ def test_order_stores_pg_result_without_card_number(client, engine):
 )
 def test_invalid_order_is_rejected(client, body):
     signup(client)
+    body = {**body, "shipping_address_id": _address_id(client)}
     assert client.post("/shop/orders", json=body).status_code == 400
 
 
@@ -267,7 +282,15 @@ def test_admin_commerce_routes_require_login(client):
 
 def test_withdraw_retains_order_records_and_destroys_the_rest(client, engine):
     signup(client)
-    _set_address(client)
+    _set_address(client)  # 주문에 쓴 배송지
+    office = {
+        "label": "회사",
+        "recipient": "구매자",
+        "phone": "010-0000-1234",
+        "zip_code": "90002",
+        "address": "서울특별시 가상구 회사로 2",
+    }
+    client.post("/shop/me/addresses", json=office)  # 주문에 안 쓴 배송지
     _buy(client)
     _register_account(client)
 
@@ -277,8 +300,11 @@ def test_withdraw_retains_order_records_and_destroys_the_rest(client, engine):
         assert conn.execute(select(func.count()).select_from(member)).scalar_one() == 0
         assert conn.execute(select(func.count()).select_from(refund_account)).scalar_one() == 0
         assert conn.execute(select(func.count()).select_from(shipping_address)).scalar_one() == 0
-        # 주문은 남지만 누구의 것인지 끊긴다 (FK ON DELETE SET NULL)
-        assert conn.execute(select(orders.c.member_id)).scalar_one() is None
+        # 주문은 남지만 누구의 것인지 끊기고(FK ON DELETE SET NULL), 배송 정보는 분리보관으로 옮겨
+        # 운영 테이블에서 지워진다 (db-schema 4-1)
+        order = conn.execute(select(orders)).mappings().one()
+        assert order["member_id"] is None
+        assert all(order[c] is None for c in SHIP_COLUMNS)
         retained = conn.execute(select(retained_member_record)).mappings().one()
         destroyed = conn.execute(select(destruction_history)).mappings().one()
 
@@ -293,8 +319,16 @@ def test_withdraw_retains_order_records_and_destroys_the_rest(client, engine):
         "email": "buyer@example.com",
         "phone": "010-0000-1234",
     }
-    # 보존 목적에 필요 없는 것은 담지 않는다
-    assert "가상로" not in str(data) and DIGITS not in str(data) and "argon2" not in str(data)
+    # 재화 공급 기록 — 그 주문의 배송 정보 스냅샷은 담는다
+    assert data["orders"][0]["shipping"] == {
+        "recipient": "구매자",
+        "phone": "010-0000-1234",
+        "zip_code": "90001",
+        "address": "서울특별시 가상구 가상로 1",
+        "address_detail": None,
+    }
+    # 보존 목적에 필요 없는 것은 담지 않는다 — 배송지 목록(주문에 안 쓴 회사 주소)·계좌·비밀번호
+    assert "회사로" not in str(data) and DIGITS not in str(data) and "argon2" not in str(data)
     assert destroyed["target_type"] == "MEMBER" and destroyed["deleted_count"] == 1
     assert "buyer@example.com" not in str(dict(destroyed))
 

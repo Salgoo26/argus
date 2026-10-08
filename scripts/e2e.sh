@@ -46,4 +46,12 @@ dc up -d --build
 
 echo "── 2/2 시나리오 실행 ──"
 dc --profile e2e run --rm --build e2e
+
+# 카드번호가 서버 로그에 남지 않았는지 (기능 레이어 7-4 ③) — e2e/test_checkout.py가 일부러 실어 보낸
+# 가상 카드번호를 모든 컨테이너 로그에서 찾는다. 값은 e2e/test_checkout.py의 CARD와 같다
+echo "── 서버 로그 카드번호 검사 ──"
+if dc logs --no-color 2>&1 | grep -E -q '1234567890123452|1234-5678-9012-3452'; then
+  echo "실패: 컨테이너 로그에 가상 카드번호가 남았습니다" >&2
+  exit 1
+fi
 echo "E2E 통과"

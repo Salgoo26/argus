@@ -110,6 +110,21 @@ orders = Table(
     Column("amount", Integer, nullable=False),
     Column("status", String(16), nullable=False),
     Column("ordered_at", DateTime(timezone=True), nullable=False),
+    # 배송 정보 스냅샷 — 주문 시점 배송지를 복사 (0008)
+    Column("ship_recipient", String(50)),
+    Column("ship_phone", String(20)),
+    Column("ship_zip_code", String(5)),
+    Column("ship_address", String(255)),
+    Column("ship_address_detail", String(100)),
+)
+
+# 주문의 배송 정보 스냅샷 컬럼 (탈퇴 시 분리보관으로 옮기고 비운다)
+SHIP_COLUMNS = (
+    "ship_recipient",
+    "ship_phone",
+    "ship_zip_code",
+    "ship_address",
+    "ship_address_detail",
 )
 
 payment = Table(

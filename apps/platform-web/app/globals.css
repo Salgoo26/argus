@@ -537,6 +537,16 @@ textarea {
   color: #374151;
 }
 
+/* "가상 결제 — 실제 카드번호 입력 금지" — 결제창에서 가장 먼저 눈에 띄게 */
+.pg-warning {
+  padding: 8px 12px;
+  border-radius: var(--radius);
+  background: var(--warn-soft);
+  color: #7a4d00;
+  font-weight: 700;
+  text-align: center;
+}
+
 .mono {
   font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
   font-size: 12px;

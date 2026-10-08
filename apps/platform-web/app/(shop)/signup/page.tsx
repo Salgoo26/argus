@@ -4,7 +4,13 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { type FormEvent, useEffect, useState } from "react";
 
-import { api, type ConsentItem, customerErrorMessage, passwordProblem } from "@/lib/api";
+import {
+  api,
+  type ConsentItem,
+  customerErrorMessage,
+  passwordProblem,
+  safeShopPath,
+} from "@/lib/api";
 
 // 회원가입 — 필수·선택 동의를 따로 받는다 (PIPA §22①·⑤). "전체 동의" 버튼은 두지 않는다:
 // 선택 항목까지 한 번에 체크하게 유도하지 않기 위함 (명확한 의사 표시)
@@ -45,7 +51,9 @@ export default function SignupPage() {
           consents: Object.fromEntries(items.map((item) => [item.code, !!agreed[item.code]])),
         }),
       });
-      router.replace("/mypage");
+      // 주문하다 가입하러 왔으면 그 상품으로 (7-4 ③), 아니면 마이페이지
+      const next = new URLSearchParams(window.location.search).get("next");
+      router.replace(next ? safeShopPath(next) : "/mypage");
     } catch (e) {
       setError(customerErrorMessage(e));
     } finally {
