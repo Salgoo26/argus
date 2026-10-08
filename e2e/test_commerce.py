@@ -28,7 +28,13 @@ def test_payment_full_view_is_detected(officer):
     consents = {"TOS": True, "PRIVACY_REQUIRED": True, "AGE_OVER_14": True}
     joined = shop.post(
         "/api/shop/auth/signup",
-        json={"email": email, "password": PASSWORD, "name": "가상구매자", "consents": consents},
+        json={
+            "email": email,
+            "password": PASSWORD,
+            "name": "가상구매자",
+            "phone": "010-0000-0003",  # 가상
+            "consents": consents,
+        },
     )
     assert joined.status_code == 201, joined.text
     member_id = shop.get("/api/shop/me").json()["id"]

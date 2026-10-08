@@ -20,7 +20,13 @@ def test_inquiry_ticket_reaches_argus(officer):
     assert (
         shop.post(
             "/api/shop/auth/signup",
-            json={"email": email, "password": PASSWORD, "name": "가상문의자", "consents": consents},
+            json={
+                "email": email,
+                "password": PASSWORD,
+                "name": "가상문의자",
+                "phone": "010-0000-0002",  # 가상
+                "consents": consents,
+            },
         ).status_code
         == 201
     )

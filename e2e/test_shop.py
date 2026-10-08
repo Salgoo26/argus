@@ -19,21 +19,31 @@ def test_customer_signup_mypage_withdraw():
     items = shop.get("/api/shop/consent-items").json()
     assert {i["code"] for i in items} >= set(REQUIRED) | {"MARKETING"}
 
+    profile = {"email": email, "password": PASSWORD, "name": "가상고객", "phone": "01000000001"}
+
     # 필수 동의가 빠지면 가입 불가
-    refused = shop.post(
-        "/api/shop/auth/signup",
-        json={"email": email, "password": PASSWORD, "name": "가상고객", "consents": {}},
-    )
+    refused = shop.post("/api/shop/auth/signup", json={**profile, "consents": {}})
+    assert refused.status_code == 400
+    # 휴대폰은 가입 필수 (2026-10-07 플랫폼 보강)
+    no_phone = {k: v for k, v in profile.items() if k != "phone"}
+    refused = shop.post("/api/shop/auth/signup", json={**no_phone, "consents": REQUIRED})
     assert refused.status_code == 400
 
-    joined = shop.post(
-        "/api/shop/auth/signup",
-        json={"email": email, "password": PASSWORD, "name": "가상고객", "consents": REQUIRED},
-    )
+    joined = shop.post("/api/shop/auth/signup", json={**profile, "consents": REQUIRED})
     assert joined.status_code == 201, joined.text
 
     me = shop.get("/api/shop/me").json()
     assert {c["code"]: c["agreed"] for c in me["consents"]}["MARKETING"] is False
+    assert me["phone"] == "010-0000-0001"  # 하이픈 형식으로 저장
+
+    # 정정: 이름·휴대폰은 바뀌고, 이메일(로그인 아이디)은 보내도 바뀌지 않는다
+    edited = shop.request(
+        "PATCH",
+        "/api/shop/me",
+        json={"name": "가상고객2", "phone": "010-0000-0009", "email": "other@example.com"},
+    )
+    assert edited.status_code == 200
+    assert (edited.json()["name"], edited.json()["email"]) == ("가상고객2", email)
 
     # 고객 세션 토큰으로는 관리자 API가 열리지 않는다 (토큰 용도 분리)
     admin_try = Browser(PLATFORM_URL, "platform_session")

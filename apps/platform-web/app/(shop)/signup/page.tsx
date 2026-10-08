@@ -41,6 +41,7 @@ export default function SignupPage() {
           email: form.get("email"),
           password,
           name: form.get("name"),
+          phone: form.get("phone"),
           consents: Object.fromEntries(items.map((item) => [item.code, !!agreed[item.code]])),
         }),
       });
@@ -57,8 +58,8 @@ export default function SignupPage() {
       <div className="card">
         <h1 className="page-title">회원가입</h1>
         <p className="page-subtitle">
-          가입에 꼭 필요한 정보(이메일·비밀번호·이름)만 받습니다. 연락처·주소는 필요할 때
-          마이페이지에서 입력합니다.
+          가입에 꼭 필요한 정보(이메일·비밀번호·이름·휴대전화번호)만 받습니다. 생년월일·성별은 받지
+          않습니다.
         </p>
         {error && <div className="alert-error">{error}</div>}
         <form className="stack" onSubmit={onSubmit}>
@@ -99,6 +100,19 @@ export default function SignupPage() {
           <div className="field">
             <label htmlFor="name">이름</label>
             <input id="name" name="name" autoComplete="name" required maxLength={50} />
+          </div>
+          <div className="field">
+            <label htmlFor="phone">휴대전화번호</label>
+            <input
+              id="phone"
+              name="phone"
+              type="tel"
+              autoComplete="tel"
+              placeholder="010-0000-0000"
+              required
+              maxLength={20}
+            />
+            <span className="hint">주문·배송 연락에 씁니다</span>
           </div>
 
           <fieldset className="consents">

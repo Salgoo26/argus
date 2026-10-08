@@ -20,8 +20,10 @@ router = APIRouter(prefix="/shop/me")
 
 
 class ProfileUpdate(BaseModel):
+    """정정할 수 있는 칸만 — 이메일은 로그인 아이디라 칸 자체가 없다 (보내도 버려진다)"""
+
     name: Name
-    phone: Phone = None
+    phone: Phone
     address: Address = None
 
 
