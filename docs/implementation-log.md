@@ -29,6 +29,36 @@
 
 ---
 
+## 2026-10-10 (7) — v0.1 보강 2차 PR 7: 접속지(IP)·특정 정보주체 기반 탐지 (설계 K)
+
+**한 일**
+- **K-1 룰 조건**: 필드 `client_ip`(연산자 `in_cidr`·`not_in_cidr`, CIDR 목록 1~50개), 집계 `DISTINCT_IP`(고유 접속지 수)·`MAX_SUBJECT_REPEAT`(윈도우 안 한 회원이 든 기록 수의 최댓값 — 회원번호가 있는 기록만). 반복 처리 탐지건의 탐지 이력에 "최다 처리 member_10*** N회"(마스킹 식별값만). 순찰이 `client_ip`를 읽도록 컬럼 추가
+- 룰 빌더: 접속지 조건(대역 밖/안 + 한 줄에 하나 입력칸), 집계 선택지 2개, 탐지건 상세 집계값 단위(곳·회)
+- **화면·서버 목록 일치 테스트** 신설 — `argus-web/lib/rules.ts`의 FIELDS·MEASURE_LABELS를 서버 FIELDS·MEASURES와 비교(레포 전체가 있는 CI에서 실행, argus-api 컨테이너만 있으면 건너뜀 — 로컬은 `-v .../argus-web/lib:/argus-web/lib:ro`로 확인)
+- **K-2 기본 룰**(0019): 허용 범위 밖 접속지(전체·상·사설망 3대역+루프백 밖), 짧은 시간 여러 접속지(전체·중·1시간 3곳), 특정 회원 반복 처리(화면 경유·중·하루 20회). 룰 변경 이력 CREATE(시스템)
+- 테스트: argus `test_ip_subject_rules.py` 29개 — CIDR 검증·판정(IPv6 포함), 새 집계 2종·동률 처리, `test_rule_builder_offers_the_same_fields_and_measures`, 시드, 순찰 3종(`test_access_from_outside_the_allowed_range` — 화면 경유·DB 직접 각각, `test_many_addresses_within_an_hour`, **`test_same_member_processed_repeatedly`**(미특정 기록 제외, 이력에 원본 회원번호 없음)), 룰 빌더 API 저장 / `test_migrations`·`test_rules_api` 시드 목록 갱신 / E2E `test_ip_and_subject_rules_are_seeded`
+- 결과: argus-api 531 passed, argus-web lint·typecheck
+
+**결정사항**
+- 집계 룰은 조건식을 비울 수 없어 "짧은 시간 여러 접속지"는 **모든 수행업무**(로그인 포함 7개), "특정 회원 반복 처리"는 **개인정보 데이터 4종**으로 대상을 적었다
+- `MAX_SUBJECT_REPEAT`는 기록 하나에 같은 회원이 여러 번 있어도 1회로 센다(기록 단위 처리 횟수)
+- 최다 처리 회원 표시는 탐지 이력 문장에(마스킹) — 탐지건 요약(log_summary)은 순찰마다 다시 계산돼 덮이므로
+- CIDR은 호스트 비트가 있어도 받는다(`10.0.0.1/8` = `10.0.0.0/8`) — 담당자가 적은 대역 그대로의 뜻
+- 허용 범위 밖 룰은 자동 소명 요청 켜짐(기본값) — 취급자가 어디서 접속했는지 소명
+
+**설계 변경**
+- 무엇을: 설계 K. 화면·서버 목록 일치 테스트는 기존에 없어 새로 만들었다
+- 영향 문서: db-schema 3-6(필드 `client_ip`·연산자, 집계 `DISTINCT_IP`·`MAX_SUBJECT_REPEAT`)·시드 룰 표, policy 1-3(기본 룰 3개, 로컬 주의 — 신뢰 프록시 없으면 화면 경유 접속지가 컨테이너 주소), requirements LOG-03
+
+**미결·이슈**
+- 로컬 구성에서는 화면 경유 기록의 접속지가 화면 서버 컨테이너 주소(사설망)라 "허용 범위 밖" 룰이 걸리지 않는다 — 시연은 DB 직접 접근이나 접속지를 정한 기록으로(설계 그대로)
+- 1,000명에서 잘린 기록이 있으면 `MAX_SUBJECT_REPEAT`도 하한값
+
+**다음 할 일**
+- PR 8(L-1~L-3 플랫폼 역할별 접근 범위·계정 관리·권한 이력)
+
+---
+
 ## 2026-10-10 (6) — v0.1 보강 2차 PR 6: 소명 단위 보완 (설계 J)
 
 **한 일**
