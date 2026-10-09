@@ -3,7 +3,8 @@
 - 연속 5회 실패 → status LOCKED, 성공하면 실패 횟수 0. 해제는 app.scripts.users unlock
 - 없는 ID·틀린 비밀번호는 같은 응답(401) + 더미 해시 검증으로 응답 시간도 같게 — 계정 열거 방지
 - 잠김·비활성(403)은 비밀번호가 맞았을 때만 알려준다
-- 자체 접속기록: 존재하는 계정의 시도만 LOGIN으로 기록(성공·실패), 없는 ID는 기록하지 않는다
+- 자체 접속기록: 존재하는 계정의 시도만 LOGIN으로 기록(성공·실패), 없는 ID는 기록하지 않는다.
+  로그인한 사용자의 로그아웃은 LOGOUT으로 기록 (v0.1 보강 A)
 """
 
 from typing import Annotated
@@ -13,7 +14,13 @@ from pydantic import BaseModel, Field
 from sqlalchemy import case, func, update
 
 from app.agent import access_log, access_log_exempt, record_actor
-from app.auth.deps import MAX_FAILED_LOGINS, CurrentUser, block_reason, user_query
+from app.auth.deps import (
+    MAX_FAILED_LOGINS,
+    CurrentUser,
+    OptionalUser,
+    block_reason,
+    user_query,
+)
 from app.auth.passwords import dummy_password_hash, verify_password
 from app.auth.tokens import clear_session_cookie, issue_token, set_session_cookie
 from app.config import Settings
@@ -97,8 +104,12 @@ def login(body: LoginRequest, request: Request, response: Response) -> dict:
 
 
 @router.post("/logout", status_code=204)
-@access_log_exempt("개인정보 처리 없음 — api-spec 수행업무 코드에 로그아웃 없음")
-def logout(request: Request, response: Response) -> None:
+@access_log(action="LOGOUT", data_category="NONE")
+def logout(request: Request, response: Response, _user: OptionalUser) -> None:
+    """로그아웃도 자체 접속기록 (v0.1 보강 A — 안내서 FAQ 147). 쿠키가 없거나 만료된 요청은
+    행위자가 없어 기록하지 않고, 응답은 똑같이 쿠키를 지운다."""
+    # 행위자를 확인하느라 재발급한 세션을 응답에 싣지 않는다 (main.py 쿠키 연장 미들웨어)
+    request.state.session_token = None
     clear_session_cookie(response, request.app.state.settings)
 
 

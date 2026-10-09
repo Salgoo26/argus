@@ -37,7 +37,17 @@ from app.models import detection_log, handler, source_system
 
 router = APIRouter(prefix="/api/access-logs")
 
-ACTIONS = ("LOGIN", "READ", "CREATE", "UPDATE", "DELETE", "DOWNLOAD", "EXPORT", "UNMASK")
+ACTIONS = (
+    "LOGIN",
+    "LOGOUT",
+    "READ",
+    "CREATE",
+    "UPDATE",
+    "DELETE",
+    "DOWNLOAD",
+    "EXPORT",
+    "UNMASK",
+)
 DEFAULT_DAYS = 7  # 기간을 비우면 오늘 포함 최근 7일
 MAX_DAYS = 366  # 한 번에 1년 — 접속기록 보관기간(policy 5-1)
 SUBJECT_PREVIEW = 5  # 한 기록에서 보여 주는 정보주체 수 — 나머지는 "외 N명" (최소 노출)

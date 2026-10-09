@@ -68,7 +68,7 @@ export const WEEKDAY_LABELS: Record<string, string> = {
   SAT: "토",
   SUN: "일",
 };
-export const RULE_ACTIONS = ["LOGIN", "READ", "CREATE", "UPDATE", "DELETE", "DOWNLOAD"];
+export const RULE_ACTIONS = ["LOGIN", "LOGOUT", "READ", "CREATE", "UPDATE", "DELETE", "DOWNLOAD"];
 export const RULE_CATEGORIES = ["MEMBER_BASIC", "PAYMENT", "ORDER", "INQUIRY"];
 
 // 조건 필드 — 서버 app/detection/rules.py의 FIELDS와 같은 목록

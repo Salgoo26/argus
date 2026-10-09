@@ -16,7 +16,7 @@ import {
 } from "@/lib/labels";
 
 const PAGE_SIZE = 50;
-const ACTIONS = ["LOGIN", "READ", "CREATE", "UPDATE", "DELETE", "DOWNLOAD", "EXPORT", "UNMASK"];
+const ACTIONS = ["LOGIN", "LOGOUT", "READ", "CREATE", "UPDATE", "DELETE", "DOWNLOAD", "EXPORT", "UNMASK"];
 const EMPTY: AccessLogSearch = { source: "PLATFORM", page: 1, size: PAGE_SIZE };
 
 // 검색 조건은 화면 상태에만 두고 URL(주소창·방문 기록)에 싣지 않는다 — 회원번호 검색어가 남지 않게.

@@ -66,3 +66,15 @@ def current_operator(request: Request) -> AuthenticatedOperator:
 
 
 CurrentOperator = Annotated[AuthenticatedOperator, Depends(current_operator)]
+
+
+def optional_operator(request: Request) -> AuthenticatedOperator | None:
+    """인증돼 있으면 그 취급자, 아니면 None — 비인증 요청도 받아야 하는 라우트(로그아웃)용.
+    인증된 경우에만 current_operator가 기록지에 식별자를 적으므로, 비인증 요청은 기록되지 않는다."""
+    try:
+        return current_operator(request)
+    except ApiError:
+        return None
+
+
+OptionalOperator = Annotated[AuthenticatedOperator | None, Depends(optional_operator)]
