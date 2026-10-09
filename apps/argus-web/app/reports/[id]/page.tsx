@@ -142,6 +142,12 @@ function Section({ path, section }: { path: AccessPath; section: ReportSection }
             {explanations.approved}건 / {explanations.rejected}건
           </dd>
         </div>
+        {explanations.overdue !== undefined && (
+          <div>
+            <dt>소명 기한 초과</dt>
+            <dd>{explanations.overdue}건</dd>
+          </div>
+        )}
       </dl>
       {detections.by_rule.length > 0 && (
         <p className="muted report-note">룰별: {detections.by_rule.map((r) => `${r.name} ${r.count}`).join(" · ")}</p>

@@ -95,6 +95,7 @@ export type CaseSummary = {
   last_occurred_at: string;
   detected_at: string;
   closed_at: string | null;
+  due_at: string | null; // 제출을 기다리는 건의 소명 기한 (v0.1 보강 F-3)
 };
 
 // 탐지건 검색 (v0.1 보강 C-1) — POST /api/detections/search 본문
@@ -133,6 +134,7 @@ export type Explanation = {
   requested_by: string | null; // null = 시스템 자동 요청
   requested_at: string;
   request_message: string | null;
+  due_at: string | null; // 소명 기한 (v0.1 보강 F-3)
   submitted_by: string | null;
   submitted_at: string | null;
   content: string | null;
@@ -274,7 +276,13 @@ export type ReportSection = {
     by_rule: { name: string; count: number }[];
     escalated: number;
   };
-  explanations: { requested: number; submitted: number; approved: number; rejected: number };
+  explanations: {
+    requested: number;
+    submitted: number;
+    approved: number;
+    rejected: number;
+    overdue?: number; // 기한 초과 (v0.1 보강 F-3) — 이전 보고서에는 없다
+  };
   cases: ReportCase[];
 };
 export type ReportSummary = {

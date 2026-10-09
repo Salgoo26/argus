@@ -8,7 +8,7 @@ from datetime import UTC, datetime, timedelta, timezone
 
 import pytest
 from fastapi.testclient import TestClient
-from sqlalchemy import insert, select, text
+from sqlalchemy import insert, select, text, update
 
 from app.auth.passwords import hash_password
 from app.ledger.append import append_access_logs
@@ -201,7 +201,13 @@ def test_report_has_a_section_per_path_with_masked_subjects(as_user, march, app_
         app["detections"]["by_status"] == {"ESCALATED": 1} and app["detections"]["escalated"] == 1
     )
     assert db["detections"]["by_rule"] == [{"name": "DB 직접 야간 접근", "count": 1}]
-    assert app["explanations"] == {"requested": 1, "submitted": 1, "approved": 0, "rejected": 1}
+    assert app["explanations"] == {
+        "requested": 1,
+        "submitted": 1,
+        "approved": 0,
+        "rejected": 1,
+        "overdue": 0,  # 기한 없는 옛 요청은 세지 않는다
+    }
 
     [case] = app["cases"]
     # 마스킹 값 앞 몇 개만 — 화면에서 "외 N명" (policy 6-1)
@@ -405,3 +411,26 @@ def test_unsubmitted_draft_attachments_are_not_counted(as_user, march, admin_eng
     [case] = summary["paths"]["APP"]["cases"]
     assert case["explanation"]["round"] == 2 and case["explanation"]["content"] is None
     assert case["explanation"]["attachment_count"] == 0
+
+
+def test_overdue_explanations_are_counted(as_user, march, admin_engine):
+    # v0.1 보강 F-3 — 기한 뒤 제출(1) + 기한이 지났는데 아직 미제출(1), 기한 안 제출(0)
+    with admin_engine.begin() as conn:
+        conn.execute(
+            update(explanation)
+            .where(explanation.c.detection_id == march)
+            .values(due_at=WHEN + timedelta(hours=12))  # 제출은 WHEN + 1일 → 늦음
+        )
+        for round_, due, submitted in ((2, WHEN, None), (3, WHEN + timedelta(days=9), WHEN)):
+            conn.execute(
+                insert(explanation).values(
+                    detection_id=march,
+                    round=round_,
+                    requested_by=_officer_id(conn),
+                    due_at=due,
+                    submitted_at=submitted,
+                    ticket_ids=[],
+                )
+            )
+    summary = as_user("officer").post(REPORTS, json=MARCH).json()["summary"]
+    assert summary["paths"]["APP"]["explanations"]["overdue"] == 2

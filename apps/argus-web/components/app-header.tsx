@@ -4,6 +4,7 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
 
+import { NotificationBell } from "@/components/notifications";
 import { ApiError, api, errorMessage, type Me } from "@/lib/api";
 
 const ROLE_LABELS = { OFFICER: "정보보호 담당자", HANDLER: "개인정보취급자" } as const;
@@ -81,6 +82,7 @@ export function AppHeader({ me }: { me: Me | null }) {
       )}
       {me && (
         <div className="header-user">
+          <NotificationBell />
           <span>
             {me.name ?? me.login_id} ({me.login_id}) · {ROLE_LABELS[me.role]}
           </span>

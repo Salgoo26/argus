@@ -50,6 +50,7 @@ from app.models import (
     explanation_attachment,
     handler,
 )
+from app.notifications.events import due_at, on_requested, on_submitted
 
 router = APIRouter(prefix="/api/detections")
 
@@ -128,11 +129,23 @@ def _case_summary(row) -> dict:
         "last_occurred_at": row["last_occurred_at"],
         "detected_at": row["detected_at"],
         "closed_at": row["closed_at"],
+        # 소명 기한 — 제출을 기다리는 건(REQUESTED)만. 넘겨도 상태는 그대로 (v0.1 보강 F-3)
+        "due_at": row["due_at"] if row["status"] == "REQUESTED" else None,
     }
 
 
+# 현재 차수 소명의 기한
+_current_due = select(explanation.c.due_at).where(
+    explanation.c.detection_id == detection.c.id, explanation.c.round == detection.c.round
+)
+
+
 def _case_query():
-    return select(detection, _actor_name.scalar_subquery().label("actor_name"))
+    return select(
+        detection,
+        _actor_name.scalar_subquery().label("actor_name"),
+        _current_due.scalar_subquery().label("due_at"),
+    )
 
 
 # ── 조회 ──────────────────────────────────────────────────
@@ -339,6 +352,7 @@ def _explanations(
             "requested_by": r["requested_by_login"],  # None = 시스템 자동 요청
             "requested_at": r["requested_at"],
             "request_message": r["request_message"],
+            "due_at": r["due_at"],  # 소명 기한 (v0.1 보강 F-3)
             "submitted_by": r["submitted_by_login"],
             "submitted_at": r["submitted_at"],
             "content": r["content"],
@@ -421,7 +435,12 @@ def _transition(
         # 행을 잠그고 확인 — 탐지 배치가 같은 건에 기록을 보태는 순간과 겹치지 않게
         row = (
             conn.execute(
-                _visible(select(detection.c.id, detection.c.status, detection.c.round), user)
+                _visible(
+                    select(
+                        detection.c.id, detection.c.status, detection.c.round, detection.c.severity
+                    ),
+                    user,
+                )
                 .where(detection.c.id == detection_id)
                 .with_for_update()
             )
@@ -456,6 +475,17 @@ def _transition(
                 comment=text,
             )
         )
+        # 화면 알림 (v0.1 보강 F-1) — 상태 변경과 같은 트랜잭션
+        if action == "request":
+            on_requested(conn, detection_id, row["severity"], new_round)
+        elif action == "submit":
+            requested_by = conn.execute(
+                select(explanation.c.requested_by).where(
+                    explanation.c.detection_id == detection_id,
+                    explanation.c.round == row["round"],
+                )
+            ).scalar_one_or_none()
+            on_submitted(conn, detection_id, row["severity"], row["round"], requested_by)
     return {"id": detection_id, "status": transition.to_status, "round": new_round}
 
 
@@ -471,6 +501,7 @@ def _record_explanation(
                 round=new_round,
                 requested_by=user.id,
                 request_message=text,
+                due_at=due_at(conn),  # 소명 기한 — 재요청은 다시 기본 7일 (F-3)
             )
         )
     elif action == "submit":

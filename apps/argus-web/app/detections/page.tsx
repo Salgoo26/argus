@@ -4,6 +4,7 @@ import { useRouter } from "next/navigation";
 import { type FormEvent, useEffect, useMemo, useState } from "react";
 
 import { AppHeader, useMe } from "@/components/app-header";
+import { DueLabel } from "@/components/due-label";
 import { api, type CaseSearch, type CaseSummary, type Status } from "@/lib/api";
 import {
   PATH_LABELS,
@@ -201,6 +202,7 @@ export default function DetectionsPage() {
                   <th>상태</th>
                   <th className="num">차수</th>
                   <th>탐지 시각</th>
+                  <th>소명 기한</th>
                 </tr>
               </thead>
               <tbody>
@@ -227,11 +229,12 @@ export default function DetectionsPage() {
                     </td>
                     <td className="num">{c.round}</td>
                     <td>{formatDateTime(c.detected_at)}</td>
+                    <td>{c.due_at ? <DueLabel due={c.due_at} /> : "-"}</td>
                   </tr>
                 ))}
                 {data && data.items.length === 0 && (
                   <tr>
-                    <td colSpan={11} className="muted" style={{ textAlign: "center", padding: 24 }}>
+                    <td colSpan={12} className="muted" style={{ textAlign: "center", padding: 24 }}>
                       해당하는 탐지건이 없습니다.
                     </td>
                   </tr>

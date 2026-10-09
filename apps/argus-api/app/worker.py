@@ -2,7 +2,7 @@
 
 argus-api와 같은 이미지·같은 앱 계정(argus_app)으로, 실행 명령만 다르다 (architecture 2절).
 setting.detection_interval_min(기본 5분)마다 탐지 배치를 돌린다 — 주기는 매번 DB에서 다시 읽어
-재시작 없이 설정 변경이 반영된다.
+재시작 없이 설정 변경이 반영된다. 순찰마다 소명 기한 임박·초과 알림도 판정한다(v0.1 보강 F-3).
 
 --once: 기다리지 않고 한 번만 순찰하고 끝낸다 (시연·E2E 테스트용). 실패하면 종료 코드 1.
 
@@ -22,6 +22,7 @@ from sqlalchemy import Engine, create_engine, select
 from app.config import Settings
 from app.detection.batch import MAX_LOGS, run_batch
 from app.models import setting
+from app.notifications.events import check_due
 
 logger = logging.getLogger("worker")
 
@@ -39,6 +40,16 @@ def interval_minutes(engine: Engine) -> int:
     return DEFAULT_INTERVAL_MIN
 
 
+def _check_due(engine: Engine) -> None:
+    """소명 기한 임박·초과 알림 (v0.1 보강 F-3) — 실패해도 탐지 순찰은 계속한다"""
+    try:
+        created = check_due(engine)
+        if created:
+            logger.info("due notifications created: %d", created)
+    except Exception:
+        logger.exception("due check failed")
+
+
 def main(argv: list[str]) -> int:
     parser = argparse.ArgumentParser(prog="python -m app.worker")
     parser.add_argument("--once", action="store_true", help="순찰을 한 번만 실행하고 종료")
@@ -49,6 +60,7 @@ def main(argv: list[str]) -> int:
 
     if args.once:
         result = run_batch(engine)
+        _check_due(engine)
         engine.dispose()
         if result is None:
             print("skipped: another detection batch is running", file=sys.stderr)
@@ -67,6 +79,7 @@ def main(argv: list[str]) -> int:
     while not stop.is_set():
         try:
             result = run_batch(engine)
+            _check_due(engine)
             # 한 번에 처리할 수 있는 만큼 꽉 채웠으면 밀려 있다는 뜻 — 쉬지 않고 다음 순찰
             backlog = result is not None and result.processed == MAX_LOGS
             wait_sec = 0 if backlog else interval_minutes(engine) * 60
