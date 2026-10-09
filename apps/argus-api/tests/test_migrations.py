@@ -25,6 +25,11 @@ SKELETON_TABLES = {
     "notification",  # v0.1 보강 F (0015)
     "push_subscription",  # v0.1 보강 F-4 (0016)
     "argus_user_history",  # v0.1 보강 L-4 (0020)
+    # v0.1 보강 N (0021) — 보호 대상 등록부·이력, DB 구조 목록·수신 기록
+    "protected_column",
+    "protected_column_history",
+    "db_schema_column",
+    "db_schema_receipt",
 }
 
 

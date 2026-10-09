@@ -18,6 +18,8 @@ from psycopg.conninfo import make_conninfo
 from app.auth import fetch_operator_status
 from app.catalog import Catalog
 from app.config import Settings
+from app.registry import Registry
+from app.registry_sync import RegistrySync, read_schema, run_registry_sync
 from app.sender import BATCH_SIZE, POLL_INTERVAL_SEC, Sender
 from app.server import Gateway, UpstreamConfig
 from app.store import Store
@@ -52,6 +54,9 @@ async def serve(settings: Settings, stop: threading.Event) -> None:
     else:
         cert, key = ensure_self_signed(settings.data_dir / "tls")
 
+    # 마지막으로 받은 등록부 — 없으면 고정 표(builtin)로 시작한다
+    registry = Registry(settings.data_dir / "registry.json")
+
     password = settings.upstream_password.get_secret_value()
     conninfo = make_conninfo(
         host=settings.upstream_host,
@@ -74,12 +79,19 @@ async def serve(settings: Settings, stop: threading.Event) -> None:
         ),
         operator_lookup=lambda login_id: fetch_operator_status(conninfo, login_id),
         catalog=Catalog(conninfo),
+        registry=registry,
     )
 
     sender_thread = threading.Thread(
         target=run_sender, args=(Sender(store, base_url, secret), stop), name="sender"
     )
     sender_thread.start()
+    # 보호 대상 등록부 받기·DB 구조 목록 보내기 (v0.1 보강 N-2·N-3)
+    sync = RegistrySync(registry, base_url, secret, lambda: read_schema(conninfo))
+    registry_thread = threading.Thread(
+        target=run_registry_sync, args=(sync, stop), name="registry", daemon=True
+    )
+    registry_thread.start()
     server = await asyncio.start_server(gateway.handle, settings.listen_host, settings.listen_port)
     logger.info(
         "listening on %s:%d, sending to %s", settings.listen_host, settings.listen_port, base_url

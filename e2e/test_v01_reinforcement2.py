@@ -5,9 +5,11 @@
 - K: 접속지·특정 회원 기반 기본 룰
 - L: 플랫폼 역할별 접근 범위, 계정 부여(임시 비밀번호·변경 강제)·권한 이력
 - L-4: Argus 계정 관리(담당자 전용)·계정 이력
+- N: 보호 대상 등록부 — 게이트웨이의 DB 구조 목록 수신, 원장의 등록부 버전
 """
 
 import os
+import re
 from datetime import datetime, timedelta, timezone
 
 import psycopg
@@ -143,3 +145,30 @@ def test_argus_account_management_is_officer_only_and_recorded(officer, handler_
     handler = argus_login("ops_park", handler_password("ops_park"))
     assert handler.get("/api/users").status_code == 403
     handler.close()
+
+
+def test_gateway_sends_db_structure_and_records_registry_version(officer):
+    # N — 게이트웨이가 플랫폼 DB 구조(이름·자료형만)를 보내고, 등록부 버전을 원장에 남긴다
+    browser = argus_login(*officer)
+
+    def received():
+        data = browser.get("/api/protection").json()
+        return data if data["summary"]["last_schema_at"] else None
+
+    data = wait_until("게이트웨이의 DB 구조 목록 수신", received)
+    tables = {t["table_name"]: t for t in data["tables"]}
+    assert tables["member"]["data_category"] == "MEMBER_BASIC"  # 초기 등록(고정 표 이관)
+    # 고정 표에 없던 직원 계정 테이블은 미분류로 드러난다 — 담당자가 분류할 대상
+    assert {c["status"] for c in tables["operator"]["columns"]} == {"UNCLASSIFIED"}
+    assert data["summary"]["unclassified"] > 0
+    assert "@" not in str(data)  # 구조 목록에 데이터 값(이메일 등)이 없다
+    browser.close()
+
+    versions = _ledger(
+        "SELECT DISTINCT a.context ->> 'registry_version' FROM access_log a"
+        " WHERE a.access_path = 'DB' AND a.context ? 'sql_normalized'"
+        " AND a.context ? 'registry_version'",
+        (),
+    )
+    # 게이트웨이를 거친 문장마다 판정에 쓴 등록부 버전 (기준선 시드 기록은 버전 없음)
+    assert versions and all(re.fullmatch(r"builtin|r\d+", v) for (v,) in versions)

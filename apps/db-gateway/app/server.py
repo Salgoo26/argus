@@ -32,6 +32,7 @@ from app import protocol as pg
 from app import upstream
 from app.auth import OperatorStatus, TokenCheck, check_token
 from app.catalog import Catalog
+from app.registry import Registry
 from app.session import Session
 from app.store import Store
 
@@ -86,8 +87,10 @@ class Gateway:
         operator_lookup: OperatorLookup,
         catalog: Catalog,
         clock: Callable[[], datetime] = lambda: datetime.now(UTC),
+        registry: Registry | None = None,
     ) -> None:
         self.store = store
+        self.registry = registry or Registry()  # 보호 대상 판정 표 (v0.1 보강 N-3)
         self.ssl_context = ssl_context
         self.token_key = token_key
         self.upstream = upstream_config
@@ -251,6 +254,7 @@ class Gateway:
             token_id=check.token_id,
             db_user=self.upstream.user,
             clock=self.clock,
+            registry=self.registry,
         )
         tasks = {
             asyncio.create_task(_client_to_db(session, reader, conn.writer, writer)),

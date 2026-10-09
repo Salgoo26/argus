@@ -31,7 +31,9 @@ SELECT c.relname, a.attnum, a.attname
 """
 
 
-# 회원을 가리키는 열 (v0.1 보강 G-1) — 이 열의 결과 값만 회원번호로 읽는다. 플랫폼 스키마가 바뀌면
+# 회원을 가리키는 열 (v0.1 보강 G-1) — 이 열의 결과 값만 회원번호로 읽는다. v0.1 보강 N부터는
+# Argus 등록부의 회원 식별 열을 쓰고, 이 목록은 등록부를 받지 못했을 때의 기본값이다.
+# 플랫폼 스키마가 바뀌면
 # 여기와 tests/test_table_category.py를 함께 고친다. 없는 테이블은 조용히 빠진다(축약 스키마)
 MEMBER_COLUMNS = (
     ("member", "id"),
@@ -86,10 +88,15 @@ class Catalog:
             self._functions = (time.monotonic(), names)
         return names
 
-    async def member_columns(self) -> frozenset[tuple[int, int]]:
+    async def member_columns(
+        self, names: tuple[tuple[str, str], ...] = MEMBER_COLUMNS
+    ) -> frozenset[tuple[int, int]]:
         """회원을 가리키는 열의 (테이블 OID, 열 번호) — 사용자 행위가 아닌 게이트웨이 자체 조회라
-        기록하지 않는다. 연결(Session)이 시작 후 처음 결과를 볼 때 한 번 받아 그 연결 동안 쓴다"""
-        tables, columns = zip(*MEMBER_COLUMNS, strict=True)
+        기록하지 않는다. 연결(Session)이 시작 후 처음 결과를 볼 때 한 번 받아 그 연결 동안 쓴다.
+        names: 보호 대상 등록부의 회원 식별 열(v0.1 보강 N-3) — 기본은 고정 표"""
+        if not names:
+            return frozenset()
+        tables, columns = zip(*names, strict=True)
         rows = await self._query(_MEMBER_COLUMNS_SQL, (list(tables), list(columns)))
         return frozenset((int(oid), int(attnum)) for oid, attnum in rows)
 
