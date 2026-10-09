@@ -30,7 +30,6 @@ export default function MyOrdersPage() {
   return (
     <>
       <h1 className="page-title">주문 내역</h1>
-      <p className="page-subtitle">결제는 가상 PG(데모페이)로 흉내만 냈습니다.</p>
       {error && <div className="alert-error">{error}</div>}
       <section className="card">
         <div className="table-wrap">

@@ -36,10 +36,7 @@ export default function LoginPage() {
           <span className="brand-mark" />
           Argus
         </div>
-        <p className="page-subtitle">
-          개인정보 접속기록 점검 — 정보보호 담당자·개인정보취급자 전용. 이 화면의 로그인·조회도 접속기록으로
-          남습니다.
-        </p>
+        <p className="page-subtitle">접속 및 개인정보 처리 내역은 기록됩니다.</p>
         {error && <div className="alert-error">{error}</div>}
         <form onSubmit={onSubmit}>
           <div className="field">

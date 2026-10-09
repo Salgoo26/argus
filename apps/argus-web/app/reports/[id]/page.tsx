@@ -298,8 +298,7 @@ export default function ReportPage() {
               </div>
             </dl>
             <p className="muted report-note">
-              근거: 개인정보의 안전성 확보조치 기준 §8②(접속기록 월 1회 이상 점검)·§8③(위·변조 방지). 정보주체
-              식별값은 마스킹 표시이며(원본 회원번호 미포함), 수치는 보고서를 만든 시점의 기록입니다.
+              정보주체는 마스킹 표시이며, 수치는 보고서를 만든 시점 기준입니다.
             </p>
 
             <section className="card">

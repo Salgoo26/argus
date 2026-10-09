@@ -106,7 +106,8 @@ def test_bulk_download_creates_detected_case(app_engine):
     assert linked_logs(app_engine, case["id"]) == [log_id]
     # 탐지 당시 룰 사본 — 룰이 바뀌어도 판단 근거가 남는다
     snapshot = case["rule_snapshot"]
-    assert snapshot["name"] == "대량 다운로드" and snapshot["version"] == 1
+    # 시드 v1 → 설명 문구 정리(0022) v2
+    assert snapshot["name"] == "대량 다운로드" and snapshot["version"] == 2
     assert snapshot["condition"]["all"][1] == {"field": "subject_count", "op": "gte", "value": 50}
 
     with app_engine.connect() as conn:

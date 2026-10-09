@@ -171,18 +171,13 @@ function PgWindow({
   }
 
   return (
-    <div className="card pg-window" role="dialog" aria-label="가상 PG 결제창">
-      <div className="pg-head">데모페이 · 가상 PG 결제창</div>
+    <div className="card pg-window" role="dialog" aria-label="결제창">
+      <div className="pg-head">데모페이 결제</div>
       <div className="pg-warning" role="alert">
         가상 결제 — 실제 카드번호 입력 금지
       </div>
-      <p className="hint">
-        실제 서비스라면 이 창은 PG사 화면이며 카드번호는 PG사만 받습니다. 이 데모의 카드번호·유효기간
-        입력칸은 흉내일 뿐이라 검사하지 않고, 쇼핑몰 서버로 보내지도 않습니다. 쇼핑몰은 승인
-        결과(카드사·거래번호·금액)만 받습니다.
-      </p>
       <div className="field">
-        <label htmlFor="pg_card">카드사 (가상)</label>
+        <label htmlFor="pg_card">카드사</label>
         <select id="pg_card" value={card} onChange={(e) => setCard(e.target.value)}>
           {cards.map((c) => (
             <option key={c}>{c}</option>
@@ -195,7 +190,6 @@ function PgWindow({
           id="pg_number"
           inputMode="numeric"
           autoComplete="off"
-          placeholder="가상 번호 (검사하지 않음)"
           value={number}
           onChange={(e) => setNumber(e.target.value)}
           maxLength={19}

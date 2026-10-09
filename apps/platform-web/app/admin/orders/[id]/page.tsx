@@ -58,7 +58,6 @@ export default function AdminOrderDetailPage() {
       <AppHeader me={me} />
       <main className="container">
         <h1 className="page-title">주문 상세 {order && <span className="muted">#{order.id}</span>}</h1>
-        <p className="page-subtitle">이 화면의 조회는 접속기록으로 남아 정보보호 담당자가 점검합니다.</p>
         {error && <div className="alert-error">{error}</div>}
 
         {order && (
@@ -105,11 +104,10 @@ export default function AdminOrderDetailPage() {
                     : "탈퇴 회원의 주문 — 배송 정보는 법정 보존 기록으로 분리보관되었습니다."}
                 </p>
               )}
-              <p className="hint">주문할 때 고객이 고른 배송지를 복사해 둔 값입니다.</p>
             </section>
 
             <section className="card">
-              <h2 className="card-title">결제 (가상 PG 승인 결과)</h2>
+              <h2 className="card-title">결제</h2>
               <dl className="kv">
                 <dt>카드사</dt>
                 <dd>{order.card_company ?? "-"}</dd>
@@ -118,7 +116,6 @@ export default function AdminOrderDetailPage() {
                 <dt>승인 일시</dt>
                 <dd>{order.approved_at ? formatDateTime(order.approved_at) : "-"}</dd>
               </dl>
-              <p className="hint">카드번호는 PG사만 처리하며 쇼핑몰은 받지도 저장하지도 않습니다.</p>
             </section>
           </>
         )}

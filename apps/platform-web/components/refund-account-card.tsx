@@ -75,7 +75,7 @@ export function RefundAccountCard() {
       {editing && data && (
         <form className="toolbar" onSubmit={save}>
           <div className="field">
-            <label htmlFor="bank_name">은행 (가상)</label>
+            <label htmlFor="bank_name">은행</label>
             <select id="bank_name" name="bank_name" defaultValue={account?.bank_name}>
               {data.banks.map((b) => (
                 <option key={b}>{b}</option>
@@ -105,10 +105,6 @@ export function RefundAccountCard() {
           </button>
         </form>
       )}
-      <p className="hint">
-        환불할 때만 씁니다. 계좌번호는 암호화해 저장하고 화면에는 끝 4자리만 표시합니다. 가상 계좌번호만
-        입력하세요.
-      </p>
     </section>
   );
 }

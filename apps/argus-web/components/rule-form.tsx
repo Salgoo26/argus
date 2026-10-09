@@ -442,9 +442,6 @@ export function RuleForm({
         탐지 즉시 해당 취급자에게 소명을 자동 요청
       </label>
 
-      <p className="muted" style={{ fontSize: 12 }}>
-        저장한 룰은 다음 탐지 순찰부터 적용되며, 이미 지나간 기록을 다시 판정하지 않습니다.
-      </p>
       <button className="btn btn-primary" type="submit" disabled={pending}>
         {submitLabel}
       </button>

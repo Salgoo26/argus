@@ -69,11 +69,6 @@ export default function RulesPage() {
             </Link>
           )}
         </div>
-        <p className="page-subtitle">
-          탐지 배치가 접속기록을 판정하는 기준입니다. 고친 룰은 다음 순찰부터 적용되고, 모든 변경은
-          이력으로 남습니다. 룰은 지우지 않고 꺼서 관리합니다.
-        </p>
-
         {me && !isOfficer && <div className="alert-error">정보보호 담당자 전용 화면입니다.</div>}
         {error && <div className="alert-error">{error}</div>}
 
@@ -82,7 +77,7 @@ export default function RulesPage() {
             <form className="toolbar" onSubmit={onSearch} onReset={() => setFilters({})}>
               <div className="field">
                 <label htmlFor="name">이름</label>
-                <input id="name" name="name" placeholder="야간" maxLength={100} size={14} />
+                <input id="name" name="name" maxLength={100} size={14} />
               </div>
               <div className="field">
                 <label htmlFor="access_path">적용 경로</label>

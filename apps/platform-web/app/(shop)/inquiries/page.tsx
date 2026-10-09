@@ -56,10 +56,7 @@ export default function MyInquiriesPage() {
   return (
     <>
       <h1 className="page-title">1:1 문의</h1>
-      <p className="page-subtitle">
-        상담원이 문의를 처리하면서 회원님의 주문·회원 정보를 확인할 수 있습니다. 문의에는 비밀번호·
-        카드번호를 적지 마세요.
-      </p>
+      <p className="page-subtitle">비밀번호·카드번호는 적지 마세요.</p>
       {error && <div className="alert-error">{error}</div>}
 
       <section className="card">

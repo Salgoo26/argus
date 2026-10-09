@@ -75,9 +75,6 @@ export default function AdminOrdersPage() {
       <AppHeader me={me} />
       <main className="container">
         <h1 className="page-title">주문 조회</h1>
-        <p className="page-subtitle">
-          주문 조회도 접속기록으로 남습니다. 카드번호는 PG사만 처리하며 쇼핑몰은 저장하지 않습니다.
-        </p>
         {error && <div className="alert-error">{error}</div>}
         <section className="card">
           <h2 className="card-title">주문 검색</h2>

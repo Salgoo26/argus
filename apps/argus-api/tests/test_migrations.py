@@ -106,3 +106,10 @@ def test_upgrade_downgrade_roundtrip(test_db):
         command.upgrade(cfg, "head")
     finally:
         drop_database(name)
+
+
+def test_seed_rule_descriptions_have_no_document_numbers(seed_rules):
+    # v0.1 보강 M — 룰 설명은 화면에 그대로 보인다. 설계 문서·조항 번호는 지운다 (0022)
+    for rule in seed_rules:
+        assert "policy" not in (rule["description"] or ""), rule["name"]
+        assert "§" not in (rule["description"] or ""), rule["name"]

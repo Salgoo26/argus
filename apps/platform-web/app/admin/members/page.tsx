@@ -107,10 +107,6 @@ export default function MembersPage() {
       <AppHeader me={me} />
       <main className="container">
         <h1 className="page-title">회원 관리</h1>
-        <p className="page-subtitle">
-          회원 개인정보 조회·다운로드는 모두 접속기록으로 남아 정보보호 담당자(Argus)가 점검합니다.
-        </p>
-
         {error && <div className="alert-error">{error}</div>}
 
         {/* 다운로드 권한이 있는 역할만 (v0.1 보강 L-1 — 운영·관리자) */}
@@ -183,10 +179,6 @@ export default function MembersPage() {
               초기화
             </button>
           </form>
-          <p className="muted" style={{ margin: "12px 0 0", fontSize: 12 }}>
-            이름·이메일·연락처는 부분 일치입니다. 검색 결과로 표시된 회원도 접속기록으로 남습니다
-            (검색어는 남지 않습니다).
-          </p>
         </section>
 
         <section className="card">

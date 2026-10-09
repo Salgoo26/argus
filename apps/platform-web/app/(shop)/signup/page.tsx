@@ -65,10 +65,6 @@ export default function SignupPage() {
     <div className="narrow">
       <div className="card">
         <h1 className="page-title">회원가입</h1>
-        <p className="page-subtitle">
-          가입에 꼭 필요한 정보(이메일·비밀번호·이름·휴대전화번호)만 받습니다. 생년월일·성별은 받지
-          않으며, 배송지는 필요할 때 마이페이지에서 등록합니다.
-        </p>
         {error && <div className="alert-error">{error}</div>}
         <form className="stack" onSubmit={onSubmit}>
           <div className="field">
@@ -120,7 +116,6 @@ export default function SignupPage() {
               required
               maxLength={20}
             />
-            <span className="hint">주문·배송 연락에 씁니다</span>
           </div>
 
           <fieldset className="consents">

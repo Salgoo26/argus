@@ -15,7 +15,7 @@ export default function ShopLayout({ children }: { children: React.ReactNode }) 
             개인정보 처리방침
           </Link>
           <Link href="/terms">이용약관</Link>
-          <span className="muted">데모 커머스 (가상 회사) · 포트폴리오용 데모</span>
+          <span className="muted">데모 커머스</span>
         </div>
       </footer>
     </div>

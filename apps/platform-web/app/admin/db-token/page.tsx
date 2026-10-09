@@ -55,10 +55,7 @@ export default function AdminDbTokenPage() {
       <AppHeader me={me} />
       <main className="container">
         <h1 className="page-title">DB 접속 토큰</h1>
-        <p className="page-subtitle">
-          DB 툴로 직접 접속할 때 쓰는 1시간짜리 토큰입니다. DB 게이트웨이를 거친 모든 SQL은 본인 아이디로
-          접속기록에 남아 정보보호 담당자가 점검합니다.
-        </p>
+        <p className="page-subtitle">DB 툴 접속용 토큰입니다. 1시간 동안 쓸 수 있습니다.</p>
         {error && <div className="alert-error">{error}</div>}
 
         <section className="card">
@@ -105,8 +102,7 @@ export default function AdminDbTokenPage() {
             </dd>
             <dt>접속 주소</dt>
             <dd>
-              <span className="mono">localhost:16432</span> (DB 게이트웨이) · 데이터베이스는 플랫폼 DB만 — README
-              &ldquo;2-2. DB 직접 접속 (2티어)&rdquo; 참고
+              <span className="mono">localhost:16432</span> (DB 게이트웨이)
             </dd>
           </dl>
         </section>

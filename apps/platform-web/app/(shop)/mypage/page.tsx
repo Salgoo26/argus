@@ -124,7 +124,6 @@ export default function MyPage() {
           <div className="field">
             <label htmlFor="email">이메일 (로그인 아이디)</label>
             <input id="email" value={me.email} readOnly disabled />
-            <span className="hint">로그인 아이디라 바꿀 수 없습니다</span>
           </div>
           <div className="field">
             <label htmlFor="name">이름</label>

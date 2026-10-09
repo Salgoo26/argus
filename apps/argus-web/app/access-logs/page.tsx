@@ -90,11 +90,6 @@ export default function AccessLogsPage() {
       <AppHeader me={me} />
       <main className="container">
         <h1 className="page-title">{me && !isOfficer ? "내 접속기록" : "접속기록"}</h1>
-        <p className="page-subtitle">
-          {me && !isOfficer
-            ? "플랫폼에서 내가 한 개인정보 처리 기록입니다(화면 경유·DB 직접). 소명을 쓸 때 근거로 확인하세요. 정보주체는 마스킹되어 표시되고, 이 조회도 접속기록으로 남습니다."
-            : "원장에 쌓인 접속기록을 조건으로 찾아봅니다 — 정기 점검(§8②)과 정보주체 열람 청구 대응용. 정보주체는 마스킹되어 표시되고, 이 검색도 접속기록으로 남습니다."}
-        </p>
 
         <section className="card">
           <form className="toolbar" onSubmit={onSearch} onReset={onReset}>
@@ -191,8 +186,7 @@ export default function AccessLogsPage() {
             </button>
           </form>
           <p className="muted" style={{ margin: "12px 0 0", fontSize: 12 }}>
-            기간을 비우면 최근 7일(한국 날짜), 최대 1년까지 검색합니다. 한 기록의 정보주체가
-            1,000명을 넘으면 앞 1,000명만 저장되어 회원번호 검색에서 빠질 수 있습니다.
+            기간을 비우면 최근 7일, 최대 1년까지 검색합니다.
           </p>
         </section>
 
