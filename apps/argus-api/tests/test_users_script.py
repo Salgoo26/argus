@@ -6,7 +6,7 @@ import pytest
 from sqlalchemy import insert, select, text, update
 
 from app.auth.passwords import unusable_password_hash, verify_password
-from app.models import argus_user, handler
+from app.models import argus_user, argus_user_history, handler
 from app.scripts import users
 
 NEW_PASSWORD = "brand-new-password-1234"  # 테스트 전용 더미 값
@@ -31,8 +31,9 @@ def clean_users(admin_engine):
         conn.execute(text("DELETE FROM handler"))
 
 
-def run(*argv) -> int:
-    return users.main([*argv, "--password-env", "TEST_NEW_PASSWORD"])
+def run(*argv, reason: str | None = "테스트 — 담당자 지정") -> int:
+    extra = ["--reason", reason] if reason is not None else []
+    return users.main([*argv, "--password-env", "TEST_NEW_PASSWORD", *extra])
 
 
 def row(admin_engine, login_id) -> dict:
@@ -98,13 +99,15 @@ def test_unlock_only_locked_accounts(admin_engine):
     add_synced_handler(admin_engine)
     with admin_engine.begin() as conn:
         conn.execute(update(argus_user).values(status="LOCKED", failed_login_count=5))
-    assert users.main(["unlock", "ops_park"]) == 0
+    assert users.main(["unlock", "ops_park", "--reason", "본인 확인"]) == 0
     unlocked = row(admin_engine, "ops_park")
     assert (unlocked["status"], unlocked["failed_login_count"]) == ("ACTIVE", 0)
 
     with admin_engine.begin() as conn:
         conn.execute(update(argus_user).values(status="DISABLED"))
-    assert users.main(["unlock", "ops_park"]) == 1  # 퇴직 등 비활성은 해제 대상 아님
+    assert (
+        users.main(["unlock", "ops_park", "--reason", "x"]) == 1
+    )  # 퇴직 등 비활성은 해제 대상 아님
 
 
 @pytest.mark.parametrize("password", ["short", ""])
@@ -115,7 +118,7 @@ def test_short_password_is_refused(admin_engine, monkeypatch, password):
 
 def test_unknown_account(admin_engine):
     assert run("set-password", "nobody") == 1
-    assert users.main(["unlock", "nobody"]) == 1
+    assert users.main(["unlock", "nobody", "--reason", "x"]) == 1
 
 
 # ── 플랫폼 아이디 = Argus 아이디 원칙 (2026-10-02) ─────────────────
@@ -152,3 +155,45 @@ def test_promotion_does_not_revive_disabled_account(admin_engine):
     add_synced_handler(admin_engine, login_id="officer", status="DISABLED")
     assert run("create-officer", "officer") == 0
     assert row(admin_engine, "officer")["status"] == "DISABLED"
+
+
+# ── 계정 이력 (v0.1 보강 L-4) — 스크립트도 화면과 같은 이력을 남긴다 ──────
+
+
+def history(admin_engine) -> list[dict]:
+    with admin_engine.connect() as conn:
+        return [
+            dict(r)
+            for r in conn.execute(
+                select(argus_user_history).order_by(argus_user_history.c.id)
+            ).mappings()
+        ]
+
+
+@pytest.mark.parametrize("command", ["create-officer", "unlock"])
+@pytest.mark.parametrize("reason", [None, "  "], ids=["missing", "blank"])
+def test_permission_commands_need_a_reason(admin_engine, command, reason):
+    add_synced_handler(admin_engine, status="LOCKED")
+    assert run(command, "ops_park", reason=reason) == 1
+    assert row(admin_engine, "ops_park")["role"] == "HANDLER"
+    assert history(admin_engine) == []
+
+
+def test_script_changes_are_recorded(admin_engine):
+    add_synced_handler(admin_engine, login_id="officer")  # 동기화로 먼저 생긴 계정 → 전환
+    add_synced_handler(admin_engine, login_id="ops_park", status="LOCKED")
+    assert run("create-officer", "officer", reason="최초 담당자") == 0
+    assert run("create-officer", "officer2", reason="두 번째 담당자") == 0
+    assert run("unlock", "ops_park", reason="본인 확인 후 해제") == 0
+    assert run("set-password", "ops_park", reason=None) == 0  # 권한 변경이 아니라 이력 없음
+
+    rows = [
+        (h["login_id"], h["change_type"], h["before_role"], h["after_role"], h["reason"])
+        for h in history(admin_engine)
+    ]
+    assert rows == [
+        ("officer", "GRANT", "HANDLER", "OFFICER", "최초 담당자"),
+        ("officer2", "GRANT", None, "OFFICER", "두 번째 담당자"),
+        ("ops_park", "UNLOCK", "HANDLER", "HANDLER", "본인 확인 후 해제"),
+    ]
+    assert all(h["actor_login_id"] is None for h in history(admin_engine))  # 운영 스크립트

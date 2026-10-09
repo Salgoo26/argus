@@ -142,6 +142,8 @@ def clean_ledger(request):
     with engine.begin() as conn:
         with ledger_triggers_off(conn, "trg_access_log_no_truncate"):
             conn.exec_driver_sql("TRUNCATE access_log RESTART IDENTITY CASCADE")
+        # 계정 이력(append-only, v0.1 보강 L-4)도 비운다 — TRUNCATE는 행 트리거를 거치지 않는다
+        conn.exec_driver_sql("TRUNCATE argus_user_history")
     yield
 
 

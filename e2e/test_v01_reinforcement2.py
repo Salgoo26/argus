@@ -4,6 +4,7 @@
 - J: 탐지건의 처리 성격(데이터 유형·행위 구분)과 소명 제출 뒤 추가 기록 수
 - K: 접속지·특정 회원 기반 기본 룰
 - L: 플랫폼 역할별 접근 범위, 계정 부여(임시 비밀번호·변경 강제)·권한 이력
+- L-4: Argus 계정 관리(담당자 전용)·계정 이력
 """
 
 import os
@@ -125,3 +126,20 @@ def test_admin_grants_an_account_with_a_temporary_password():
         ("GRANT", "E2E — CS팀 신규 입사", "admin_han")
     ]
     assert temp not in str(history)
+
+
+def test_argus_account_management_is_officer_only_and_recorded(officer, handler_password):
+    # L-4 — 담당자는 계정 목록·이력을 보고, 스크립트로 만든 담당자 계정도 사유와 함께 이력에 있다
+    browser = argus_login(*officer)
+    users = {u["login_id"]: u for u in browser.get("/api/users").json()["items"]}
+    assert users[officer[0]]["role"] == "OFFICER"
+    assert users["ops_park"]["handler"]["login_id"] == "ops_park"
+    history = browser.post("/api/users/history/search", json={"login_id": officer[0]}).json()
+    assert [(h["change_type"], h["reason"]) for h in history["items"]] == [
+        ("GRANT", "E2E 담당자 계정")
+    ]
+    browser.close()
+
+    handler = argus_login("ops_park", handler_password("ops_park"))
+    assert handler.get("/api/users").status_code == 403
+    handler.close()
