@@ -341,9 +341,9 @@ def test_notification_rows_hold_no_text(app_engine):
     detect(app_engine)
     with app_engine.connect() as conn:
         rows = [dict(r) for r in conn.execute(select(notification)).mappings()]
-    assert rows and all(
-        set(r)
-        == {"id", "user_id", "kind", "detection_id", "severity", "round", "created_at", "read_at"}
-        for r in rows
-    )
+    columns = {"id", "user_id", "kind", "detection_id", "severity", "round", "created_at"}
+    columns |= {"read_at", "push_pending"}  # push_pending: 웹 푸시 발송 대기 (F-4)
+    assert rows and all(set(r) == columns for r in rows)
+    # 상 탐지건(담당자)·상 소명 요청(취급자)은 웹 푸시도 — 급한 건
+    assert all(r["push_pending"] for r in rows)
     assert "10001" not in json.dumps(rows, default=str)

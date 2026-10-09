@@ -3,6 +3,7 @@
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useRef, useState } from "react";
 
+import { PushToggle } from "@/components/push-toggle";
 import { api } from "@/lib/api";
 import { SEVERITY_LABELS, formatDateTime } from "@/lib/labels";
 import { severityBadgeClass } from "@/lib/rules";
@@ -94,6 +95,7 @@ export function NotificationBell() {
               모두 읽음
             </button>
           </div>
+          <PushToggle />
           {page && page.items.length === 0 && <p className="muted notify-empty">알림이 없습니다.</p>}
           <ul className="notify-list">
             {page?.items.map((item) => (

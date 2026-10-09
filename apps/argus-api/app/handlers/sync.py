@@ -13,12 +13,12 @@ last_event_at 비교만으로 멱등이 성립한다.
 import logging
 from collections.abc import Iterable
 
-from sqlalchemy import Connection, func, select, update
+from sqlalchemy import Connection, delete, func, select, update
 from sqlalchemy.dialects.postgresql import insert
 
 from app.auth.passwords import unusable_password_hash
 from app.ingest.handler_validation import HandlerState
-from app.models import argus_user, handler
+from app.models import argus_user, handler, push_subscription
 
 logger = logging.getLogger(__name__)
 
@@ -76,6 +76,14 @@ def _sync_a5_account(conn: Connection, handler_id: int, state: HandlerState) -> 
             update(argus_user)
             .where(argus_user.c.handler_id == handler_id, argus_user.c.status != "DISABLED")
             .values(status="DISABLED")
+        )
+        # 막힌 계정의 웹 푸시 구독도 지운다 (v0.1 보강 F-4)
+        conn.execute(
+            delete(push_subscription).where(
+                push_subscription.c.user_id.in_(
+                    select(argus_user.c.id).where(argus_user.c.handler_id == handler_id)
+                )
+            )
         )
         return
 

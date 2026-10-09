@@ -806,3 +806,14 @@ tr.case-handling td {
     display: none;
   }
 }
+
+/* 웹 푸시 "알림 받기" (v0.1 보강 F-4) */
+.push-toggle {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 8px;
+  align-items: center;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--border);
+  font-size: 12px;
+}

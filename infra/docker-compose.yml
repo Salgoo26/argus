@@ -287,6 +287,10 @@ services:
       ARGUS_TRUSTED_PROXIES: ${ARGUS_TRUSTED_PROXIES:-}
       # 소명의 관련 티켓 → 플랫폼 문의 상세 링크의 앞부분 (브라우저가 이동, 서버 간 통신 없음)
       ARGUS_PLATFORM_ADMIN_URL: ${ARGUS_PLATFORM_ADMIN_URL:-http://localhost:3000/admin}
+      # 웹 푸시 VAPID 키 (v0.1 보강 F-4) — 비우면 웹 푸시만 꺼지고 화면 알림은 그대로
+      ARGUS_VAPID_PUBLIC_KEY: ${ARGUS_VAPID_PUBLIC_KEY:-}
+      ARGUS_VAPID_PRIVATE_KEY: ${ARGUS_VAPID_PRIVATE_KEY:-}
+      ARGUS_VAPID_SUBJECT: ${ARGUS_VAPID_SUBJECT:-mailto:privacy-officer@example.com}
     depends_on:
       argus-migrate:
         condition: service_completed_successfully
@@ -313,6 +317,10 @@ services:
       # 원장은 읽기·추가만 가능한 앱 계정 — 탐지 배치는 원장을 읽기만 한다 (§8③)
       ARGUS_DB_USER: ${ARGUS_APP_DB_USER}
       ARGUS_DB_PASSWORD: ${ARGUS_APP_DB_PASSWORD}
+      # 웹 푸시 발송 (v0.1 보강 F-4) — 기한 임박·초과·탐지건 생성 알림. 비우면 웹 푸시만 꺼짐
+      ARGUS_VAPID_PUBLIC_KEY: ${ARGUS_VAPID_PUBLIC_KEY:-}
+      ARGUS_VAPID_PRIVATE_KEY: ${ARGUS_VAPID_PRIVATE_KEY:-}
+      ARGUS_VAPID_SUBJECT: ${ARGUS_VAPID_SUBJECT:-mailto:privacy-officer@example.com}
     # 이미지의 HEALTHCHECK는 웹 서버(8000)용 — worker는 웹 서버를 띄우지 않는다
     healthcheck:
       disable: true

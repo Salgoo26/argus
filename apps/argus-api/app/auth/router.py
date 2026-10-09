@@ -11,7 +11,7 @@ from typing import Annotated
 
 from fastapi import APIRouter, Request, Response
 from pydantic import BaseModel, Field
-from sqlalchemy import case, func, update
+from sqlalchemy import case, delete, func, update
 
 from app.agent import access_log, access_log_exempt, record_actor
 from app.auth.deps import (
@@ -25,7 +25,7 @@ from app.auth.passwords import dummy_password_hash, verify_password
 from app.auth.tokens import clear_session_cookie, issue_token, set_session_cookie
 from app.config import Settings
 from app.errors import ApiError
-from app.models import argus_user
+from app.models import argus_user, push_subscription
 
 router = APIRouter(prefix="/api/auth")
 
@@ -110,6 +110,10 @@ def logout(request: Request, response: Response, _user: OptionalUser) -> None:
     행위자가 없어 기록하지 않고, 응답은 똑같이 쿠키를 지운다."""
     # 행위자를 확인하느라 재발급한 세션을 응답에 싣지 않는다 (main.py 쿠키 연장 미들웨어)
     request.state.session_token = None
+    if _user is not None:
+        # 로그아웃하면 웹 푸시도 끊는다 — 공용 PC에 남은 브라우저로 알림이 가지 않게 (F-4)
+        with request.app.state.engine.begin() as conn:
+            conn.execute(delete(push_subscription).where(push_subscription.c.user_id == _user.id))
     clear_session_cookie(response, request.app.state.settings)
 
 

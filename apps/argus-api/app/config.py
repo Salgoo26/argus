@@ -35,6 +35,12 @@ class Settings(BaseSettings):
     # 서버끼리 통신하지 않는다(브라우저가 이동). 운영에서는 실제 도메인으로
     platform_admin_url: str = "http://localhost:3000/admin"
 
+    # 웹 푸시 VAPID 키 (v0.1 보강 F-4) — 둘 다 비면 웹 푸시만 꺼지고 화면 알림은 그대로.
+    # 만들기: docker compose exec argus-api python -m app.scripts.vapid_keys → .env에 붙여 넣기
+    vapid_public_key: str = ""
+    vapid_private_key: SecretStr | None = None
+    vapid_subject: str = "mailto:privacy-officer@example.com"
+
     def database_url(self) -> URL:
         # URL.create는 비밀번호의 특수문자를 알아서 이스케이프한다
         return URL.create(

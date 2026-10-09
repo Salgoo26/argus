@@ -29,6 +29,8 @@ ENV NODE_ENV=production \
 RUN addgroup -S -g 10001 web && adduser -S -u 10001 -G web -H -s /sbin/nologin web
 COPY --from=build --chown=web:web /app/.next/standalone ./
 COPY --from=build --chown=web:web /app/.next/static ./.next/static
+# 정적 파일(웹 푸시 서비스 워커 sw.js — v0.1 보강 F-4). standalone 출력에는 public이 들어가지 않는다
+COPY --from=build --chown=web:web /app/public ./public
 USER web
 EXPOSE 3000
 HEALTHCHECK --interval=10s --timeout=3s --retries=5 \

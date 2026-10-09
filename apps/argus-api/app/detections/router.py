@@ -29,7 +29,7 @@
 from datetime import date, datetime, time, timedelta
 from typing import Annotated, Literal
 
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, BackgroundTasks, Request
 from pydantic import BaseModel, BeforeValidator, Field, StringConstraints, model_validator
 from sqlalchemy import Connection, and_, case, func, insert, select, update
 
@@ -51,6 +51,7 @@ from app.models import (
     handler,
 )
 from app.notifications.events import due_at, on_requested, on_submitted
+from app.notifications.webpush import dispatch_pending
 
 router = APIRouter(prefix="/api/detections")
 
@@ -532,9 +533,16 @@ def _record_explanation(
 @router.post("/{detection_id}/request")
 @access_log_exempt(_EXEMPT_TRANSITION)
 def request_explanation(
-    detection_id: int, body: RequestBody, request: Request, user: CurrentUser
+    detection_id: int,
+    body: RequestBody,
+    request: Request,
+    user: CurrentUser,
+    background: BackgroundTasks,
 ) -> dict:
-    return _transition(request, user, detection_id, "request", body.message)
+    result = _transition(request, user, detection_id, "request", body.message)
+    # 상 심각도 소명 요청은 웹 푸시도 — 응답을 보낸 뒤 발송해 담당자 화면을 붙잡지 않는다 (F-4)
+    background.add_task(dispatch_pending, request.app.state.engine, request.app.state.vapid)
+    return result
 
 
 @router.post("/{detection_id}/dismiss")

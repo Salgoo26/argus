@@ -150,3 +150,11 @@ def test_notifications_reach_officer_and_handler(officer, handler_password):
     # 탐지건 목록에 소명 기한이 보인다(제출 대기 건)
     cases = handler.post("/api/detections/search", json={"status": "REQUESTED"}).json()["items"]
     assert cases and all(c["due_at"] for c in cases)
+
+
+def test_web_push_is_off_without_keys_and_service_worker_is_served(officer):
+    # E2E 환경은 VAPID 키를 넣지 않는다 — 웹 푸시만 꺼지고 화면 알림은 그대로 (F-4)
+    browser = argus_login(*officer)
+    assert browser.get("/api/push/config").json() == {"enabled": False, "public_key": None}
+    worker = browser.get("/sw.js")
+    assert worker.status_code == 200 and "showNotification" in worker.text

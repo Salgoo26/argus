@@ -183,6 +183,19 @@ notification = Table(
     Column("round", Integer, nullable=False),
     Column("created_at", DateTime(timezone=True), nullable=False),
     Column("read_at", DateTime(timezone=True)),
+    Column("push_pending", Boolean, nullable=False),  # 웹 푸시 발송 대기 (F-4, 0016)
+)
+
+# 웹 푸시 구독 (v0.1 보강 F-4, 0016) — 브라우저가 준 구독 정보
+push_subscription = Table(
+    "push_subscription",
+    metadata,
+    Column("id", BigInteger, primary_key=True),
+    Column("user_id", BigInteger, nullable=False),
+    Column("endpoint", String(1000), nullable=False),
+    Column("p256dh", String(128), nullable=False),
+    Column("auth", String(64), nullable=False),
+    Column("created_at", DateTime(timezone=True), nullable=False),
 )
 
 setting = Table(

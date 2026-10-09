@@ -23,6 +23,17 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 from app.models import argus_user, detection, explanation, handler, notification, setting
 
 DEFAULT_DUE_DAYS = 7  # 【기본값】 setting.explanation_due_days
+# 웹 푸시도 보내는 (종류, 심각도) — 급한 건만 (F-1 표의 "+푸시", 발송은 webpush.dispatch_pending)
+PUSH = frozenset(
+    {
+        ("DETECTED", "HIGH"),
+        ("REQUESTED", "HIGH"),
+        ("DUE_SOON", "HIGH"),
+        ("DUE_SOON", "MEDIUM"),
+        ("OVERDUE", "HIGH"),
+        ("OVERDUE", "MEDIUM"),
+    }
+)
 DUE_SOON_WINDOW = timedelta(hours=24)  # 남은 시간이 이보다 적으면 "기한 임박"
 OPEN_REQUEST = "REQUESTED"
 
@@ -87,6 +98,7 @@ def notify(
             "detection_id": detection_id,
             "severity": severity,
             "round": round_,
+            "push_pending": (kind, severity) in PUSH,
         }
         for user_id in dict.fromkeys(user_ids)
     ]
