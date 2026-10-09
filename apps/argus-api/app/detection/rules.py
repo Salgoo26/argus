@@ -19,9 +19,12 @@
   기록의 오판정 방지). **명부에 없는 계정은 판정 불가 → 참으로 본다**(2026-10-01 사용자 결정):
   판정 불가를 "이상 없음"으로 넘기면 탐지 누락이고, relay가 명부를 기록보다 먼저 보내므로
   정상이라면 생기지 않는다 — 생겼다면 동기화 실패나 명부 밖 계정이라 그 자체가 점검 대상
+- client_ip: 접속지가 대역(CIDR) 목록 안·밖인가 (v0.1 보강 K-1). 로컬처럼 신뢰 프록시가 없으면
+  화면 경유 기록의 접속지는 화면 서버 컨테이너 주소(사설망)라는 점에 주의
 actor_team(db-schema 3-6)은 아직 쓰는 룰이 없어 넣지 않았다 — 룰 빌더(기능 레이어 6) 때 추가.
 """
 
+import ipaddress
 import re
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
@@ -63,6 +66,30 @@ def _is_weekday_list(value: Any) -> bool:
     return _is_str_list(value) and all(v in WEEKDAYS for v in value)
 
 
+CIDR_LIST_MAX = 50  # 허용·차단 대역 목록 상한 — 룰 하나에 넣는 대역 수
+
+
+def _network(value: str) -> ipaddress.IPv4Network | ipaddress.IPv6Network:
+    # 호스트 비트가 있어도 받는다(10.0.0.1/8 → 10.0.0.0/8) — 담당자가 적은 대역 그대로의 뜻
+    return ipaddress.ip_network(value, strict=False)
+
+
+def _is_cidr_list(value: Any) -> bool:
+    if not (_is_str_list(value) and len(value) <= CIDR_LIST_MAX):
+        return False
+    try:
+        for v in value:
+            _network(v)
+    except ValueError:
+        return False
+    return True
+
+
+def _in_networks(actual: Any, networks: list[str]) -> bool:
+    ip = ipaddress.ip_address(str(actual).split("/")[0])
+    return any(ip in _network(n) for n in networks)
+
+
 def _is_true(value: Any) -> bool:
     # "행위 시점에 퇴직하지 않았음"(false)은 명부 미등록을 어떻게 볼지 모호해 받지 않는다
     return value is True
@@ -82,6 +109,8 @@ FIELDS: Mapping[str, _Field] = {
     "occurred_time": _Field("occurred_time", {"between": _is_time_range}),
     "occurred_weekday": _Field("occurred_weekday", {"in": _is_weekday_list}),
     "actor_terminated_at_or_before": _Field("actor_terminated_at_or_before", {"eq": _is_true}),
+    # 접속지 — 인가된 대역 밖(not_in_cidr)·특정 대역 안(in_cidr) (v0.1 보강 K-1, 안내서 95)
+    "client_ip": _Field("client_ip", {"in_cidr": _is_cidr_list, "not_in_cidr": _is_cidr_list}),
 }
 # 취급자 명부(handler)를 봐야 판정할 수 있는 필드
 ROSTER_FIELDS = frozenset({"actor_terminated_at_or_before"})
@@ -93,7 +122,10 @@ SUPPORTED_GROUP_BY = frozenset({"ACTOR_RULE_DATE"})
 # AGGREGATE 집계 스펙 (db-schema 3-6) — 윈도우는 한국 시각 기준의 **고정** 구간(매시 정각·매일 0시·
 # 매월 1일 0시). 정책 예시 "cs_kim의 9/15 14:00~15:00 대량조회 = 1건"이 고정 구간이다
 WINDOWS = frozenset({"1h", "1d", "1mo"})
-MEASURES = frozenset({"LOG_COUNT", "SUBJECT_COUNT", "DISTINCT_SUBJECT"})
+# DISTINCT_IP: 고유 접속지 수, MAX_SUBJECT_REPEAT: 한 회원을 처리한 최대 횟수 (v0.1 보강 K-1)
+MEASURES = frozenset(
+    {"LOG_COUNT", "SUBJECT_COUNT", "DISTINCT_SUBJECT", "DISTINCT_IP", "MAX_SUBJECT_REPEAT"}
+)
 BASELINES = frozenset({"PREV_MONTH_SAME_PERIOD"})
 
 
@@ -236,6 +268,10 @@ def _leaf_matches(leaf: Mapping[str, Any], facts: Mapping[str, Any]) -> bool:
             return actual >= expected
         case "lte":
             return actual <= expected
+        case "in_cidr":
+            return _in_networks(actual, expected)
+        case "not_in_cidr":
+            return not _in_networks(actual, expected)
         case "between":
             return _in_time_range(actual, *expected)
     raise RuleError(f"unsupported op: {leaf['op']}")  # validate_rule을 거쳤다면 도달하지 않음

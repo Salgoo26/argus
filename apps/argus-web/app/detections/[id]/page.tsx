@@ -33,7 +33,9 @@ function aggregateLabel(detail: CaseDetail): string {
   if (spec.compare === "RATIO_TO_BASELINE") {
     return `전월 같은 기간의 ${detail.aggregate_value.toFixed(2)}배 (기준 ${spec.threshold}배)`;
   }
-  return `${detail.aggregate_value}건 (기준 ${spec.threshold}건)`;
+  // 접속지 수는 "곳", 한 회원 처리 횟수는 "회" (v0.1 보강 K-1)
+  const unit = spec.measure === "DISTINCT_IP" ? "곳" : spec.measure === "MAX_SUBJECT_REPEAT" ? "회" : "건";
+  return `${detail.aggregate_value}${unit} (기준 ${spec.threshold}${unit})`;
 }
 
 export default function DetectionDetailPage() {

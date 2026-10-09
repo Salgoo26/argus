@@ -6,6 +6,7 @@ import { ACTION_LABELS, DATA_CATEGORY_LABELS } from "@/lib/labels";
 import {
   ACCESS_PATH_LABELS,
   type AggregateSpec,
+  CIDR_OPS,
   COUNT_OPS,
   type FieldKey,
   FIELDS,
@@ -74,6 +75,37 @@ function Checks({
           {labels[option] ?? option}
         </label>
       ))}
+    </span>
+  );
+}
+
+/** 접속지 대역 — 한 줄에 하나(CIDR). 형식의 최종 판단은 서버 (v0.1 보강 K-1) */
+function CidrEditor({ leaf, onChange }: { leaf: Leaf; onChange: (leaf: Leaf) => void }) {
+  // 입력 중인 글자(빈 줄·쓰다 만 주소)를 그대로 두려고 화면 상태는 문자열로 따로 둔다
+  const [text, setText] = useState(choicesOf(leaf).join("\n"));
+  return (
+    <span className="inline">
+      <select value={leaf.op} onChange={(e) => onChange({ ...leaf, op: e.target.value })}>
+        {Object.entries(CIDR_OPS).map(([op, label]) => (
+          <option key={op} value={op}>
+            {label}
+          </option>
+        ))}
+      </select>
+      <textarea
+        rows={3}
+        value={text}
+        placeholder="10.0.0.0/8"
+        onChange={(e) => {
+          setText(e.target.value);
+          const ranges = e.target.value
+            .split(/[\s,]+/)
+            .map((v) => v.trim())
+            .filter(Boolean);
+          onChange({ ...leaf, value: ranges });
+        }}
+        style={{ width: 220 }}
+      />
     </span>
   );
 }
@@ -148,6 +180,8 @@ function LeafEditor({ leaf, onChange }: { leaf: Leaf; onChange: (leaf: Leaf) => 
       );
     case "actor_terminated_at_or_before":
       return <span className="muted">행위 시점에 이미 퇴직한 계정 (취급자 명부에 없는 계정 포함)</span>;
+    case "client_ip":
+      return <CidrEditor leaf={leaf} onChange={onChange} />;
     default:
       return <code>{JSON.stringify(leaf.value)}</code>;
   }

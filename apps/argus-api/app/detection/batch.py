@@ -56,6 +56,7 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 from app.detection.aggregate import (
     bucket_label,
     measure,
+    most_repeated_subject,
     prev_month_same_period,
     window_end,
     window_start,
@@ -70,6 +71,7 @@ from app.detection.rules import (
     uses_fields,
     validate_rule,
 )
+from app.detections.masking import mask_subject
 from app.models import (
     access_log,
     argus_user,
@@ -104,6 +106,7 @@ _LOG_COLUMNS = (
     access_log.c.data_category,
     access_log.c.result,
     access_log.c.subject_count,
+    access_log.c.client_ip,  # 접속지 조건·고유 접속지 수 (v0.1 보강 K)
     source_system.c.code.label("source_code"),
 )
 
@@ -313,7 +316,7 @@ def _evaluate_aggregate(
         logs = _window_logs(conn, rule, roster, scope, start, end, to_id)
         value = measure(logs, spec["measure"])
         if spec["compare"] == "ABSOLUTE":
-            note = f"집계 {value} ≥ 기준 {spec['threshold']}"
+            note = f"집계 {value} ≥ 기준 {spec['threshold']}" + _top_subject_note(logs, spec)
             exceeded, aggregate_value = value >= spec["threshold"], value
         else:  # RATIO_TO_BASELINE — 전월 동기 대비
             as_of = min(datetime.now(UTC), end)
@@ -328,11 +331,27 @@ def _evaluate_aggregate(
                 continue
             ratio = value / base
             note = f"당월 {value} / 전월 동기 {base} = {ratio:.2f}배 ≥ {spec['threshold']}배"
+            note += _top_subject_note(logs, spec)
             exceeded, aggregate_value = ratio >= spec["threshold"], round(ratio, 4)
         if exceeded and logs:
             key = (source_system_id, path, actor, bucket_label(start), None, None)
             detected += _attach(conn, run_id, rule, key, logs, aggregate_value, note)
     return detected
+
+
+# 회원번호를 읽어야 하는 집계 (DISTINCT_SUBJECT·MAX_SUBJECT_REPEAT)
+SUBJECT_MEASURES = frozenset({"DISTINCT_SUBJECT", "MAX_SUBJECT_REPEAT"})
+
+
+def _top_subject_note(logs: list[dict[str, Any]], spec: Any) -> str:
+    """특정 회원 반복 처리 — 어느 회원인지 **마스킹 식별값**으로 탐지 이력에 (v0.1 보강 K-1)"""
+    if spec["measure"] != "MAX_SUBJECT_REPEAT":
+        return ""
+    top = most_repeated_subject(logs)
+    if top is None:
+        return ""
+    (subject_type, subject), count = top
+    return f" — 최다 처리 {mask_subject(subject_type, subject)} {count}회"
 
 
 def _window_logs(
@@ -347,8 +366,8 @@ def _window_logs(
     """한 취급자·한 경로의 [start, end) 기록 중 룰에 맞는 것 — 이번 순찰 범위(id ≤ to_id)까지"""
     source_system_id, path, actor = scope
     columns = list(_LOG_COLUMNS)
-    if rule["aggregate"]["measure"] == "DISTINCT_SUBJECT":
-        columns.append(access_log.c.subject_ids)
+    if rule["aggregate"]["measure"] in SUBJECT_MEASURES:
+        columns += [access_log.c.subject_ids, access_log.c.subject_type]
     rows = (
         conn.execute(
             select(*columns)

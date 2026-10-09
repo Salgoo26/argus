@@ -26,6 +26,10 @@ SEED_NAMES = (
     "DB 직접 야간 접근",
     "DB 직접 주말 접근",
     "DB 직접 전월 대비 급증",
+    # v0.1 보강 K-2 — 접속지·특정 회원 기반
+    "허용 범위 밖 접속지",
+    "짧은 시간 여러 접속지",
+    "특정 회원 반복 처리",
 )
 
 # 쪼개기 다운로드 — 대량 다운로드(50명)를 피해 여러 번 나눠 받는 우회를 잡는 룰 (생성 예시)
@@ -153,7 +157,11 @@ def test_list_filters_by_name_path_severity_and_type(as_user):
 
     assert names(name="야간") == ["야간 접속", "DB 직접 야간 접근"]
     assert names(name="DB", access_path="DB", severity="HIGH") == ["DB 직접 야간 접근"]
-    assert names(rule_type="AGGREGATE", access_path="APP") == ["대량 조회", "전월 대비 급증"]
+    assert names(rule_type="AGGREGATE", access_path="APP") == [
+        "대량 조회",
+        "전월 대비 급증",
+        "특정 회원 반복 처리",
+    ]
     assert names(name="없는 룰") == []
     for bad in ({"severity": "CRITICAL"}, {"rule_type": "X"}, {"access_path": "WEB"}):
         assert officer.get("/api/rules", params=bad).status_code == 400

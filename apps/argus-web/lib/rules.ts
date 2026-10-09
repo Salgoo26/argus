@@ -9,7 +9,7 @@ export type Leaf = { field: string; op: string; value: unknown };
 export type Condition = { all: Leaf[] } | { any: Leaf[] };
 export type AggregateSpec = {
   window: "1h" | "1d" | "1mo";
-  measure: "LOG_COUNT" | "SUBJECT_COUNT" | "DISTINCT_SUBJECT";
+  measure: "LOG_COUNT" | "SUBJECT_COUNT" | "DISTINCT_SUBJECT" | "DISTINCT_IP" | "MAX_SUBJECT_REPEAT";
   compare: "ABSOLUTE" | "RATIO_TO_BASELINE";
   threshold: number;
   baseline?: "PREV_MONTH_SAME_PERIOD";
@@ -56,6 +56,8 @@ export const MEASURE_LABELS = {
   LOG_COUNT: "기록 수",
   SUBJECT_COUNT: "처리 건수 합",
   DISTINCT_SUBJECT: "고유 정보주체 수",
+  DISTINCT_IP: "고유 접속지 수",
+  MAX_SUBJECT_REPEAT: "한 회원 최대 처리 횟수",
 };
 export const CHANGE_LABELS = { CREATE: "생성", UPDATE: "수정", ENABLE: "켜기", DISABLE: "끄기" };
 export const WEEKDAYS = ["MON", "TUE", "WED", "THU", "FRI", "SAT", "SUN"];
@@ -80,10 +82,13 @@ export const FIELDS = [
   { key: "occurred_time", label: "시각(한국)" },
   { key: "occurred_weekday", label: "요일(한국)" },
   { key: "actor_terminated_at_or_before", label: "퇴직 여부" },
+  { key: "client_ip", label: "접속지(IP 대역)" },
 ] as const;
 export type FieldKey = (typeof FIELDS)[number]["key"];
 
 export const COUNT_OPS = { gte: "이상", lte: "이하", eq: "같음" } as const;
+// 접속지 대역 (v0.1 보강 K-1) — 허용 대역 밖 / 특정 대역 안
+export const CIDR_OPS = { not_in_cidr: "다음 대역 밖", in_cidr: "다음 대역 안" } as const;
 
 /** 필드를 처음 고를 때의 기본 조건 */
 export function defaultLeaf(field: FieldKey): Leaf {
@@ -102,6 +107,8 @@ export function defaultLeaf(field: FieldKey): Leaf {
       return { field, op: "in", value: ["SAT", "SUN"] };
     case "actor_terminated_at_or_before":
       return { field, op: "eq", value: true };
+    case "client_ip":
+      return { field, op: "not_in_cidr", value: ["10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16"] };
   }
 }
 
@@ -152,6 +159,10 @@ function describeLeaf(leaf: Leaf): string {
       return `${choices(WEEKDAY_LABELS)}요일`;
     case "actor_terminated_at_or_before":
       return "행위 시점에 퇴직한 계정";
+    case "client_ip": {
+      const ranges = choicesOf(leaf).join(", ");
+      return `접속지 ${ranges} ${leaf.op === "in_cidr" ? "안" : "밖"}`;
+    }
     default:
       return `${leaf.field} ${leaf.op} ${JSON.stringify(leaf.value)}`;
   }

@@ -52,6 +52,10 @@ def test_default_rules_seeded(admin_engine, seed_rules):
         "DB 직접 야간 접근": ("EVENT", "DB", "HIGH", True),
         "DB 직접 주말 접근": ("EVENT", "DB", "MEDIUM", True),
         "DB 직접 전월 대비 급증": ("AGGREGATE", "DB", "MEDIUM", True),
+        # v0.1 보강 K-2 — 접속지·특정 회원 기반 (0019)
+        "허용 범위 밖 접속지": ("EVENT", "ALL", "HIGH", True),
+        "짧은 시간 여러 접속지": ("AGGREGATE", "ALL", "MEDIUM", True),
+        "특정 회원 반복 처리": ("AGGREGATE", "APP", "MEDIUM", True),
     }
     bulk = next(r for r in seed_rules if r["name"] == "대량 다운로드")
     assert bulk["condition"]["all"][0] == {"field": "action", "op": "eq", "value": "DOWNLOAD"}
