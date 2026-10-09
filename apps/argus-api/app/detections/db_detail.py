@@ -17,6 +17,6 @@ def db_detail(access_path: str, context: dict[str, Any] | None) -> dict[str, Any
         return None
     context = context or {}
     detail = {key: context.get(key) for key in _SHOWN}
-    # 회원번호 추출 전(구현 순서 ② 보류) — 처리한 정보주체를 특정하지 못한 기록
+    # 처리한 정보주체를 특정하지 못한 기록 — 결과에 회원을 가리키는 열이 없던 조회 (v0.1 보강 G-1)
     detail["subject_unresolved"] = bool(context.get("subject_unresolved"))
     return detail

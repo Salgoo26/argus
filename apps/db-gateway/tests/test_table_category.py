@@ -6,6 +6,7 @@
 
 import pytest
 
+from app.catalog import MEMBER_COLUMNS
 from app.sql import TABLE_CATEGORY, analyze
 
 # 플랫폼 DB의 개인정보·거래 테이블 (apps/platform-api/migrations) → 기대 유형
@@ -44,3 +45,10 @@ def test_shipping_address_is_member_basic(sql, category):
     assert result.data_category == category
     assert any(t.endswith("shipping_address") for t in result.tables)
     assert "010-0000-0001" not in result.normalized and "10001" not in result.normalized
+
+
+def test_every_personal_table_with_a_member_reference_is_in_member_columns():
+    # 2티어 회원번호 추출(v0.1 보강 G-1)이 읽는 열 — 결제(payment)는 주문을 거쳐서만 회원과 이어진다
+    tables = {table for table, _ in MEMBER_COLUMNS}
+    assert tables == set(PLATFORM_PERSONAL_TABLES) - {"payment"}
+    assert ("member", "id") in MEMBER_COLUMNS
