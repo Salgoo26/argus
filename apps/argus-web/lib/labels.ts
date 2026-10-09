@@ -122,3 +122,19 @@ export const EXPLANATION_GUIDE: Record<AccessPath, { write: string[]; review: st
     ],
   },
 };
+
+// 탐지건의 행위 구분 (v0.1 보강 J-2) — 같은 날 같은 룰이라도 성격이 다르면 다른 탐지건
+export const ACTION_GROUP_LABELS: Record<string, string> = {
+  READ: "조회",
+  DOWNLOAD: "내려받기",
+  CHANGE: "변경·삭제",
+  SESSION: "로그인·로그아웃",
+};
+
+// "회원 기본정보 · 조회" — 성격이 없는 건(집계 룰·이전 탐지건)은 null
+export function caseNature(c: { data_category: string | null; action_group: string | null }): string | null {
+  if (!c.data_category || !c.action_group) return null;
+  const category = DATA_CATEGORY_LABELS[c.data_category] ?? c.data_category;
+  const group = ACTION_GROUP_LABELS[c.action_group] ?? c.action_group;
+  return category === "-" ? group : `${category} · ${group}`;
+}

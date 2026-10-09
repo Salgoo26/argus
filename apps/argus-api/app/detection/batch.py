@@ -13,6 +13,8 @@
 
 탐지건 그룹핑 (policy 2-2·2-3):
 - 키 = (룰, 출처, 접근 경로, 취급자, 발생 날짜)
+  + **EVENT 룰은 데이터 유형·행위 구분**(조회/내려받기/변경·삭제/로그인·로그아웃, v0.1 보강 J-2)
+  — 같은 날 회원정보 조회와 결제정보 조회는 다른 탐지건. AGGREGATE는 그대로(집계 의미가 바뀜)
   — 날짜는 **한국 시각(KST)** 기준 (2026-10-01 결정)
 - **탐지건 하나 = 경로 하나**: 적용 경로가 "전체"인 룰도 화면 경유(APP)·DB 직접(DB) 기록을
   한 탐지건에 섞지 않는다 (policy 1-5, 2026-10-06 — 두 경로는 성격이 다른 기록이고 보고도 따로)
@@ -115,6 +117,24 @@ class BatchResult:
     processed: int = 0
     detected: int = 0
     error: str | None = None
+
+
+# 행위 구분 (v0.1 보강 J-2) — 같은 성격의 행위끼리만 한 탐지건으로 묶는다
+ACTION_GROUPS = {
+    "READ": "READ",
+    "DOWNLOAD": "DOWNLOAD",
+    "EXPORT": "DOWNLOAD",
+    "CREATE": "CHANGE",
+    "UPDATE": "CHANGE",
+    "DELETE": "CHANGE",
+    "LOGIN": "SESSION",
+    "LOGOUT": "SESSION",
+}
+
+
+def action_group(action: str) -> str:
+    """조회 / 내려받기 / 변경·삭제 / 로그인·로그아웃"""
+    return ACTION_GROUPS[action]
 
 
 def group_bucket(occurred_at: datetime) -> str:
@@ -238,7 +258,7 @@ def _evaluate(conn: Connection, run_id: int, from_id: int, to_id: int) -> tuple[
         if rule["rule_type"] == "AGGREGATE":
             detected += _evaluate_aggregate(conn, run_id, rule, facts, roster, to_id)
             continue
-        groups: dict[tuple[int, str, str, str], list[Any]] = defaultdict(list)
+        groups: dict[tuple, list[Any]] = defaultdict(list)
         for fact in facts:
             if _hits(rule, fact):
                 key = (
@@ -246,6 +266,9 @@ def _evaluate(conn: Connection, run_id: int, from_id: int, to_id: int) -> tuple[
                     fact["access_path"],
                     fact["actor_login_id"],
                     group_bucket(fact["occurred_at"]),
+                    # 다른 성격의 처리는 다른 탐지건 — 소명 하나가 다른 행위를 덮지 않게 (J-2)
+                    fact["data_category"],
+                    action_group(fact["action"]),
                 )
                 groups[key].append(fact)
         for key, matched in groups.items():
@@ -307,7 +330,7 @@ def _evaluate_aggregate(
             note = f"당월 {value} / 전월 동기 {base} = {ratio:.2f}배 ≥ {spec['threshold']}배"
             exceeded, aggregate_value = ratio >= spec["threshold"], round(ratio, 4)
         if exceeded and logs:
-            key = (source_system_id, path, actor, bucket_label(start))
+            key = (source_system_id, path, actor, bucket_label(start), None, None)
             detected += _attach(conn, run_id, rule, key, logs, aggregate_value, note)
     return detected
 
@@ -373,7 +396,7 @@ def _attach(
 
     AGGREGATE는 집계값(aggregate_value)을 함께 갱신하고, note(집계 근거)를 탐지 이력에 남긴다.
     """
-    source_system_id, path, actor, bucket = key
+    source_system_id, path, actor, bucket, data_category, action_group_ = key
     ids = [log["id"] for log in logs]
 
     # 같은 룰로 이미 어떤 탐지건에 붙은 기록은 다시 붙이지 않는다 — 재처리해도 증거가 중복되지 않게
@@ -398,6 +421,8 @@ def _attach(
             detection.c.access_path == path,
             detection.c.actor_login_id == actor,
             detection.c.group_bucket == bucket,
+            detection.c.data_category.is_not_distinct_from(data_category),
+            detection.c.action_group.is_not_distinct_from(action_group_),
             detection.c.status.in_(OPEN_STATUSES),
         )
         .with_for_update()
@@ -426,6 +451,8 @@ def _attach(
                 access_path=path,
                 actor_login_id=actor,
                 group_bucket=bucket,
+                data_category=data_category,
+                action_group=action_group_,
                 severity=rule["severity"],
                 first_occurred_at=first,
                 last_occurred_at=first,
@@ -462,7 +489,7 @@ def _attach(
 
 
 def _window_was_judged(conn: Connection, rule: Any, key: tuple) -> bool:
-    source_system_id, path, actor, bucket = key
+    source_system_id, path, actor, bucket, *_ = key  # 집계 윈도우 — 성격 구분 없음
     return (
         conn.execute(
             select(detection.c.id).where(

@@ -115,6 +115,9 @@ detection = Table(
     Column("detected_at", DateTime(timezone=True), nullable=False),
     Column("closed_at", DateTime(timezone=True)),
     Column("close_reason", Text),
+    # EVENT 탐지건의 묶음 기준에 더한 데이터 유형·행위 구분 (v0.1 보강 J-2, AGGREGATE는 NULL)
+    Column("data_category", String(16)),
+    Column("action_group", String(16)),
 )
 
 detection_log = Table(
@@ -122,6 +125,8 @@ detection_log = Table(
     metadata,
     Column("detection_id", BigInteger, primary_key=True),
     Column("access_log_id", BigInteger, primary_key=True),
+    # 탐지건에 붙은 시각 — 소명 제출 뒤에 붙은 기록 구분 (v0.1 보강 J-1, 0018 이전 행은 NULL)
+    Column("attached_at", DateTime(timezone=True)),
 )
 
 detection_status_history = Table(

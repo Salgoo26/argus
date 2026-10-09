@@ -96,6 +96,9 @@ export type CaseSummary = {
   detected_at: string;
   closed_at: string | null;
   due_at: string | null; // 제출을 기다리는 건의 소명 기한 (v0.1 보강 F-3)
+  data_category: string | null; // EVENT 탐지건의 처리 성격 (v0.1 보강 J-2) — AGGREGATE·이전 건은 null
+  action_group: "READ" | "DOWNLOAD" | "CHANGE" | "SESSION" | null;
+  after_submission_count: number; // 현재 차수 소명 제출 뒤에 붙은 기록 수 (J-1)
 };
 
 // 탐지건 검색 (v0.1 보강 C-1) — POST /api/detections/search 본문
@@ -127,6 +130,7 @@ export type CaseLog = {
   subjects: string[]; // 서버에서 이미 마스킹된 값(member_10***)만 온다
   ticket_id: string | null; // 업무 근거 티켓(예: 1:1 문의 INQ-12) — 소명 대조용
   db: DbDetail | null; // DB 직접(2티어) 기록일 때만
+  after_submission_round: number | null; // N차 소명 제출 뒤에 붙어 어떤 소명도 다루지 않은 기록 (J-1)
 };
 
 export type Explanation = {
@@ -250,6 +254,7 @@ export type ReportCase = {
   handled_by?: string | null;
   handled_at?: string | null;
   close_reason?: string | null;
+  after_submission?: number; // 소명 제출 뒤 추가 기록 (v0.1 보강 J-1)
 };
 // 마지막 차수의 소명 — 자유 입력은 앞 200자 요지
 export type ReportExplanation = {

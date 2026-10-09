@@ -251,6 +251,8 @@ def _cases(conn: Connection, where) -> list[dict[str, Any]]:
                 # 어떻게 처리했는지 (v0.1 보강 B — 실무 결재문서처럼 사유까지 남긴다)
                 "explanation": _latest_explanation(conn, row["id"]),
                 **_handled(conn, row["id"]),
+                # 마지막 차수 소명 제출 뒤에 붙은 기록 — 그 소명이 다루지 않은 행위 (v0.1 보강 J-1)
+                "after_submission": _after_submission(conn, row["id"], row["round"]),
                 "close_reason": (
                     excerpt(row["close_reason"]) if row["status"] == "DISMISSED" else None
                 ),
@@ -337,3 +339,20 @@ def _masked_subjects(conn: Connection, detection_id: int) -> list[str]:
 def masked_count(summary: dict[str, Any]) -> int:
     """보고서에 실린 마스킹 식별값 수 — Argus 자체 접속기록의 처리 건수 (policy 6-3)"""
     return sum(len(c["subjects"]) for s in summary["paths"].values() for c in s["cases"])
+
+
+def _after_submission(conn: Connection, detection_id: int, round_: int) -> int:
+    """현재 차수 소명 제출 시각 뒤에 탐지건에 붙은 하위 기록 수 (제출 전이면 0)"""
+    submitted_at = conn.execute(
+        select(explanation.c.submitted_at).where(
+            explanation.c.detection_id == detection_id, explanation.c.round == round_
+        )
+    ).scalar_one_or_none()
+    if submitted_at is None:
+        return 0
+    return conn.execute(
+        select(func.count()).where(
+            detection_log.c.detection_id == detection_id,
+            detection_log.c.attached_at > submitted_at,
+        )
+    ).scalar_one()

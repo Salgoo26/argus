@@ -166,12 +166,35 @@ def _case_summary(row) -> dict:
         "closed_at": row["closed_at"],
         # 소명 기한 — 제출을 기다리는 건(REQUESTED)만. 넘겨도 상태는 그대로 (v0.1 보강 F-3)
         "due_at": row["due_at"] if row["status"] == "REQUESTED" else None,
+        # EVENT 탐지건의 처리 성격 — 데이터 유형·행위 구분 (v0.1 보강 J-2, AGGREGATE·이전 건은 null)
+        "data_category": row["data_category"],
+        "action_group": row["action_group"],
+        # 현재 차수 소명 제출 뒤에 붙은 하위 기록 수 — 그 소명이 다루지 않은 행위 (J-1)
+        "after_submission_count": row["after_submission_count"],
     }
 
 
 # 현재 차수 소명의 기한
 _current_due = select(explanation.c.due_at).where(
     explanation.c.detection_id == detection.c.id, explanation.c.round == detection.c.round
+)
+# 현재 차수 소명 제출 뒤에 붙은 하위 기록 수 — 아직 제출 전이면 제출 시각이 NULL이라 0건
+_after_submission = (
+    select(func.count())
+    .select_from(
+        detection_log.join(
+            explanation,
+            and_(
+                explanation.c.detection_id == detection_log.c.detection_id,
+                explanation.c.round == detection.c.round,
+            ),
+        )
+    )
+    .where(
+        detection_log.c.detection_id == detection.c.id,
+        detection_log.c.attached_at > explanation.c.submitted_at,
+    )
+    .correlate(detection)
 )
 
 
@@ -180,6 +203,7 @@ def _case_query():
         detection,
         _actor_name.scalar_subquery().label("actor_name"),
         _current_due.scalar_subquery().label("due_at"),
+        _after_submission.scalar_subquery().label("after_submission_count"),
     )
 
 
@@ -310,6 +334,23 @@ def _logs(conn: Connection, detection_id: int) -> list[dict]:
             a.c.subject_truncated,
             a.c.access_path,
             a.c.context,
+            detection_log.c.attached_at,
+            # 이 기록이 붙기 전에 제출된 가장 최근 차수 — 그 차수 소명 뒤에 붙은 기록 (J-1)
+            select(func.max(explanation.c.round))
+            .where(
+                explanation.c.detection_id == detection_id,
+                explanation.c.submitted_at < detection_log.c.attached_at,
+            )
+            .scalar_subquery()
+            .label("after_round"),
+            # 그 뒤 차수에서 다시 제출했다면 그 소명이 이 기록까지 다룬다
+            select(explanation.c.id)
+            .where(
+                explanation.c.detection_id == detection_id,
+                explanation.c.submitted_at >= detection_log.c.attached_at,
+            )
+            .exists()
+            .label("covered"),
         )
         .join(detection_log, detection_log.c.access_log_id == a.c.id)
         .where(detection_log.c.detection_id == detection_id)
@@ -334,6 +375,9 @@ def _logs(conn: Connection, detection_id: int) -> list[dict]:
             "ticket_id": (r["context"] or {}).get("ticket_id"),
             # DB 직접(2티어) 기록이면 정규화 SQL·테이블·건수 — 무엇을 소명할지 (policy 1-5)
             "db": db_detail(r["access_path"], r["context"]),
+            "attached_at": r["attached_at"],
+            # N차 제출 뒤에 붙었고 그 뒤 제출이 없으면 N — 어떤 소명도 다루지 않은 행위
+            "after_submission_round": None if r["covered"] else r["after_round"],
         }
         for r in rows
     ]

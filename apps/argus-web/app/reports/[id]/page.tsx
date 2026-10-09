@@ -200,7 +200,13 @@ function Section({ path, section }: { path: AccessPath; section: ReportSection }
                   {c.actor_name ?? "-"} <span className="muted">({c.actor_login_id})</span>
                 </td>
                 <td>{formatDateTime(c.first_occurred_at)}</td>
-                <td className="num">{c.log_count}</td>
+                <td className="num">
+                  {c.log_count}
+                  {/* 소명 제출 뒤에 붙어 그 소명이 다루지 않은 기록 (v0.1 보강 J-1) */}
+                  {(c.after_submission ?? 0) > 0 && (
+                    <div className="small">제출 뒤 추가 {c.after_submission}건</div>
+                  )}
+                </td>
                 <td className="subjects">
                   {subjectsLabel(c.subjects, c.distinct_subject_count, c.subject_count_sum)}
                 </td>
