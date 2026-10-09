@@ -29,6 +29,39 @@
 
 ---
 
+## 2026-10-10 (10) — v0.1 보강 2차 PR 10: 개인정보 식별·관리 — 보호 대상 등록부 (설계 N)
+
+**한 일**
+- **N-1 보호 대상 등록부**(Argus 0021, 담당자 메뉴 "보호 대상"): `protected_column`(출처·DB·테이블·컬럼 → 개인정보 항목 13종(개인정보 아님 포함)·데이터 유형·회원 식별 열·활성), `protected_column_history`(REGISTER/CHANGE/RELEASE, 스냅샷·사유·처리자, append-only). 등록·변경·해제(비활성)에 사유 필수, **받은 DB 구조 목록에 있는 컬럼만** 등록(409 `UNKNOWN_COLUMN`). 등록부 버전 = 이력 마지막 id(`r{id}`)
+- 【기본값】 **초기 등록**: 게이트웨이 고정 표(TABLE_CATEGORY 8테이블·MEMBER_COLUMNS 7열)를 컬럼 단위로 이관 — 8개 테이블의 컬럼은 모두 분류(개인정보 / 개인정보 아님), 이력 "초기 등록 — 게이트웨이 고정 표 이관". 이관 결과가 고정 표와 같은 판정을 내는지 테스트
+- **N-2 DB 구조 목록**: 게이트웨이가 기동 시 + 1시간마다 `pg_catalog`만 읽어 테이블·컬럼 **이름과 자료형만** `POST /ingest/v1/db-schema`(HMAC, 출처 PLATFORM). Argus는 키를 정확히 정해 두고 값·예시 칸은 400으로 거부, 받을 때마다 목록 교체 + 수신 기록. 등록부에 없는 컬럼은 **미분류**, 등록했는데 구조에 없으면 **DB에 없음**
+- **N-3 게이트웨이 연동**: `app/registry.py` — 5분마다 `GET /ingest/v1/protection-registry`로 판정 표(테이블 → 가장 민감한 등록 컬럼의 유형, 회원 식별 열, 버전)를 받아 `gateway-data/registry.json`에 저장. **받지 못하면 마지막 등록부, 한 번도 못 받았으면 고정 표(builtin)** — 기록이 NONE으로 빠지지 않음. 실패 시 30초 뒤 재시도. 원장 `context.registry_version`(Argus 검증에 키 추가)
+- **N-4 현황**(보호 대상 화면 위): 개인정보 테이블·컬럼 수, 미분류 수, 마지막 구조 목록 수신 시각, **접속기록 최소 2년 보관 대상**(고유식별·민감정보 등록 시, §8①), 등록부 버전, 테이블별 최근 30일 DB 직접 접근 건수·마지막 접근(원장 `context.tables`), 화면 경유 수집 안내 한 줄
+- 테스트: argus `test_protection.py` 24개(초기 등록 = 고정 표 판정, 구조 목록 서명·**값 칸 거부 5종**·교체·미분류/DB에 없음, 등록·변경·해제·2년 보관, 개인정보 아님 명시, 불일치 등록 400 4종, 구조에 없는 컬럼 409, 취급자 403, 이력 append-only, 자체 기록 제외, 가장 민감한 유형, 등록부 응답 서명·키, 회원 식별 열 해제, 원장 `registry_version` 검증, 30일 DB 접근 집계) / db-gateway `test_registry.py` 18개(**한 번도 못 받으면 고정 표 — NONE 아님**, **받은 뒤 실패해도 마지막 등록부 + 재기동 시 파일에서 복원**, 저장 파일 손상 시 고정 표, 잘못된 응답 거부 6종, 요청 서명, 고정 표 = 원래 표, 받은 등록부로 판정·버전 기록, 기본 버전 builtin, 회원 식별 열 해제 시 추출 안 함, **구조 조회는 pg_catalog만**, **구조 목록에 값 없음**(실제 DB), 전송 서명, 조회 실패 시 미전송) / E2E `test_gateway_sends_db_structure_and_records_registry_version`
+- 결과: argus-api 588 passed, db-gateway 214 passed, argus-web lint·typecheck
+
+**결정사항**
+- 등록부는 **컬럼 단위로 저장**하고 판정은 테이블 단위로 내려준다(설계 N-3 v0.1) — v0.2에서 컬럼 단위 판정으로 넓힐 때 데이터를 다시 만들지 않게
+- 회원 식별 열은 항목이 "회원 식별자"인 컬럼만 켤 수 있다(DB CHECK) — 이름·이메일 열을 회원번호로 읽는 실수 방지
+- 등록부 버전 = 이력의 마지막 id — 별도 카운터 없이 "언제 어떤 변경 뒤의 표인지"가 이력과 바로 이어진다
+- DB 이름은 논리 이름 `platform`으로 고정(v0.1 대상 DB 하나) — 실제 DB 이름(.env)이 원장·등록부에 퍼지지 않게
+- 게이트웨이 등록부 요청은 GET + 빈 본문 서명(수집 API와 같은 키). 응답도 키를 정확히 검증해 값 칸이 섞이면 버린다
+- "대시보드"는 Argus에 따로 없어 **보호 대상 화면 맨 위 현황**으로 구현
+- 직원 계정(operator)·권한 이력·outbox 등 고정 표에 없던 테이블은 **미분류로 둔다** — 담당자가 분류할 대상이 화면에 바로 보이게(누락 사례 ①의 DB판 시연)
+
+**설계 변경**
+- 무엇을: 설계 N. 게이트웨이 → Argus 수신 API 2개 신설, 원장 context 키 `registry_version`, 재시도 30초
+- 영향 문서: architecture 3-4(데이터 유형 판정 출처 = Argus 등록부, 받지 못할 때의 순서, 구조 목록 전송·주기), api-spec(`/ingest/v1/db-schema`·`/ingest/v1/protection-registry`, 2-3 DB context `registry_version`, `/api/protection*`, 2-7 자체 기록 제외), db-schema(`protected_column`·`protected_column_history`·`db_schema_column`·`db_schema_receipt`), policy(보호 대상 등록·사유·2년 보관 표시 §8①), requirements(개인정보 식별·관리), CLAUDE.md 6절 7-4 "새 테이블은 게이트웨이 분류에 등록" → "보호 대상 화면에서 분류"
+
+**미결·이슈**
+- v0.2(N-5): 자동 식별(이름 패턴·샘플 검사), 컬럼 단위 판정, 여러 DB·시스템, 화면 경유(3티어) 수집 지점과 등록부 대조
+- 게이트웨이 테스트 고정 표(`TABLE_CATEGORY`·`MEMBER_COLUMNS`)와 Argus 초기 등록은 둘 다 남는다 — 기본값과 이관 원본이라. 플랫폼 스키마가 바뀌면 이제 **보호 대상 화면**에서 분류(미분류로 드러남)
+
+**다음 할 일**
+- PR 11(M 화면 문구 정리)
+
+---
+
 ## 2026-10-10 (9) — v0.1 보강 2차 PR 9: Argus 계정 관리 + 계정 이력 (설계 L-4)
 
 **한 일**
