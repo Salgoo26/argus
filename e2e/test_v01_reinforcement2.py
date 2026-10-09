@@ -80,7 +80,8 @@ def test_marketing_cannot_open_orders_and_the_refusal_reaches_argus():
         lambda: (
             _ledger(
                 "SELECT result FROM access_log a JOIN source_system s ON s.id = a.source_system_id"
-                " WHERE s.code = 'PLATFORM' AND actor_login_id = %s AND data_category = 'ORDER'",
+                " WHERE s.code = 'PLATFORM' AND actor_login_id = %s AND data_category = 'ORDER'"
+                " AND result = 'FAILURE'",
                 ("mkt_lee",),
             )
             or None

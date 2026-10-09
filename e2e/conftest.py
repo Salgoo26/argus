@@ -62,13 +62,40 @@ class Browser:
         self.http.close()
 
 
-def platform_login(login_id: str) -> Browser:
+def platform_login(login_id: str, password: str = OPERATOR_PASSWORD) -> Browser:
     browser = Browser(PLATFORM_URL, "platform_session")
     response = browser.post(
-        "/api/admin/auth/login", json={"login_id": login_id, "password": OPERATOR_PASSWORD}
+        "/api/admin/auth/login", json={"login_id": login_id, "password": password}
     )
     assert response.status_code == 200, response.text
     return browser
+
+
+def create_operator(login_id: str, name: str, team: str, role: str) -> str:
+    """관리자(admin_han)가 계정·권한 화면으로 새 관리자 계정을 만든다 (v0.1 보강 L-2).
+    임시 비밀번호로 처음 로그인해 새 비밀번호로 바꾸고 그 비밀번호를 돌려준다
+    (platform_login에 넘김).
+    시드 계정 역할을 바꾸지 않고 역할 표에 맞는 계정을 쓰기 위함"""
+    password = secrets.token_hex(8) + "-Aa1"  # 비밀번호 규칙(10자·두 종류 이상)을 늘 만족
+    admin = platform_login("admin_han")
+    created = admin.post(
+        "/api/admin/accounts",
+        json={"login_id": login_id, "name": name, "team": team, "role": role, "reason": "E2E"},
+    )
+    admin.close()
+    assert created.status_code == 201, created.text
+    first = Browser(PLATFORM_URL, "platform_session")
+    temp = created.json()["temporary_password"]
+    assert first.post(
+        "/api/admin/auth/login", json={"login_id": login_id, "password": temp}
+    ).json()["must_change_password"]
+    changed = first.post(
+        "/api/admin/auth/password",
+        json={"current_password": temp, "new_password": password},
+    )
+    first.close()
+    assert changed.status_code == 204, changed.text
+    return password
 
 
 def argus_login(login_id: str, password: str) -> Browser:

@@ -18,6 +18,7 @@ from datetime import datetime, timedelta, timezone
 from conftest import (
     admin_command,
     argus_login,
+    create_operator,
     platform_login,
     run_detection_batch,
     wait_until,
@@ -29,9 +30,9 @@ MASKED = re.compile(r"^member_\d+\*\*\*$")  # 저장 "10293" → 마스킹 membe
 KST = timezone(timedelta(hours=9))
 
 
-def download_members(login_id: str, count: int) -> list[dict]:
+def download_members(login_id: str, count: int, password: str | None = None) -> list[dict]:
     """플랫폼 관리자 화면의 CSV 다운로드와 같은 요청 → 내려받은 행"""
-    platform = platform_login(login_id)
+    platform = platform_login(login_id, password) if password else platform_login(login_id)
     response = platform.get("/api/admin/members/export", params={"limit": count})
     platform.close()
     assert response.status_code == 200, response.text
@@ -168,10 +169,16 @@ def test_bulk_download_to_approval(officer, handler_password):
 
 
 def test_false_positive_request_is_cancelled(officer, handler_password):
-    """시나리오의 갈림길: 담당자가 오탐으로 판단하면 자동 요청을 취소 → DISMISSED(종결)"""
-    download_members("mkt_lee", 60)
+    """시나리오의 갈림길: 담당자가 오탐으로 판단하면 자동 요청을 취소 → DISMISSED(종결)
+
+    다운로드는 관리자·운영 역할만(v0.1 보강 L-1) — 다른 시나리오와 탐지건이 묶이지 않도록
+    이 테스트만
+    쓰는 운영 계정을 만든다(시드의 운영·관리자 계정은 같은 날 각자 대량 다운로드 탐지건이 있다)
+    """
+    password = create_operator("ops_yoon", "윤가상", "OPS", "OPS")
+    download_members("ops_yoon", 60, password)
     officer_browser = argus_login(*officer)
-    case = wait_for_detection(officer_browser, "mkt_lee", 60)
+    case = wait_for_detection(officer_browser, "ops_yoon", 60)
     assert case["status"] == "REQUESTED"
 
     # 사유 없는 취소는 거부 — 종결 사유는 점검 근거로 남아야 한다
@@ -182,7 +189,7 @@ def test_false_positive_request_is_cancelled(officer, handler_password):
     assert response.json()["status"] == "DISMISSED"
 
     # 취소된 건에는 제출할 수 없다
-    handler = argus_login("mkt_lee", handler_password("mkt_lee"))
+    handler = argus_login("ops_yoon", handler_password("ops_yoon"))
     response = transition(handler, case["id"], "submit", {"content": "늦은 제출"})
     assert response.status_code == 409
 
