@@ -142,6 +142,23 @@ def test_list_has_seed_rules_and_filters_by_enabled(as_user):
     assert len(on) == len(SEED_NAMES) - 1
 
 
+def test_list_filters_by_name_path_severity_and_type(as_user):
+    # v0.1 보강 C-3 — 룰 이름은 개인정보가 아니라 조회 조건을 URL 쿼리로 받는다
+    officer = as_user("officer")
+
+    def names(**params) -> list[str]:
+        res = officer.get("/api/rules", params=params)
+        assert res.status_code == 200, res.text
+        return [r["name"] for r in res.json()["items"]]
+
+    assert names(name="야간") == ["야간 접속", "DB 직접 야간 접근"]
+    assert names(name="DB", access_path="DB", severity="HIGH") == ["DB 직접 야간 접근"]
+    assert names(rule_type="AGGREGATE", access_path="APP") == ["대량 조회", "전월 대비 급증"]
+    assert names(name="없는 룰") == []
+    for bad in ({"severity": "CRITICAL"}, {"rule_type": "X"}, {"access_path": "WEB"}):
+        assert officer.get("/api/rules", params=bad).status_code == 400
+
+
 def test_detail_includes_history_newest_first(as_user):
     officer = as_user("officer")
     bulk = rule_by_name(officer, "대량 다운로드")

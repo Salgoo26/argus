@@ -17,13 +17,25 @@ import {
 
 const PAGE_SIZE = 50;
 const ACTIONS = ["LOGIN", "LOGOUT", "READ", "CREATE", "UPDATE", "DELETE", "DOWNLOAD", "EXPORT", "UNMASK"];
+const CATEGORIES = ["MEMBER_BASIC", "PAYMENT", "ORDER", "INQUIRY", "ACCESS_LOG", "NONE"];
 const EMPTY: AccessLogSearch = { source: "PLATFORM", page: 1, size: PAGE_SIZE };
+const KEYS = [
+  "actor",
+  "date_from",
+  "date_to",
+  "action",
+  "subject",
+  "access_path",
+  "client_ip",
+  "data_category",
+  "result",
+] as const;
 
 // 검색 조건은 화면 상태에만 두고 URL(주소창·방문 기록)에 싣지 않는다 — 회원번호 검색어가 남지 않게.
 // 서버에도 요청 본문(POST)으로 보낸다 (argus-api access_logs/router.py)
 function toCriteria(form: FormData): AccessLogSearch {
   const criteria: AccessLogSearch = { ...EMPTY };
-  for (const key of ["actor", "date_from", "date_to", "action", "subject", "access_path"] as const) {
+  for (const key of KEYS) {
     const value = String(form.get(key) ?? "").trim();
     if (value) (criteria as Record<string, unknown>)[key] = value;
   }
@@ -47,10 +59,11 @@ export default function AccessLogsPage() {
   const [settled, setSettled] = useState<AccessLogSearch | null>(null);
 
   const isOfficer = me?.role === "OFFICER";
-  const loading = isOfficer && settled !== criteria;
+  const loading = me !== null && settled !== criteria;
 
   useEffect(() => {
-    if (!isOfficer) return; // 취급자는 이 화면을 쓰지 않는다 — 서버도 403
+    if (!me) return;
+    // 취급자는 같은 API로 본인 기록만 받는다 — 행위자는 서버가 고정 (v0.1 보강 D)
     // 검색도 Argus 자체 접속기록(READ)으로 남는다 — 조건의 이름만, 검색어 값은 남지 않는다
     api<AccessLogPage>("/access-logs/search", { method: "POST", body: JSON.stringify(criteria) })
       .then((page) => {
@@ -59,7 +72,7 @@ export default function AccessLogsPage() {
       })
       .catch((e) => setError(handleError(e)))
       .finally(() => setSettled(criteria));
-  }, [criteria, handleError, isOfficer]);
+  }, [criteria, handleError, me]);
 
   function onSearch(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -76,18 +89,21 @@ export default function AccessLogsPage() {
     <>
       <AppHeader me={me} />
       <main className="container">
-        <h1 className="page-title">접속기록</h1>
+        <h1 className="page-title">{me && !isOfficer ? "내 접속기록" : "접속기록"}</h1>
         <p className="page-subtitle">
-          원장에 쌓인 접속기록을 조건으로 찾아봅니다 — 정기 점검(§8②)과 정보주체 열람 청구 대응용.
-          정보주체는 마스킹되어 표시되고, 이 검색도 접속기록으로 남습니다.
+          {me && !isOfficer
+            ? "플랫폼에서 내가 한 개인정보 처리 기록입니다(화면 경유·DB 직접). 소명을 쓸 때 근거로 확인하세요. 정보주체는 마스킹되어 표시되고, 이 조회도 접속기록으로 남습니다."
+            : "원장에 쌓인 접속기록을 조건으로 찾아봅니다 — 정기 점검(§8②)과 정보주체 열람 청구 대응용. 정보주체는 마스킹되어 표시되고, 이 검색도 접속기록으로 남습니다."}
         </p>
 
         <section className="card">
           <form className="toolbar" onSubmit={onSearch} onReset={onReset}>
-            <div className="field">
-              <label htmlFor="actor">계정</label>
-              <input id="actor" name="actor" placeholder="ops_park" maxLength={64} size={12} />
-            </div>
+            {isOfficer && (
+              <div className="field">
+                <label htmlFor="actor">계정</label>
+                <input id="actor" name="actor" placeholder="ops_park" maxLength={64} size={12} />
+              </div>
+            )}
             <div className="field">
               <label htmlFor="date_from">시작일</label>
               <input id="date_from" name="date_from" type="date" />
@@ -127,12 +143,46 @@ export default function AccessLogsPage() {
               </select>
             </div>
             <div className="field">
-              <label htmlFor="source">출처</label>
-              <select id="source" name="source" defaultValue="PLATFORM">
-                <option value="PLATFORM">플랫폼</option>
-                <option value="ARGUS">Argus 자체</option>
+              <label htmlFor="client_ip">접속지(IP)</label>
+              <input
+                id="client_ip"
+                name="client_ip"
+                placeholder="10.20.3 또는 전체 주소"
+                maxLength={45}
+                size={14}
+                pattern="[0-9A-Fa-f:.]+"
+                title="숫자·점·콜론만 — 앞부분만 적으면 앞부분 일치"
+                autoComplete="off"
+              />
+            </div>
+            <div className="field">
+              <label htmlFor="data_category">데이터 유형</label>
+              <select id="data_category" name="data_category" defaultValue="">
+                <option value="">전체</option>
+                {CATEGORIES.map((c) => (
+                  <option key={c} value={c}>
+                    {c === "NONE" ? "없음(로그인 등)" : (DATA_CATEGORY_LABELS[c] ?? c)}
+                  </option>
+                ))}
               </select>
             </div>
+            <div className="field">
+              <label htmlFor="result">결과</label>
+              <select id="result" name="result" defaultValue="">
+                <option value="">전체</option>
+                <option value="SUCCESS">성공</option>
+                <option value="FAILURE">실패</option>
+              </select>
+            </div>
+            {isOfficer && (
+              <div className="field">
+                <label htmlFor="source">출처</label>
+                <select id="source" name="source" defaultValue="PLATFORM">
+                  <option value="PLATFORM">플랫폼</option>
+                  <option value="ARGUS">Argus 자체</option>
+                </select>
+              </div>
+            )}
             <button className="btn btn-primary" type="submit" disabled={loading}>
               검색
             </button>
@@ -146,7 +196,12 @@ export default function AccessLogsPage() {
           </p>
         </section>
 
-        {me && !isOfficer && <div className="alert-error">정보보호 담당자 전용 화면입니다.</div>}
+        {data && !data.linked && (
+          <div className="alert-error">
+            계정이 취급자 명부와 연결되어 있지 않아 본인 접속기록을 찾을 수 없습니다. 정보보호
+            담당자에게 문의하세요.
+          </div>
+        )}
         {error && <div className="alert-error">{error}</div>}
 
         <section className="card">
@@ -234,7 +289,7 @@ export default function AccessLogsPage() {
             </button>
             <span className="muted">
               {criteria.page} / {lastPage} · 총 {data?.total ?? "-"}건
-              {data && ` · 기간 ${periodLabel(data.period)}`}
+              {data?.period && ` · 기간 ${periodLabel(data.period)}`}
             </span>
             <button
               className="btn btn-secondary"

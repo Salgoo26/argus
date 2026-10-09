@@ -15,6 +15,7 @@ from app.models import access_log, argus_user, detection, handler, source_system
 from conftest import TEST_CLIENT_ADDR, make_entry, reset_rules
 
 PASSWORD = "test-password-1234"  # 테스트 전용 더미 값
+SEARCH = "/api/detections/search"  # 목록 조회 — 검색 조건은 POST 본문 (v0.1 보강 C-1)
 
 
 @pytest.fixture(scope="module")
@@ -253,8 +254,8 @@ def test_officer_sees_all_handler_sees_own_requested_only(app_engine, as_user):
     other = detect(app_engine, actor="mkt_lee")
     unassigned = detect(app_engine, actor="cs_kim")  # 계정 없음 → DETECTED
 
-    officer_ids = {i["id"] for i in as_user("officer").get("/api/detections").json()["items"]}
-    handler_ids = {i["id"] for i in as_user("ops_park").get("/api/detections").json()["items"]}
+    officer_ids = {i["id"] for i in as_user("officer").post(SEARCH, json={}).json()["items"]}
+    handler_ids = {i["id"] for i in as_user("ops_park").post(SEARCH, json={}).json()["items"]}
 
     assert officer_ids == {own, other, unassigned}
     assert handler_ids == {own}
@@ -293,9 +294,80 @@ def test_list_filter_and_paging(app_engine, as_user):
     detect(app_engine, actor="ops_park")
     detect(app_engine, actor="mkt_lee")
     officer = as_user("officer")
-    body = officer.get("/api/detections", params={"status": "REQUESTED", "size": 1}).json()
+    body = officer.post(SEARCH, json={"status": "REQUESTED", "size": 1}).json()
     assert body["total"] == 2 and len(body["items"]) == 1
-    assert officer.get("/api/detections", params={"status": "WHATEVER"}).status_code == 400
+    assert officer.post(SEARCH, json={"status": "WHATEVER"}).status_code == 400
+
+
+# ── 검색 조건·정렬 (v0.1 보강 C-1) ─────────────────────────
+
+
+def _set(admin_engine, case_id: int, **values) -> None:
+    with admin_engine.begin() as conn:
+        conn.execute(update(detection).where(detection.c.id == case_id).values(**values))
+
+
+def _ids(client, **body) -> list[int]:
+    res = client.post(SEARCH, json=body)
+    assert res.status_code == 200, res.text
+    return [i["id"] for i in res.json()["items"]]
+
+
+def test_search_by_period_rule_actor_and_severity(app_engine, admin_engine, as_user):
+    ops = detect(app_engine, actor="ops_park")
+    mkt = detect(app_engine, actor="mkt_lee")
+    # 지난달 말일 23:30(한국) 탐지 — 한국 날짜 기준으로 이번 달에서 빠져야 한다
+    _set(admin_engine, mkt, detected_at=datetime(2026, 9, 30, 14, 30, tzinfo=UTC), severity="LOW")
+    officer = as_user("officer")
+
+    assert _ids(officer, date_from="2026-09-30", date_to="2026-09-30") == [mkt]
+    assert ops in _ids(officer, date_from="2026-10-01")  # 끝을 비우면 열린 구간
+    assert _ids(officer, actor="ops_park") == [ops]
+    assert _ids(officer, severity="LOW") == [mkt]
+    with app_engine.connect() as conn:
+        rule_id = conn.execute(select(detection.c.rule_id).where(detection.c.id == ops)).scalar()
+    assert set(_ids(officer, rule_id=rule_id)) == {ops, mkt}
+    assert _ids(officer, rule_id=999999) == []
+
+
+def test_search_sorts_latest_or_by_severity(app_engine, admin_engine, as_user):
+    low = detect(app_engine, actor="ops_park")
+    high = detect(app_engine, actor="mkt_lee")
+    _set(admin_engine, low, severity="LOW", detected_at=datetime(2026, 10, 9, 1, tzinfo=UTC))
+    _set(admin_engine, high, severity="HIGH", detected_at=datetime(2026, 10, 8, 1, tzinfo=UTC))
+    officer = as_user("officer")
+    assert _ids(officer) == [low, high]  # 기본: 최신순
+    assert _ids(officer, sort="SEVERITY") == [high, low]
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        {"date_from": "2026-10-09", "date_to": "2026-10-01"},
+        {"severity": "CRITICAL"},
+        {"sort": "NAME"},
+        {"actor": "has space"},
+        {"rule_id": 0},
+    ],
+)
+def test_invalid_search_is_400(as_user, body):
+    assert as_user("officer").post(SEARCH, json=body).status_code == 400
+
+
+def test_handler_search_cannot_reach_others_by_actor(app_engine, as_user):
+    own = detect(app_engine, actor="ops_park")
+    detect(app_engine, actor="mkt_lee")
+    ops_park = as_user("ops_park")
+    assert _ids(ops_park, actor="mkt_lee") == []  # 본인 건 필터가 먼저 — 남의 건은 안 나온다
+    assert _ids(ops_park) == [own]
+
+
+def test_search_values_are_not_recorded(app_engine, as_user):
+    detect(app_engine)
+    as_user("officer").post(SEARCH, json={"actor": "ops_park", "date_from": "2026-10-01"})
+    [log] = [r for r in _argus_logs(app_engine) if r["request_path"] == SEARCH]
+    assert log["request_query_keys"] == ["actor", "date_from"]
+    assert "ops_park" not in json.dumps(log["request_query_keys"])
 
 
 # ── 마스킹 ────────────────────────────────────────────────
@@ -317,7 +389,7 @@ def test_member_ids_are_masked_for_everyone(app_engine, as_user, who):
 
 def test_list_contains_counts_not_identifiers(app_engine, as_user):
     detect(app_engine)
-    [item] = as_user("officer").get("/api/detections").json()["items"]
+    [item] = as_user("officer").post(SEARCH, json={}).json()["items"]
     assert item["subject_count_sum"] == 120 and item["distinct_subject_count"] == 120
     assert "subjects" not in item
 
@@ -341,12 +413,13 @@ def _argus_logs(app_engine) -> list[dict]:
 def test_reads_are_logged_with_counts_only_transitions_are_not(app_engine, as_user):
     case = detect(app_engine, count=120)
     officer = as_user("officer")
-    officer.get("/api/detections")
+    officer.post(SEARCH, json={"status": "REQUESTED"})
     officer.get(f"/api/detections/{case}")
     act(officer, case, "dismiss", reason="오탐")
 
     listing, detail = _argus_logs(app_engine)  # 전이(dismiss)는 READ로 남지 않는다
-    assert listing["request_path"] == "/api/detections" and listing["subject_count"] == 0
+    assert listing["request_path"] == SEARCH and listing["subject_count"] == 0
+    assert listing["request_query_keys"] == ["status"]  # 검색 조건은 키 이름만
     assert detail["request_path"] == "/api/detections/{detection_id}"
     assert detail["subject_count"] == 120  # 화면에 보여준(마스킹된) 식별값 수
     assert detail["subject_ids"] is None  # 회원 PK를 Argus 원장에 다시 쌓지 않는다
@@ -354,7 +427,7 @@ def test_reads_are_logged_with_counts_only_transitions_are_not(app_engine, as_us
 
 
 def test_unauthenticated_is_401(client):
-    assert client.get("/api/detections").status_code == 401
+    assert client.post(SEARCH, json={}).status_code == 401
 
 
 def test_detail_shows_business_ticket_but_not_other_context(app_engine, as_user):
@@ -422,12 +495,12 @@ def test_cases_show_and_filter_by_access_path(app_engine, admin_engine, as_user)
         conn.execute(update(detection).where(detection.c.id == app_case).values(access_path="DB"))
     other = detect(app_engine, actor="mkt_lee")
     officer = as_user("officer")
-    items = officer.get("/api/detections").json()["items"]
+    items = officer.post(SEARCH, json={}).json()["items"]
     assert {i["id"]: i["access_path"] for i in items} == {app_case: "DB", other: "APP"}
-    only_db = officer.get("/api/detections", params={"access_path": "DB"}).json()["items"]
+    only_db = officer.post(SEARCH, json={"access_path": "DB"}).json()["items"]
     assert [i["id"] for i in only_db] == [app_case]
     assert officer.get(f"/api/detections/{app_case}").json()["access_path"] == "DB"
-    assert officer.get("/api/detections", params={"access_path": "WEB"}).status_code == 400
+    assert officer.post(SEARCH, json={"access_path": "WEB"}).status_code == 400
 
 
 def test_db_case_logs_show_what_to_explain(app_engine, admin_engine, as_user):

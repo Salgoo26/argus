@@ -71,7 +71,7 @@ def test_payment_full_view_is_detected(officer):
 
     def probe():
         run_detection_batch()
-        items = officer_browser.get("/api/detections", params={"size": 100}).json()["items"]
+        items = officer_browser.post("/api/detections/search", json={"size": 100}).json()["items"]
         return next(
             (
                 i
