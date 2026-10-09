@@ -29,6 +29,41 @@
 
 ---
 
+## 2026-10-10 (4) — v0.1 보강 PR 4: 알림 — 화면 알림·소명 기한·웹 푸시 (설계 F)
+
+**한 일**
+- **F-1 받는 사람**: 탐지건 생성(상만)→담당자 전원 / 소명 요청(자동·수동·재요청)→해당 취급자 / 기한 임박·초과→취급자+담당자 전원 / 소명 제출→요청한 담당자(자동 요청이면 담당자 전원). 업무와 같은 트랜잭션에서 만든다
+- **F-2 화면 알림**: `notification`(마이그레이션 0015 — 본문 없음, 같은 (사람·종류·탐지건·차수)는 한 번만), `GET /api/notifications`·읽음 표시, 헤더 "알림" 배지 + 목록(심각도 색·기호), 30초마다 확인
+- **F-3 소명 기한**: `explanation.due_at` = 요청 시각 + `setting.explanation_due_days`(7일), 재요청은 다시 7일. worker가 순찰마다 임박(24시간 이하)·초과 판정, 상태는 바꾸지 않음. 목록·상세에 기한, 보고서에 기한 초과 건수
+- **F-4 웹 푸시**: VAPID(RFC 8292)·aes128gcm 암호화(RFC 8291)를 `cryptography`(platform-api와 같은 50.0.2)·PyJWT로 직접 구현, `push_subscription`(0016)·`notification.push_pending`, 구독 API(`/api/push/config`·`subscriptions`·`unsubscribe`), 서비스 워커 `public/sw.js`, 알림 목록의 "알림 받기". 키 생성 `python -m app.scripts.vapid_keys`, 키가 없으면 웹 푸시만 꺼짐
+- 테스트: argus `test_notifications.py` 17개(누가 받는가·기한·API·원장 미기록·행에 본문 없음), `test_webpush.py` 27개(브라우저 쪽 RFC 8291 복호화로 암호화 검증, VAPID 서명, 구독 주소 허용 목록·SSRF 차단, 페이로드에 개인정보 없음, 모의 발송·410 삭제·키 없음·비활성 계정·발송 실패, 구독 API·로그아웃·퇴직 시 삭제), `test_reports_api.py::test_overdue_explanations_are_counted` / E2E 2개
+- 결과: argus-api 468 passed, argus-web lint·typecheck, E2E 19 passed
+
+**결정사항**
+- 알림 API는 **자체 접속기록 제외** — 정보주체 처리가 없고 30초 확인이 원장을 채운다. 알림이 가리키는 탐지건을 열면 READ로 남는다
+- 알림 FK는 `ON DELETE CASCADE` — 파생 데이터이고 운영에서는 탐지건·계정을 지우지 않음(테스트 정리를 위해)
+- 기한을 넘긴 뒤 처음 판정하면 **초과만**(임박 건너뜀)
+- 웹 푸시 라이브러리(pywebpush)를 쓰지 않고 직접 구현 — 새 의존성(requests·aiohttp 등)을 늘리지 않고, 이미 검증해 쓰는 cryptography만으로. 정확성은 테스트에서 **구독자 입장의 RFC 8291 복호화**로 확인
+- **구독 주소는 브라우저 푸시 서비스 https 호스트만**(FCM·Mozilla·Apple·WNS) — 서버가 사용자가 넣은 임의 주소로 POST하는 SSRF 통로가 되지 않게. 발송 직전에도 다시 확인
+- 발송 시점: 상태 변경(소명 요청) 직후 응답 뒤 백그라운드 + worker 순찰마다. 행 잠금(SKIP LOCKED)으로 중복 발송 방지. **한 번만 시도**(화면 알림이 주 수단), 404·410이면 구독 삭제
+- 로그아웃·퇴직(계정 비활성화) 시 구독 삭제. 같은 브라우저에 다른 사람이 로그인해 구독하면 주인이 바뀐다
+- VAPID 키는 `.env`(비우면 꺼짐), 하나만 있거나 짝이 안 맞으면 **기동 거부**. `init-env.sh`는 VAPID를 채우지 않는다(형식이 hex가 아님) — 필요하면 키 생성 명령으로
+- argus-web Dockerfile에 `public/` 복사 추가(standalone 출력에 빠짐)
+
+**설계 변경**
+- 무엇을: 설계 F 전체. 알림 API의 자체 접속기록 제외, 구독 주소 허용 목록, 푸시 1회 시도 원칙을 추가로 정함
+- 영향 문서: policy(알림·소명 기한 7일·기한 초과는 상태 불변), api-spec(알림·푸시 API, 자체 기록 제외 사유), db-schema(`notification`·`push_subscription`·`explanation.due_at`·setting `explanation_due_days`), architecture(웹 푸시 발송 경로, 외부 푸시 서비스로의 아웃바운드 — 운영 방화벽), actor-flows(F-05·F-06 알림 확인), requirements(알림 — 이메일은 v0.2 유지), CLAUDE.md 5절·6절(VAPID 시크릿)
+
+**미결·이슈**
+- 실제 브라우저·푸시 서비스로의 종단 발송은 확인하지 않음(로컬·CI에 VAPID 키 없음) — 암호화·서명은 테스트로, 발송은 모의 객체로
+- 웹 푸시는 브라우저 제조사 서버를 거친다 — 내용은 암호화되지만 "언제 알림이 갔는지"는 그쪽에 남는다(내용에 개인정보 없음)
+- 로그아웃 시 브라우저 쪽 구독(서비스 워커)은 그대로 남는다 — 서버가 지워 더는 보내지 않음
+
+**다음 할 일**
+- 사용자 머지(#60 → #61 → #62 → #63), Cowork에서 설계 원본 반영
+
+---
+
 ## 2026-10-10 (3) — v0.1 보강 PR 3: 2티어 회원번호 추출 (설계 G-1)
 
 **한 일**
