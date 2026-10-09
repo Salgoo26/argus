@@ -32,7 +32,13 @@ def test_login_sets_httponly_strict_cookie(client, engine, password_hash):
     res = login(client)
 
     assert res.status_code == 200
-    assert res.json() == {"login_id": "ops_park", "name": "박지훈", "team": "OPS", "role": "OPS"}
+    assert res.json()["must_change_password"] is False
+    assert {k: res.json()[k] for k in ("login_id", "name", "team", "role")} == {
+        "login_id": "ops_park",
+        "name": "박지훈",
+        "team": "OPS",
+        "role": "OPS",
+    }
     cookie = _set_cookie_header(res).lower()
     assert cookie.startswith(f"{COOKIE_NAME}=")
     assert "httponly" in cookie and "samesite=strict" in cookie
@@ -203,4 +209,10 @@ def test_me_returns_current_operator(client, engine, password_hash):
     assert client.get("/admin/auth/me").status_code == 401
     login(client)
     res = client.get("/admin/auth/me")
-    assert res.json() == {"login_id": "ops_park", "name": "박지훈", "team": "OPS", "role": "OPS"}
+    assert res.json()["must_change_password"] is False
+    assert {k: res.json()[k] for k in ("login_id", "name", "team", "role")} == {
+        "login_id": "ops_park",
+        "name": "박지훈",
+        "team": "OPS",
+        "role": "OPS",
+    }

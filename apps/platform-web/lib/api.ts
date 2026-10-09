@@ -53,6 +53,13 @@ const MESSAGES: Record<string, string> = {
   NOT_FOUND: "대상을 찾을 수 없습니다.",
   ADDRESS_LIMIT: "배송지는 최대 10개까지 등록할 수 있습니다.",
   SHIPPING_ADDRESS_REQUIRED: "배송지를 선택하세요.",
+  FORBIDDEN: "이 기능을 쓸 권한이 없습니다.",
+  PASSWORD_CHANGE_REQUIRED: "임시 비밀번호를 먼저 바꿔야 합니다.",
+  SAME_PASSWORD: "새 비밀번호가 지금 비밀번호와 같습니다.",
+  SELF_CHANGE_FORBIDDEN: "본인 계정은 바꿀 수 없습니다.",
+  LOGIN_ID_TAKEN: "이미 있는 아이디입니다.",
+  NO_CHANGE: "바뀐 내용이 없습니다.",
+  ACCOUNT_TERMINATED: "퇴직 처리된 계정입니다.",
   SHIPPING_ADDRESS_INCOMPLETE:
     "이 배송지는 연락처·우편번호가 비어 있습니다. 마이페이지에서 배송지를 보완해 주세요.",
 };
@@ -62,7 +69,28 @@ export function errorMessage(error: unknown): string {
   return "서버에 연결할 수 없습니다.";
 }
 
-export type Operator = { login_id: string; name: string; team: string; role: string };
+export type Operator = {
+  login_id: string;
+  name: string;
+  team: string;
+  role: string;
+  // 역할별 기능 (v0.1 보강 L-1) — 메뉴를 숨기는 데만 쓴다. 허용 여부는 언제나 서버가 판단
+  permissions?: Permission[];
+  must_change_password?: boolean;
+};
+
+export type Permission =
+  | "MEMBERS"
+  | "ORDERS"
+  | "INQUIRIES"
+  | "MEMBER_EXPORT"
+  | "REFUND_FULL_VIEW"
+  | "DB_TOKEN"
+  | "ACCOUNTS";
+
+export function can(me: Operator | null, permission: Permission): boolean {
+  return !!me?.permissions?.includes(permission);
+}
 
 // ── 고객 화면 ─────────────────────────────────────────
 

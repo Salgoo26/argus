@@ -19,7 +19,7 @@ from fastapi import APIRouter, Request
 from sqlalchemy import insert
 
 from app.agent import access_log_exempt
-from app.auth.deps import CurrentOperator
+from app.auth.deps import DbTokenOperator
 from app.errors import ApiError
 from app.models import db_access_token
 from app.shop.deps import client_ip
@@ -32,7 +32,7 @@ LIFETIME = timedelta(hours=1)  # db-schema 4절 CHECK와 같은 값
 
 @router.post("", status_code=201)
 @access_log_exempt("DB 접속 토큰 발급 — 개인정보 처리 없음 (발급 기록은 db_access_token)")
-def issue_db_token(operator: CurrentOperator, request: Request) -> dict:
+def issue_db_token(operator: DbTokenOperator, request: Request) -> dict:
     # 발급 IP는 관리자 접속기록과 같은 신뢰 프록시 규칙으로 정한다 (CLAUDE.md 3절 #10).
     # 정할 수 없으면 발급하지 않는다 — 발급 기록의 접속지를 지어내지 않는다
     ip = client_ip(request)

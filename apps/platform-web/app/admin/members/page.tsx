@@ -9,6 +9,7 @@ import {
   ApiError,
   adminLoginPath,
   api,
+  can,
   errorMessage,
   formCriteria,
   type Operator,
@@ -112,6 +113,8 @@ export default function MembersPage() {
 
         {error && <div className="alert-error">{error}</div>}
 
+        {/* 다운로드 권한이 있는 역할만 (v0.1 보강 L-1 — 운영·관리자) */}
+        {can(me, "MEMBER_EXPORT") && (
         <section className="card">
           <h2 className="card-title">회원 목록 다운로드 (CSV)</h2>
           <form className="toolbar" onSubmit={onDownload}>
@@ -132,6 +135,7 @@ export default function MembersPage() {
             </button>
           </form>
         </section>
+        )}
 
         <section className="card">
           <h2 className="card-title">회원 검색</h2>

@@ -11,15 +11,16 @@ from typing import Annotated
 
 from fastapi import APIRouter, Request, Response
 from pydantic import BaseModel, Field
-from sqlalchemy import select, update
+from sqlalchemy import func, select, update
 
 from app.agent import access_log, access_log_exempt, record_actor
-from app.auth.deps import MAX_FAILED_LOGINS, CurrentOperator, OptionalOperator
-from app.auth.passwords import dummy_password_hash, verify_password
+from app.auth.deps import MAX_FAILED_LOGINS, OptionalOperator, PendingOperator, permissions_of
+from app.auth.passwords import dummy_password_hash, hash_password, verify_password
 from app.auth.tokens import clear_session_cookie, issue_token, set_session_cookie
 from app.config import Settings
 from app.errors import ApiError
 from app.models import operator
+from app.shop.validation import NewPassword
 
 router = APIRouter(prefix="/admin/auth")
 
@@ -84,6 +85,8 @@ def login(body: LoginRequest, request: Request, response: Response) -> dict:
         "name": row["name"],
         "team": row["team"],
         "role": row["role"],
+        # 임시 비밀번호 계정 — 화면이 비밀번호 변경으로 보낸다 (v0.1 보강 L-2)
+        "must_change_password": row["must_change_password"],
     }
 
 
@@ -99,11 +102,42 @@ def logout(request: Request, response: Response, _operator: OptionalOperator) ->
 
 @router.get("/me")
 @access_log_exempt("본인 계정 정보만 반환 — 정보주체 처리 없음")
-def me(operator: CurrentOperator) -> dict:
-    """화면이 현재 로그인한 취급자를 확인하는 용도 (M5 platform-web)"""
+def me(operator_: PendingOperator) -> dict:
+    """화면이 현재 로그인한 취급자를 확인하는 용도 (M5 platform-web).
+    permissions는 메뉴를 숨기는 데만 쓴다 — 허용 여부는 각 라우트가 다시 판단 (v0.1 보강 L-1)"""
     return {
-        "login_id": operator.login_id,
-        "name": operator.name,
-        "team": operator.team,
-        "role": operator.role,
+        "login_id": operator_.login_id,
+        "name": operator_.name,
+        "team": operator_.team,
+        "role": operator_.role,
+        "permissions": permissions_of(operator_.role),
+        "must_change_password": operator_.must_change_password,
     }
+
+
+class PasswordChange(BaseModel):
+    current_password: Annotated[str, Field(min_length=1, max_length=256)]
+    new_password: NewPassword  # 고객 비밀번호와 같은 규칙 (shop/validation.py)
+
+
+@router.post("/password", status_code=204)
+@access_log_exempt("본인 비밀번호 변경 — 정보주체 처리 없음, 권한 변경 아님")
+def change_password(body: PasswordChange, request: Request, operator_: PendingOperator) -> None:
+    """본인 비밀번호 변경 — 임시 비밀번호로 처음 로그인했으면 이것부터 해야 한다 (v0.1 보강 L-2)"""
+    if body.new_password == body.current_password:
+        raise ApiError(400, "SAME_PASSWORD", "new password must differ from the current one")
+    with request.app.state.engine.begin() as conn:
+        current = conn.execute(
+            select(operator.c.password_hash).where(operator.c.id == operator_.id).with_for_update()
+        ).scalar_one()
+        if not verify_password(current, body.current_password):
+            raise ApiError(400, "WRONG_PASSWORD", "current password does not match")
+        conn.execute(
+            update(operator)
+            .where(operator.c.id == operator_.id)
+            .values(
+                password_hash=hash_password(body.new_password),
+                must_change_password=False,
+                updated_at=func.now(),
+            )
+        )

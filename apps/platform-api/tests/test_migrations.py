@@ -23,6 +23,7 @@ def test_skeleton_tables_created(engine):
         "inquiry",  # 1:1 문의 (0004)
         "db_access_token",  # DB 접속 토큰 발급 기록 (0005)
         "shipping_address",  # 배송지 (0007)
+        "operator_permission_history",  # 권한 이력 (0009, v0.1 보강 L-3)
     }
 
 

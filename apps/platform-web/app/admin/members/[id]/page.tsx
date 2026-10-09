@@ -8,6 +8,7 @@ import {
   ApiError,
   adminLoginPath,
   api,
+  can,
   errorMessage,
   formatDate,
   formatDateTime,
@@ -31,7 +32,7 @@ type MemberDetail = {
     status: string;
     ordered_at: string;
     card_company: string | null;
-  }[];
+  }[] | null; // 주문 권한이 없는 역할(마케팅)에게는 null (v0.1 보강 L-1)
 };
 
 type Revealed = { bank_name: string; account_holder: string; account_number: string };
@@ -107,7 +108,7 @@ export default function MemberDetailPage() {
                     <span>
                       {account.bank_name} ****{account.account_last4} · 예금주 {account.account_holder}
                     </span>
-                    {!revealed && (
+                    {!revealed && can(me, "REFUND_FULL_VIEW") && (
                       <button className="btn btn-danger" onClick={reveal}>
                         전체 보기
                       </button>
@@ -126,6 +127,7 @@ export default function MemberDetailPage() {
               )}
             </section>
 
+            {member.orders && (
             <section className="card">
               <h2 className="card-title">최근 주문 (최대 20건)</h2>
               <div className="table-wrap">
@@ -160,6 +162,7 @@ export default function MemberDetailPage() {
                 </table>
               </div>
             </section>
+            )}
           </>
         )}
       </main>

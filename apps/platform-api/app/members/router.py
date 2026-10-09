@@ -14,7 +14,7 @@ from sqlalchemy import func, select
 
 from app.admin_search import SearchPage, SearchText, check_period, kst_period
 from app.agent import access_log, record_subjects
-from app.auth.deps import CurrentOperator
+from app.auth.deps import PERMISSIONS, ExportOperator, MembersOperator, RefundViewOperator
 from app.crypto import refund_account_context
 from app.errors import ApiError
 from app.models import member, orders, payment, product, refund_account
@@ -40,7 +40,7 @@ def _csv_safe(value: object) -> str:
 @access_log(action="READ", data_category="MEMBER_BASIC")
 def list_members(
     request: Request,
-    _operator: CurrentOperator,
+    _operator: MembersOperator,
     page: Annotated[int, Query(ge=1)] = 1,
     size: Annotated[int, Query(ge=1, le=100)] = 20,
 ) -> dict:
@@ -85,7 +85,7 @@ class MemberSearch(SearchPage):
 
 @router.post("/search")
 @access_log(action="READ", data_category="MEMBER_BASIC")
-def search_members(body: MemberSearch, request: Request, _operator: CurrentOperator) -> dict:
+def search_members(body: MemberSearch, request: Request, _operator: MembersOperator) -> dict:
     """회원 검색 (v0.1 보강 E) — 조건은 본문, 접속기록에는 키 이름만 (app/admin_search.py)"""
     body.record_keys()
     m = member.c
@@ -120,7 +120,7 @@ def search_members(body: MemberSearch, request: Request, _operator: CurrentOpera
 @access_log(action="DOWNLOAD", data_category="MEMBER_BASIC")
 def export_members(
     request: Request,
-    _operator: CurrentOperator,
+    _operator: ExportOperator,
     joined_from: date | None = None,
     joined_to: date | None = None,
     limit: Annotated[int, Query(ge=1, le=EXPORT_MAX_ROWS)] = EXPORT_MAX_ROWS,
@@ -185,7 +185,7 @@ def _member_or_404(conn, member_id: int):
 
 @router.get("/{member_id}")
 @access_log(action="READ", data_category="MEMBER_BASIC")
-def get_member(member_id: int, request: Request, _operator: CurrentOperator) -> dict:
+def get_member(member_id: int, request: Request, operator_: MembersOperator) -> dict:
     """회원 상세 (PLT-11) — 환불계좌는 끝 4자리만. 전체 번호는 아래 별도 조회(결제수단)
 
     배송지는 싣지 않는다 — 배송지 마스킹·전체 보기는 v0.2 (db-schema 4절 플랫폼 보강).
@@ -200,25 +200,10 @@ def get_member(member_id: int, request: Request, _operator: CurrentOperator) -> 
             .mappings()
             .first()
         )
-        order_rows = conn.execute(
-            select(
-                orders.c.id,
-                product.c.name.label("product_name"),
-                orders.c.amount,
-                orders.c.status,
-                orders.c.ordered_at,
-                payment.c.card_company,
-            )
-            .select_from(
-                orders.join(product, product.c.id == orders.c.product_id).outerjoin(
-                    payment, payment.c.order_id == orders.c.id
-                )
-            )
-            .where(orders.c.member_id == member_id)
-            .order_by(orders.c.ordered_at.desc())
-            .limit(20)
-        ).mappings()
-        recent_orders = [dict(r) for r in order_rows]
+        # 주문 권한이 없는 역할(마케팅)에게는 회원의 주문을 싣지 않는다 (v0.1 보강 L-1)
+        recent_orders = (
+            _recent_orders(conn, member_id) if operator_.role in PERMISSIONS["ORDERS"] else None
+        )
     return {
         **dict(profile),
         "refund_account": masked_view(account),
@@ -226,9 +211,31 @@ def get_member(member_id: int, request: Request, _operator: CurrentOperator) -> 
     }
 
 
+def _recent_orders(conn, member_id: int) -> list[dict]:
+    rows = conn.execute(
+        select(
+            orders.c.id,
+            product.c.name.label("product_name"),
+            orders.c.amount,
+            orders.c.status,
+            orders.c.ordered_at,
+            payment.c.card_company,
+        )
+        .select_from(
+            orders.join(product, product.c.id == orders.c.product_id).outerjoin(
+                payment, payment.c.order_id == orders.c.id
+            )
+        )
+        .where(orders.c.member_id == member_id)
+        .order_by(orders.c.ordered_at.desc())
+        .limit(20)
+    ).mappings()
+    return [dict(r) for r in rows]
+
+
 @router.get("/{member_id}/refund-account")
 @access_log(action="READ", data_category="PAYMENT")
-def reveal_refund_account(member_id: int, request: Request, _operator: CurrentOperator) -> dict:
+def reveal_refund_account(member_id: int, request: Request, _operator: RefundViewOperator) -> dict:
     """환불계좌 전체 번호 — 데이터 유형 "결제수단"으로 기록 → Argus 결제수단 조회 룰(상)로 항상 탐지
 
     화면의 "전체 보기"를 눌렀을 때만 부른다(기능 레이어 7 결정 7). 복호화는 이 요청 안에서만 하고

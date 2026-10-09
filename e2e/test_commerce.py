@@ -1,7 +1,8 @@
 """주문·결제(PG 목업)·환불계좌 E2E (기능 레이어 7 ①)
 
-고객이 가상 PG로 구매하고 환불계좌를 등록 → 관리자(mkt_lee)가 회원 상세(끝 4자리)를 보고
-"전체 보기"를 누름 → 데이터 유형 PAYMENT로 기록 → relay → Argus → 결제수단 조회 룰(상) 탐지.
+고객이 가상 PG로 구매하고 환불계좌를 등록 → 관리자(cs_kim, 상담 역할 — v0.1 보강 L-1)가
+회원 상세(끝 4자리)를 보고 "전체 보기"를 누름 → 데이터 유형 PAYMENT로 기록 → relay → Argus →
+결제수단 조회 룰(상) 탐지.
 """
 
 import re
@@ -60,7 +61,10 @@ def test_payment_full_view_is_detected(officer):
     assert saved.json()["refund_account"]["account_last4"] == "5678"
 
     # ── 관리자: 회원 상세(끝 4자리) → 전체 보기(결제수단) ──────────
-    admin = platform_login("mkt_lee")
+    # 환불계좌 전체 보기는 관리자·운영·상담 역할만 (v0.1 보강 L-1) — 마케팅은 403
+    marketing = platform_login("mkt_lee")
+    assert marketing.get(f"/api/admin/members/{member_id}/refund-account").status_code == 403
+    admin = platform_login("cs_kim")
     detail = admin.get(f"/api/admin/members/{member_id}")
     assert detail.status_code == 200 and "000012345678" not in detail.text
     full = admin.get(f"/api/admin/members/{member_id}/refund-account")
@@ -76,12 +80,12 @@ def test_payment_full_view_is_detected(officer):
             (
                 i
                 for i in items
-                if i["rule_name"] == "결제수단 조회" and i["actor_login_id"] == "mkt_lee"
+                if i["rule_name"] == "결제수단 조회" and i["actor_login_id"] == "cs_kim"
             ),
             None,
         )
 
-    case = wait_until("mkt_lee의 결제수단 조회 탐지건 생성", probe)
+    case = wait_until("cs_kim의 결제수단 조회 탐지건 생성", probe)
     assert case["severity"] == "HIGH"
     body = officer_browser.get(f"/api/detections/{case['id']}").json()
     # 원장에는 회원 PK만 — 계좌번호·이름은 Argus로 가지 않는다 (CLAUDE.md 3절 #3)
