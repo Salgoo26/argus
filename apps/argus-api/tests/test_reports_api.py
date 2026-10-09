@@ -8,7 +8,7 @@ from datetime import UTC, datetime, timedelta, timezone
 
 import pytest
 from fastapi.testclient import TestClient
-from sqlalchemy import insert, select, text, update
+from sqlalchemy import func, insert, select, text, update
 
 from app.auth.passwords import hash_password
 from app.ledger.append import append_access_logs
@@ -25,7 +25,7 @@ from app.models import (
     source_system,
 )
 
-from conftest import TEST_CLIENT_ADDR, make_entry
+from conftest import TEST_CLIENT_ADDR, ledger_triggers_off, make_entry
 
 PASSWORD = "report-test-password-1"  # 테스트 전용 더미 값
 KST = timezone(timedelta(hours=9))
@@ -434,3 +434,72 @@ def test_overdue_explanations_are_counted(as_user, march, admin_engine):
             )
     summary = as_user("officer").post(REPORTS, json=MARCH).json()["summary"]
     assert summary["paths"]["APP"]["explanations"]["overdue"] == 2
+
+
+# ── 무결성 기준점 (v0.1 보강 I — 갭 A16, 안내서 95) ──────────
+
+
+def _ledger_tail(app_engine, last_id: int) -> tuple[str, int]:
+    with app_engine.connect() as conn:
+        last_hash = conn.execute(
+            select(access_log.c.hash).where(access_log.c.id == last_id)
+        ).scalar_one()
+        total = conn.execute(
+            select(func.count()).select_from(access_log).where(access_log.c.id <= last_id)
+        ).scalar_one()
+    return last_hash.strip(), total
+
+
+def test_integrity_snapshot_has_last_id_hash_and_total(as_user, march, app_engine):
+    integrity = as_user("officer").post(REPORTS, json=MARCH).json()["summary"]["integrity"]
+
+    # 보고서를 만든 순간의 원장 끝 — 생성 기록(EXPORT)은 그 뒤에 붙는다
+    last_hash, total = _ledger_tail(app_engine, integrity["last_id"])
+    assert integrity["last_hash"] == last_hash and len(last_hash) == 64
+    assert integrity["total"] == total
+    assert integrity["previous"] == {"status": "NONE", "report_id": None, "last_id": None}
+
+
+def test_next_report_confirms_the_previous_anchor(as_user, march):
+    officer = as_user("officer")
+    first = officer.post(REPORTS, json=MARCH).json()
+    second = officer.post(REPORTS, json=MARCH).json()["summary"]["integrity"]
+
+    assert second["previous"] == {
+        "status": "MATCH",
+        "report_id": first["id"],
+        "last_id": first["summary"]["integrity"]["last_id"],
+    }
+    assert second["last_id"] > first["summary"]["integrity"]["last_id"]
+
+
+def test_tail_deletion_shows_as_mismatch(as_user, march, admin_engine):
+    officer = as_user("officer")
+    first = officer.post(REPORTS, json=MARCH).json()["summary"]["integrity"]
+    # 소유자가 삭제 차단 트리거까지 끄고 끝부분(직전 보고서의 마지막 행 포함)을 지운 상황
+    with admin_engine.begin() as conn:
+        with ledger_triggers_off(conn, "trg_access_log_no_delete"):
+            conn.execute(text("DELETE FROM access_log WHERE id >= :id"), {"id": first["last_id"]})
+
+    second = officer.post(REPORTS, json=MARCH).json()["summary"]["integrity"]
+
+    # 남은 체인은 그대로 이어져 해시체인 검증은 통과한다 — 그래서 기준점 대조가 필요하다
+    assert second["ok"] is True
+    assert second["previous"]["status"] == "MISMATCH"
+    assert second["previous"]["last_id"] == first["last_id"]
+
+
+def test_older_reports_without_anchor_are_skipped(as_user, march, admin_engine):
+    # 이 기능 전에 만든 보고서(마지막 id 없음)는 비교 대상이 아니다
+    officer = as_user("officer")
+    first = officer.post(REPORTS, json=MARCH).json()
+    with admin_engine.begin() as conn:
+        conn.execute(
+            text(
+                "UPDATE inspection_report SET summary = summary #- '{integrity,last_id}' "
+                "WHERE id = :id"
+            ),
+            {"id": first["id"]},
+        )
+    second = officer.post(REPORTS, json=MARCH).json()["summary"]["integrity"]
+    assert second["previous"]["status"] == "NONE"

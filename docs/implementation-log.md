@@ -29,6 +29,35 @@
 
 ---
 
+## 2026-10-10 (5) — v0.1 보강 2차 PR 5: 본인 건 처리 차단 + 원장 삭제 차단·보고서 기준점 (설계 H·I)
+
+**한 일**
+- **H 본인 건 처리 차단**(갭 A18 — §8② 점검의 객관성): 담당자가 탐지건 행위자 본인이면 모든 상태 전이(요청·요청 취소·불요·승인·반려·재요청·에스컬레이션)가 403 `SELF_REVIEW_FORBIDDEN`. 본인 = 담당자 계정에 연결된 명부의 (출처, 계정), 연결이 없으면 로그인 아이디 = 행위자 아이디(출처 PLATFORM). 상세 응답에 `own_case`, 화면은 처리 칸 대신 "본인 건은 다른 담당자가 처리합니다"
+- 거부된 시도는 상태 이력에 남기지 않고 **Argus 자체 기록에 `UPDATE`·`ACCESS_LOG`·FAILURE**(context `target.detection_id`, 입력한 사유 문장은 미기록). 상태 전이 라우트는 계속 자체 기록 제외 — 거부된 시도만 남기는 `record_refused_change`를 Agent에 추가
+- **I 원장 삭제 차단**(갭 A16 — §8③): 마이그레이션 0017 — `access_log`에 DELETE 행 트리거 + TRUNCATE 문장 트리거(소유자 포함 거부). 파기 배치(v0.2) 때 재설계한다고 주석
+- **보고서 기준점**: 스냅샷 `integrity`에 `total`·`last_id`·`last_hash`, `previous`(직전 보고서 마지막 행이 같은 해시로 남아 있는지 MATCH/MISMATCH/NONE). 화면에 기준점(해시 전체)·대조 결과, 불일치면 맨 위 경고
+- 테스트: argus `test_self_review.py` 20개(연결 담당자 7전이 403·연결 없는 담당자 7전이 403·다른 담당자 처리 가능·남의 건 처리 가능·다른 출처 같은 아이디는 남·상세 `own_case`·**거부 시도 FAILURE 기록(사유 문장 없음)**·성공 전이는 자체 기록 제외 유지), `test_append_only.py::test_trigger_blocks_delete_and_truncate_even_for_owner`(3), `test_reports_api.py` 4개(`test_integrity_snapshot_has_last_id_hash_and_total`, `test_next_report_confirms_the_previous_anchor`, **`test_tail_deletion_shows_as_mismatch`**(해시체인은 통과하는데 대조로 잡힘), `test_older_reports_without_anchor_are_skipped`) / 테스트 정리(conftest `clean_ledger`, `test_deletion_is_detected`)는 같은 트랜잭션에서 트리거를 잠시 끄는 `ledger_triggers_off`로 / E2E `test_v01_reinforcement2.py::test_report_keeps_ledger_anchor_and_checks_the_previous_one`
+
+**결정사항**
+- 상태 전이 라우트는 성공 시 자체 기록 제외(상태 이력이 증적)를 유지하고, **규칙으로 거부된 본인 건 시도만** FAILURE로 남긴다 — 설계의 "기존 거부 처리와 같게"를 제외 라우트에 맞춘 방식. 수행업무는 `UPDATE`(상태 변경 시도), 데이터 유형 `ACCESS_LOG`
+- 판정 순서: 역할(403 FORBIDDEN) → 본인 건(403 SELF_REVIEW_FORBIDDEN) → 상태 전이 표(409). 본인 건은 상태와 관계없이 막는다
+- 연결된 담당자는 **연결로만** 판정(아이디 대조를 겹쳐 하지 않음) — 연결된 계정과 아이디가 같은 다른 사람을 잘못 막지 않게
+- 직전 보고서 = 기준점(`last_id`)을 남긴 보고서 중 가장 최근(범위 무관 — 원장 전체 기준). 이 기능 전 보고서는 비교 대상에서 뺀다
+- 해시는 화면·인쇄에 **전체 64자**를 보인다(관리대장에 붙여 대조하는 용도)
+
+**설계 변경**
+- 무엇을: 설계 H·I. 거부된 본인 건 시도의 자체 기록 형식(`UPDATE`·`ACCESS_LOG`·FAILURE)을 정함
+- 영향 문서: policy 3절(본인 건 처리 불가), api-spec(전이 API 403 `SELF_REVIEW_FORBIDDEN`, 상세 `own_case`, 2-7 자체 기록 — 제외 라우트의 거부 시도), db-schema(access_log 트리거 0017, inspection_report.summary.integrity 항목), architecture(§8③ 한계 — 소유자·슈퍼유저 트리거 해제, 보고서 출력 운영 전제), actor-flows F-05(본인 건 열람만)
+
+**미결·이슈**
+- 소유자·슈퍼유저는 트리거를 끌 수 있다(테스트도 그렇게 재현). 보고서도 같은 DB라, **출력해 결재문서(관리대장)에 붙이는 운영**이 전제 — README 알려진 한계 후보
+- 파기 배치(v0.2)는 지금 트리거에 막힌다 — 그때 파기 전용 경로로 재설계(마이그레이션 0017 주석)
+
+**다음 할 일**
+- PR 6(J 소명 단위 보완)
+
+---
+
 ## 2026-10-10 (4) — v0.1 보강 PR 4: 알림 — 화면 알림·소명 기한·웹 푸시 (설계 F)
 
 **한 일**

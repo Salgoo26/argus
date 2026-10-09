@@ -15,6 +15,9 @@
 - POST .../escalate  담당자: 에스컬레이션(종결)
 
 접근 통제
+- **본인 건은 처리할 수 없다**(v0.1 보강 H — 고시 §8② 점검의 객관성): 담당자가 탐지건의 행위자
+  본인이면 모든 상태 전이가 403 `SELF_REVIEW_FORBIDDEN`. 열람은 된다. 거부된 시도는 상태 이력이
+  아니라 Argus 자체 접속기록에 FAILURE로 남는다
 - 취급자에게 보이지 않는 건(남의 건, 아직 요청 전인 건)은 403이 아니라 **404**
   — 존재 여부가 드러나지 않게
 - 취급자 노출 범위를 "요청받은 건"으로 둔 이유:
@@ -31,14 +34,20 @@ from typing import Annotated, Literal
 
 from fastapi import APIRouter, BackgroundTasks, Request
 from pydantic import BaseModel, BeforeValidator, Field, StringConstraints, model_validator
-from sqlalchemy import Connection, and_, case, func, insert, select, update
+from sqlalchemy import Connection, and_, case, false, func, insert, select, update
 
-from app.agent import access_log, access_log_exempt, record_query_keys, record_subject_count
+from app.agent import (
+    access_log,
+    access_log_exempt,
+    record_query_keys,
+    record_refused_change,
+    record_subject_count,
+)
 from app.auth.deps import AuthenticatedUser, CurrentUser
 from app.detection.rules import KST
 from app.detections.db_detail import db_detail
 from app.detections.masking import mask_subject
-from app.detections.transitions import ACTION_ROLES, HANDLER, TRANSITIONS
+from app.detections.transitions import ACTION_ROLES, HANDLER, OFFICER, TRANSITIONS
 from app.errors import ApiError
 from app.models import access_log as access_log_table
 from app.models import (
@@ -49,6 +58,7 @@ from app.models import (
     explanation,
     explanation_attachment,
     handler,
+    source_system,
 )
 from app.notifications.events import due_at, on_requested, on_submitted
 from app.notifications.webpush import dispatch_pending
@@ -94,6 +104,30 @@ def _visible(query, user: AuthenticatedUser):
         )
         .exists(),
         detection.c.round >= 1,
+    )
+
+
+def _own_case(user: AuthenticatedUser):
+    """담당자 본인이 행위자인 건인가 (v0.1 보강 H) — SQL 조건식
+    - 담당자 계정에 연결된 명부가 있으면 그 (출처, 계정)이 탐지건 행위자와 같은가
+    - 연결이 없으면 담당자 로그인 아이디 = 탐지건 행위자 아이디(출처 PLATFORM)"""
+    if user.role != OFFICER:
+        return false()
+    if user.handler_id is not None:
+        me = handler.alias("me")
+        return (
+            select(me.c.id)
+            .where(
+                me.c.id == user.handler_id,
+                me.c.source_system_id == detection.c.source_system_id,
+                me.c.login_id == detection.c.actor_login_id,
+            )
+            .exists()
+        )
+    platform = select(source_system.c.id).where(source_system.c.code == "PLATFORM")
+    return and_(
+        detection.c.source_system_id == platform.scalar_subquery(),
+        detection.c.actor_login_id == user.login_id,
     )
 
 
@@ -221,7 +255,11 @@ def search_detections(body: CaseSearch, request: Request, user: CurrentUser) -> 
 def get_detection(detection_id: int, request: Request, user: CurrentUser) -> dict:
     with request.app.state.engine.connect() as conn:
         row = (
-            conn.execute(_visible(_case_query(), user).where(detection.c.id == detection_id))
+            conn.execute(
+                _visible(_case_query().add_columns(_own_case(user).label("own_case")), user).where(
+                    detection.c.id == detection_id
+                )
+            )
             .mappings()
             .first()
         )
@@ -245,6 +283,8 @@ def get_detection(detection_id: int, request: Request, user: CurrentUser) -> dic
         },
         "log_summary": row["log_summary"],
         "close_reason": row["close_reason"],
+        # 담당자 본인이 행위자인 건 — 열람만, 처리는 다른 담당자가 (v0.1 보강 H)
+        "own_case": bool(row["own_case"]),
         "logs": logs,
         "explanations": explanations,
         "history": history,
@@ -438,12 +478,16 @@ def _transition(
             conn.execute(
                 _visible(
                     select(
-                        detection.c.id, detection.c.status, detection.c.round, detection.c.severity
+                        detection.c.id,
+                        detection.c.status,
+                        detection.c.round,
+                        detection.c.severity,
+                        _own_case(user).label("own_case"),
                     ),
                     user,
                 )
                 .where(detection.c.id == detection_id)
-                .with_for_update()
+                .with_for_update(of=detection)
             )
             .mappings()
             .first()
@@ -452,6 +496,12 @@ def _transition(
             raise _not_found()
         if ACTION_ROLES[action] != user.role:
             raise ApiError(403, "FORBIDDEN", f"{action} is not allowed for {user.role}")
+        if row["own_case"]:
+            # 본인 건 — 어떤 상태든 거부. 상태 이력에는 남지 않으므로 자체 접속기록에 FAILURE로
+            record_refused_change(detection_id)
+            raise ApiError(
+                403, "SELF_REVIEW_FORBIDDEN", "your own case must be handled by another officer"
+            )
         transition = TRANSITIONS.get((action, row["status"]))
         if transition is None:
             raise ApiError(409, "INVALID_TRANSITION", f"cannot {action} a {row['status']} case")

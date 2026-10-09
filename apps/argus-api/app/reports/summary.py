@@ -11,6 +11,9 @@
 - 감시 대상(플랫폼) 기록만 집계한다. Argus 자체 접속기록은 점검 행위의 기록이라 섹션에 섞지 않는다
 - 탐지건마다 처리 내용을 싣는다(v0.1 보강 B): 마지막 차수 소명 요지·검토 결과와 의견·관련 티켓·
   첨부 개수, 처리 담당자·일시, 요청 취소 사유. 자유 입력은 앞 200자만
+- 무결성에 원장 마지막 id·해시·건수와 직전 보고서 대조 결과를 싣는다(v0.1 보강 I).
+  보고서도 같은 DB에
+  있으므로 출력해 결재문서(관리대장)에 붙이는 운영이 전제다
 """
 
 from datetime import datetime
@@ -30,6 +33,7 @@ from app.models import (
     explanation,
     explanation_attachment,
     handler,
+    inspection_report,
     source_system,
 )
 
@@ -46,15 +50,64 @@ def build_summary(conn: Connection, start: datetime, end: datetime, scope: str) 
     platform_id = conn.execute(
         select(source_system.c.id).where(source_system.c.code == PLATFORM)
     ).scalar_one()
-    chain = verify_chain(conn)
     return {
         "period": {"from": start.isoformat(), "to": end.isoformat()},
         "scope": scope,
-        # §8③ 위·변조 점검 — 보고서를 만들 때 원장 전체의 해시체인을 다시 계산한 결과
-        "integrity": {"ok": chain.ok, "checked": chain.checked, "broken_at": chain.broken_at_id},
+        "integrity": _integrity(conn),
         # §8② 점검 수행 — 기간 중 탐지 배치(자동 점검)가 실제로 돌았는지
         "patrol": _patrol(conn, start, end),
         "paths": {path: _section(conn, platform_id, path, start, end) for path in paths},
+    }
+
+
+def _integrity(conn: Connection) -> dict[str, Any]:
+    """§8③ 위·변조 점검 (안내서 95 "위·변조 확인 정보를 별도 저장매체 또는 관리대장에")
+    - 보고서를 만들 때 원장 전체의 해시체인을 다시 계산한 결과
+    - 원장의 **마지막 id·해시·전체 건수** — 출력한 보고서(관리대장)가 DB 밖의 기준점이 된다
+    - **직전 보고서의 마지막 행**이 같은 해시로 남아 있는지 — 끝부분을 지우면 남은 체인은 그대로
+      이어져 해시체인 검증만으로는 못 잡는다(v0.1 보강 I, 갭 A16)
+    """
+    a = access_log.c
+    chain = verify_chain(conn)
+    total, last_id = conn.execute(select(func.count(), func.max(a.id))).one()
+    last_hash = (
+        conn.execute(select(a.hash).where(a.id == last_id)).scalar_one().strip()
+        if last_id is not None
+        else None
+    )
+    return {
+        "ok": chain.ok,
+        "checked": chain.checked,
+        "broken_at": chain.broken_at_id,
+        "total": total,
+        "last_id": last_id,
+        "last_hash": last_hash,
+        "previous": _previous_anchor(conn),
+    }
+
+
+def _previous_anchor(conn: Connection) -> dict[str, Any]:
+    """직전 보고서(마지막 id를 남긴 것 중 가장 최근)의 마지막 행 대조
+    MATCH = 같은 해시로 남아 있음 / MISMATCH = 없거나 해시가 다름 / NONE = 비교할 보고서 없음"""
+    r = inspection_report.c
+    anchor_id = r.summary["integrity"]["last_id"].as_integer()
+    previous = conn.execute(
+        select(r.id, anchor_id.label("last_id"), r.summary["integrity"]["last_hash"].as_string())
+        .where(anchor_id.is_not(None))
+        .order_by(r.id.desc())
+        .limit(1)
+    ).first()
+    if previous is None:
+        return {"status": "NONE", "report_id": None, "last_id": None}
+    report_id, last_id, last_hash = previous
+    current = conn.execute(
+        select(access_log.c.hash).where(access_log.c.id == last_id)
+    ).scalar_one_or_none()
+    matched = current is not None and current.strip() == last_hash
+    return {
+        "status": "MATCH" if matched else "MISMATCH",
+        "report_id": report_id,
+        "last_id": last_id,
     }
 
 

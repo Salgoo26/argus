@@ -176,6 +176,7 @@ export type CaseDetail = CaseSummary & {
   };
   log_summary: { subject_ids_truncated?: boolean } | null;
   close_reason: string | null;
+  own_case: boolean; // 담당자 본인이 행위자인 건 — 열람만 (v0.1 보강 H)
   logs: CaseLog[];
   explanations: Explanation[];
   history: HistoryEntry[];
@@ -288,7 +289,16 @@ export type ReportSection = {
 export type ReportSummary = {
   period: { from: string; to: string };
   scope: ReportScope;
-  integrity: { ok: boolean; checked: number; broken_at: number | null };
+  integrity: {
+    ok: boolean;
+    checked: number;
+    broken_at: number | null;
+    // 원장 기준점 (v0.1 보강 I) — 이전 보고서에는 없다
+    total?: number;
+    last_id?: number | null;
+    last_hash?: string | null;
+    previous?: { status: "MATCH" | "MISMATCH" | "NONE"; report_id: number | null; last_id: number | null };
+  };
   patrol: { runs: number; success: number; failed: number; last_success_at: string | null };
   paths: Partial<Record<"APP" | "DB", ReportSection>>;
 };

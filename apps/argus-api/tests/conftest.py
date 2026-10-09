@@ -10,6 +10,7 @@ import os
 import secrets
 import time
 import uuid
+from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -132,14 +133,27 @@ def client(app):
 
 @pytest.fixture(autouse=True)
 def clean_ledger(request):
-    """테스트마다 원장을 비운다. TRUNCATE는 소유자만 가능(앱 롤엔 권한 없음)."""
+    """테스트마다 원장을 비운다. TRUNCATE는 소유자만 가능(앱 롤엔 권한 없음)하고, 소유자도
+    삭제 차단 트리거(0017)를 거치므로 같은 트랜잭션 안에서 트리거를 잠시 끈다(테스트 정리 전용)."""
     if "test_db" not in request.fixturenames and "client" not in request.fixturenames:
         yield
         return
     engine = request.getfixturevalue("admin_engine")
     with engine.begin() as conn:
-        conn.exec_driver_sql("TRUNCATE access_log RESTART IDENTITY CASCADE")
+        with ledger_triggers_off(conn, "trg_access_log_no_truncate"):
+            conn.exec_driver_sql("TRUNCATE access_log RESTART IDENTITY CASCADE")
     yield
+
+
+@contextmanager
+def ledger_triggers_off(conn, *triggers: str):
+    """원장 보호 트리거를 이 트랜잭션 안에서만 끈다 — 테스트 정리와 "소유자가 트리거를 끄고
+    지운" 상황 재현용. 커밋 전에 다시 켜므로 다른 연결에는 꺼진 상태가 보이지 않는다"""
+    for name in triggers:
+        conn.exec_driver_sql(f"ALTER TABLE access_log DISABLE TRIGGER {name}")
+    yield
+    for name in triggers:
+        conn.exec_driver_sql(f"ALTER TABLE access_log ENABLE TRIGGER {name}")
 
 
 # ── 탐지 룰 ───────────────────────────────────────────────
