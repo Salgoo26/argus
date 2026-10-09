@@ -2,10 +2,20 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useCallback, useEffect, useState } from "react";
+import { type FormEvent, useCallback, useEffect, useState } from "react";
 
 import { AppHeader } from "@/components/app-header";
-import { ApiError, adminLoginPath, api, errorMessage, formatDateTime, type Operator, won } from "@/lib/api";
+import {
+  ApiError,
+  adminLoginPath,
+  api,
+  errorMessage,
+  formCriteria,
+  formatDateTime,
+  type Operator,
+  type SearchBody,
+  won,
+} from "@/lib/api";
 
 type AdminOrder = {
   id: number;
@@ -21,6 +31,8 @@ type AdminOrder = {
 type OrderPage = { items: AdminOrder[]; page: number; size: number; total: number };
 
 const PAGE_SIZE = 20;
+const FIRST_PAGE: SearchBody = { page: 1, size: PAGE_SIZE };
+const SEARCH_KEYS = ["order_id", "member_id", "status", "ordered_from", "ordered_to"];
 
 // 주문·결제 조회 (PLT-16) — 접속기록(READ, 주문)으로 남는다. 결제수단 정보는 카드사 이름뿐
 // (카드번호는 저장하지 않음 — PG 목업)
@@ -28,7 +40,8 @@ export default function AdminOrdersPage() {
   const router = useRouter();
   const [me, setMe] = useState<Operator | null>(null);
   const [data, setData] = useState<OrderPage | null>(null);
-  const [page, setPage] = useState(1);
+  const [criteria, setCriteria] = useState<SearchBody>(FIRST_PAGE);
+  const page = criteria.page;
   const [error, setError] = useState<string | null>(null);
 
   const handleError = useCallback(
@@ -44,8 +57,16 @@ export default function AdminOrdersPage() {
   }, [handleError]);
 
   useEffect(() => {
-    api<OrderPage>(`/admin/orders?page=${page}&size=${PAGE_SIZE}`).then(setData).catch(handleError);
-  }, [page, handleError]);
+    // 검색 조건은 본문으로 (v0.1 보강 E) — 결과로 보인 주문의 회원이 정보주체로 남는다
+    api<OrderPage>("/admin/orders/search", { method: "POST", body: JSON.stringify(criteria) })
+      .then(setData)
+      .catch(handleError);
+  }, [criteria, handleError]);
+
+  function onSearch(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setCriteria(formCriteria(new FormData(event.currentTarget), SEARCH_KEYS, ["order_id", "member_id"]));
+  }
 
   const lastPage = data ? Math.max(1, Math.ceil(data.total / PAGE_SIZE)) : 1;
 
@@ -58,6 +79,40 @@ export default function AdminOrdersPage() {
           주문 조회도 접속기록으로 남습니다. 카드번호는 PG사만 처리하며 쇼핑몰은 저장하지 않습니다.
         </p>
         {error && <div className="alert-error">{error}</div>}
+        <section className="card">
+          <h2 className="card-title">주문 검색</h2>
+          <form className="toolbar" onSubmit={onSearch} onReset={() => setCriteria(FIRST_PAGE)}>
+            <div className="field">
+              <label htmlFor="s_order_id">주문번호</label>
+              <input id="s_order_id" name="order_id" type="number" min={1} style={{ width: 110 }} />
+            </div>
+            <div className="field">
+              <label htmlFor="s_member_id">회원번호</label>
+              <input id="s_member_id" name="member_id" type="number" min={1} style={{ width: 110 }} />
+            </div>
+            <div className="field">
+              <label htmlFor="s_status">주문 상태</label>
+              <select id="s_status" name="status" defaultValue="">
+                <option value="">전체</option>
+                <option value="PAID">결제 완료</option>
+              </select>
+            </div>
+            <div className="field">
+              <label htmlFor="s_ordered_from">주문일 시작</label>
+              <input id="s_ordered_from" name="ordered_from" type="date" />
+            </div>
+            <div className="field">
+              <label htmlFor="s_ordered_to">주문일 끝</label>
+              <input id="s_ordered_to" name="ordered_to" type="date" />
+            </div>
+            <button className="btn btn-primary" type="submit">
+              검색
+            </button>
+            <button className="btn btn-secondary" type="reset">
+              초기화
+            </button>
+          </form>
+        </section>
         <section className="card">
           <h2 className="card-title">
             주문 목록 <span className="muted">총 {data?.total ?? "-"}건</span>
@@ -104,7 +159,7 @@ export default function AdminOrdersPage() {
             <button
               className="btn btn-secondary"
               disabled={page <= 1}
-              onClick={() => setPage((p) => p - 1)}
+              onClick={() => setCriteria((c) => ({ ...c, page: c.page - 1 }))}
             >
               이전
             </button>
@@ -114,7 +169,7 @@ export default function AdminOrdersPage() {
             <button
               className="btn btn-secondary"
               disabled={page >= lastPage}
-              onClick={() => setPage((p) => p + 1)}
+              onClick={() => setCriteria((c) => ({ ...c, page: c.page + 1 }))}
             >
               다음
             </button>

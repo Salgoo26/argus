@@ -54,4 +54,11 @@ if dc logs --no-color 2>&1 | grep -E -q '1234567890123452|1234-5678-9012-3452'; 
   echo "실패: 컨테이너 로그에 가상 카드번호가 남았습니다" >&2
   exit 1
 fi
+# 관리자 검색어가 서버 로그에 남지 않았는지 (v0.1 보강 E) — 검색은 POST 본문으로 보내므로
+# 접근 로그(요청 줄)에도 실리지 않아야 한다. 값은 e2e/test_v01_reinforcement.py의 SEARCH_NEEDLE
+echo "── 서버 로그 검색어 검사 ──"
+if dc logs --no-color 2>&1 | grep -q 'e2e-search-needle-7q'; then
+  echo "실패: 컨테이너 로그에 관리자 검색어가 남았습니다" >&2
+  exit 1
+fi
 echo "E2E 통과"

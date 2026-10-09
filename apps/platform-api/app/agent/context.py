@@ -65,6 +65,14 @@ def record_subjects(ids: Iterable[int | str], count: int | None = None) -> None:
     record.subject_count = len(record.subject_ids) if count is None else count
 
 
+def record_query_keys(keys: Iterable[str]) -> None:
+    """검색 조건의 **키 이름** — 본문(POST)으로 받은 검색용 (v0.1 보강 E). 값은 넘기지 않는다.
+    URL 쿼리의 키 이름은 미들웨어가 이미 적어 두며, 이 함수가 그것을 대신한다."""
+    record = _current.get()
+    if record is not None:
+        record.query_keys = sorted(set(keys))
+
+
 CONTEXT_KEYS = frozenset({"ticket_id"})  # 플랫폼이 쓰는 api-spec 2-3 context 키
 
 

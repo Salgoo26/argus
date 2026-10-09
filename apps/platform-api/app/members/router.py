@@ -1,4 +1,4 @@
-"""회원 목록·상세·다운로드·결제수단 조회 (PLT-11, PLT-13, PLT-16) — 감시 대상 관리자 기능
+"""회원 목록·검색·상세·다운로드·결제수단 조회 (PLT-11, PLT-13, PLT-16) — 감시 대상 관리자 기능
 
 접속기록: 각 라우트의 @access_log 문패 + record_subjects(조회·다운로드한 회원 PK).
 """
@@ -6,11 +6,13 @@
 import csv
 import io
 from datetime import UTC, date, datetime, time, timedelta, timezone
-from typing import Annotated
+from typing import Annotated, Literal
 
 from fastapi import APIRouter, Query, Request, Response
+from pydantic import StringConstraints, model_validator
 from sqlalchemy import func, select
 
+from app.admin_search import SearchPage, SearchText, check_period, kst_period
 from app.agent import access_log, record_subjects
 from app.auth.deps import CurrentOperator
 from app.crypto import refund_account_context
@@ -61,6 +63,57 @@ def list_members(
     # 화면에 표시된 회원 = 처리한 정보주체 (api-spec 2-4 "회원 목록 조회, 20건 표시")
     record_subjects(item["id"] for item in items)
     return {"items": items, "page": page, "size": size, "total": total}
+
+
+class MemberSearch(SearchPage):
+    name: SearchText | None = None
+    email: SearchText | None = None
+    # 하이픈은 있어도 없어도 된다 — 숫자만 비교
+    phone: (
+        Annotated[str, StringConstraints(strip_whitespace=True, pattern=r"^[0-9][0-9-]{0,19}$")]
+        | None
+    ) = None
+    status: Literal["ACTIVE", "WITHDRAWN"] | None = None
+    joined_from: date | None = None  # 한국 날짜, 양 끝 포함
+    joined_to: date | None = None
+
+    @model_validator(mode="after")
+    def _period(self):
+        check_period(self.joined_from, self.joined_to)
+        return self
+
+
+@router.post("/search")
+@access_log(action="READ", data_category="MEMBER_BASIC")
+def search_members(body: MemberSearch, request: Request, _operator: CurrentOperator) -> dict:
+    """회원 검색 (v0.1 보강 E) — 조건은 본문, 접속기록에는 키 이름만 (app/admin_search.py)"""
+    body.record_keys()
+    m = member.c
+    conditions = kst_period(m.created_at, body.joined_from, body.joined_to)
+    # 부분 일치 — 입력의 % _ 는 글자 그대로 (autoescape)
+    if body.name:
+        conditions.append(m.name.contains(body.name, autoescape=True))
+    if body.email:
+        conditions.append(m.email.contains(body.email, autoescape=True))
+    if body.phone:
+        digits = body.phone.replace("-", "")
+        conditions.append(func.replace(m.phone, "-", "").contains(digits, autoescape=True))
+    if body.status:
+        conditions.append(m.status == body.status)
+
+    with request.app.state.engine.connect() as conn:
+        total = conn.execute(select(func.count()).where(*conditions)).scalar_one()
+        rows = conn.execute(
+            select(m.id, m.name, m.email, m.phone, m.status, m.created_at)
+            .where(*conditions)
+            .order_by(m.id)
+            .limit(body.size)
+            .offset((body.page - 1) * body.size)
+        ).mappings()
+        items = [dict(r) for r in rows]
+    # 결과로 화면에 보인 회원 전부 = 처리한 정보주체 (0건이어도 기록)
+    record_subjects(item["id"] for item in items)
+    return {"items": items, "page": body.page, "size": body.size, "total": total}
 
 
 @router.get("/export")

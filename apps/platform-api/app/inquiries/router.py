@@ -5,12 +5,14 @@ F-02 흐름: 문의 목록(READ) → 문의 상세(READ, **티켓 ID 확보**) �
 "CS가 이 고객을 왜 조회했나"를 Argus에서 문의 번호로 설명할 수 있다(소명 근거 — 결정 9).
 """
 
+from datetime import date
 from typing import Annotated, Literal
 
 from fastapi import APIRouter, Query, Request
-from pydantic import AfterValidator, BaseModel, Field
+from pydantic import AfterValidator, BaseModel, Field, model_validator
 from sqlalchemy import func, select, true, update
 
+from app.admin_search import SearchPage, SearchText, check_period, kst_period
 from app.agent import access_log, record_context, record_subjects
 from app.auth.deps import CurrentOperator
 from app.errors import ApiError
@@ -38,10 +40,43 @@ def list_inquiries(
     size: Annotated[int, Query(ge=1, le=100)] = 20,
 ) -> dict:
     """목록에는 본문을 싣지 않는다 — 제목·작성자·상태만 (최소 노출)"""
-    condition = inquiry.c.status == status if status else true()
+    conditions = [inquiry.c.status == status] if status else [true()]
+    return _page(request, conditions, page, size)
+
+
+class InquirySearch(SearchPage):
+    status: Literal["OPEN", "ANSWERED"] | None = None
+    member_id: Annotated[int, Field(ge=1)] | None = None
+    created_from: date | None = None  # 한국 날짜, 양 끝 포함
+    created_to: date | None = None
+    title: SearchText | None = None  # 부분 일치
+
+    @model_validator(mode="after")
+    def _period(self):
+        check_period(self.created_from, self.created_to)
+        return self
+
+
+@router.post("/search")
+@access_log(action="READ", data_category="INQUIRY")
+def search_inquiries(body: InquirySearch, request: Request, _operator: CurrentOperator) -> dict:
+    """문의 검색 (v0.1 보강 E) — 조건은 본문, 접속기록에는 키 이름만 (app/admin_search.py)"""
+    body.record_keys()
+    q = inquiry.c
+    conditions = kst_period(q.created_at, body.created_from, body.created_to)
+    if body.status:
+        conditions.append(q.status == body.status)
+    if body.member_id:
+        conditions.append(q.member_id == body.member_id)
+    if body.title:
+        conditions.append(q.title.contains(body.title, autoescape=True))
+    return _page(request, conditions or [true()], body.page, body.size)
+
+
+def _page(request: Request, conditions: list, page: int, size: int) -> dict:
     with request.app.state.engine.connect() as conn:
         total = conn.execute(
-            select(func.count()).select_from(inquiry).where(condition)
+            select(func.count()).select_from(inquiry).where(*conditions)
         ).scalar_one()
         rows = conn.execute(
             select(
@@ -54,7 +89,7 @@ def list_inquiries(
                 inquiry.c.answered_at,
             )
             .select_from(inquiry.outerjoin(member, member.c.id == inquiry.c.member_id))
-            .where(condition)
+            .where(*conditions)
             .order_by(inquiry.c.created_at.desc(), inquiry.c.id.desc())
             .limit(size)
             .offset((page - 1) * size)

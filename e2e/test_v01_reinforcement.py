@@ -94,3 +94,37 @@ def test_detection_search_takes_conditions_in_the_body(officer):
         (officer[0],),
     )
     assert keys == ["actor", "size", "sort"]
+
+
+# ── 플랫폼 관리자 검색 (v0.1 보강 E) ─────────────────────────
+
+# scripts/e2e.sh가 모든 컨테이너 로그에서 이 값을 찾는다 — 검색어가 서버 로그에 남으면 실패
+SEARCH_NEEDLE = "e2e-search-needle-7q"
+
+
+def test_platform_member_search_records_shown_members_not_search_values():
+    admin = platform_login("ops_park")
+    res = admin.post("/api/admin/members/search", json={"email": "user00", "size": 50})
+    assert res.status_code == 200, res.text
+    shown = sorted(str(m["id"]) for m in res.json()["items"])
+    assert shown  # 시드 회원 user0001~ 가 걸린다
+    # 검색어를 바꿔 0건도 남는지 — 이 값은 서버 로그에도 없어야 한다(scripts/e2e.sh)
+    empty = admin.post("/api/admin/members/search", json={"name": SEARCH_NEEDLE})
+    assert empty.status_code == 200 and empty.json()["items"] == []
+
+    def arrived():
+        rows = _ledger(
+            "SELECT subject_ids, subject_count, request_query_keys FROM access_log"
+            " WHERE request_path = '/admin/members/search' AND actor_login_id = %s"
+            " ORDER BY id DESC LIMIT 2",
+            ("ops_park",),
+        )
+        return rows if len(rows) == 2 else None
+
+    zero, found = wait_until("검색 접속기록 원장 도착", arrived)
+    # 결과로 보인 회원 PK 전부가 정보주체 (안내서 129쪽 누락 사례 ② — 공란이 아니다)
+    assert sorted(found[0]) == shown and found[1] == len(shown)
+    assert found[2] == ["email", "size"]  # 키 이름만
+    assert zero[1] == 0 and zero[2] == ["name"]
+    everything = str(_ledger("SELECT request_query_keys, context FROM access_log", ()))
+    assert SEARCH_NEEDLE not in everything and "user00" not in everything
