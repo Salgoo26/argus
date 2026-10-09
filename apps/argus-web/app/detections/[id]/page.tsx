@@ -192,6 +192,13 @@ export default function DetectionDetailPage() {
                     </ul>
                   </div>
                 )}
+                {me?.role === "HANDLER" && (
+                  // 소명은 자유 입력이라 점검 보고서에 요지가 그대로 실린다 (v0.1 보강 B)
+                  <p className="privacy-note">
+                    고객 이름·연락처 등 개인정보는 적지 말고 회원번호·주문번호로 적어 주세요. 소명
+                    요지는 점검 보고서에 실립니다.
+                  </p>
+                )}
                 <textarea
                   value={text}
                   onChange={(e) => setText(e.target.value)}

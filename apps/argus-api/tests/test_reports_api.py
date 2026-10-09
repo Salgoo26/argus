@@ -17,7 +17,9 @@ from app.models import (
     argus_user,
     detection,
     detection_log,
+    detection_status_history,
     explanation,
+    explanation_attachment,
     handler,
     inspection_report,
     source_system,
@@ -72,6 +74,7 @@ def accounts(admin_engine, password_hash):
             "inspection_report",
             "detection_log",
             "detection_status_history",
+            "explanation_attachment",
             "explanation",
             "detection",
             "argus_user",
@@ -269,3 +272,136 @@ def test_invalid_conditions_are_400(as_user, body):
 
 def test_unknown_report_is_404(as_user):
     assert as_user("officer").get(f"{REPORTS}/999999").status_code == 404
+
+
+# ── 탐지건별 처리 내용 (v0.1 보강 B — 실무 결재문서처럼 "어떻게 처리했는지"까지) ──
+
+
+def _officer_id(conn) -> int:
+    return conn.execute(select(argus_user.c.id).where(argus_user.c.login_id == "officer")).scalar()
+
+
+def test_cases_carry_the_latest_explanation_and_who_handled_it(as_user, march, admin_engine):
+    long_content = "주문번호 1234 배송지 확인 업무" + "가" * 250  # 200자 넘는 소명
+    with admin_engine.begin() as conn:
+        officer_id = _officer_id(conn)
+        handler_id = conn.execute(
+            select(argus_user.c.id).where(argus_user.c.login_id == "ops_park")
+        ).scalar()
+        conn.execute(
+            insert(explanation).values(
+                detection_id=march,
+                round=2,
+                requested_by=officer_id,
+                requested_at=WHEN + timedelta(days=3),
+                submitted_by=handler_id,
+                submitted_at=WHEN + timedelta(days=4),
+                content=long_content,
+                ticket_ids=["INQ-7", "INQ-9"],
+                reviewed_by=officer_id,
+                reviewed_at=WHEN + timedelta(days=5),
+                review_result="REJECTED",
+                review_comment="근거 티켓과 처리 건수가 맞지 않음",
+            )
+        )
+        second = conn.execute(
+            select(explanation.c.id).where(
+                explanation.c.detection_id == march, explanation.c.round == 2
+            )
+        ).scalar()
+        for n in range(2):
+            conn.execute(
+                insert(explanation_attachment).values(
+                    explanation_id=second,
+                    original_name=f"evidence{n}.png",
+                    stored_path=f"/data/attachments/x{n}",
+                    content_type="image/png",
+                    size_bytes=10,
+                    sha256="0" * 64,
+                )
+            )
+        conn.execute(
+            insert(detection_status_history).values(
+                detection_id=march,
+                from_status="REJECTED",
+                to_status="ESCALATED",
+                round=2,
+                actor_user_id=officer_id,
+                comment="정보보안팀 이관",
+                created_at=WHEN + timedelta(days=6),
+            )
+        )
+
+    summary = as_user("officer").post(REPORTS, json=MARCH).json()["summary"]
+    [case] = summary["paths"]["APP"]["cases"]
+    shown = case["explanation"]
+    assert shown["round"] == 2  # 마지막 차수
+    assert shown["content"] == long_content[:200] + "…"  # 요지 200자
+    assert shown["review_result"] == "REJECTED"
+    assert shown["review_comment"] == "근거 티켓과 처리 건수가 맞지 않음"
+    assert shown["ticket_ids"] == ["INQ-7", "INQ-9"]
+    assert shown["attachment_count"] == 2
+    assert case["handled_by"] == "officer"
+    assert datetime.fromisoformat(case["handled_at"]) == WHEN + timedelta(days=6)
+    assert case["close_reason"] is None
+
+
+def test_dismissed_case_carries_the_cancel_reason(as_user, march, app_engine, admin_engine):
+    log_id = _log(app_engine, action="READ", subject_ids=["10001"], subject_count=1)
+    case_id = _case(
+        admin_engine,
+        log_id,
+        rule_name="야간 접속",
+        access_path="APP",
+        severity="LOW",
+        status="DISMISSED",
+        round=1,
+        close_reason="야간 배송 장애 대응 — 사전 승인됨",
+        log_summary={"subject_count_sum": 1, "distinct_subject_count": 1},
+    )
+    with admin_engine.begin() as conn:
+        conn.execute(
+            insert(detection_status_history).values(
+                detection_id=case_id,
+                from_status="REQUESTED",
+                to_status="DISMISSED",
+                round=1,
+                actor_user_id=_officer_id(conn),
+                comment="야간 배송 장애 대응 — 사전 승인됨",
+            )
+        )
+
+    summary = as_user("officer").post(REPORTS, json=MARCH).json()["summary"]
+    dismissed = next(c for c in summary["paths"]["APP"]["cases"] if c["id"] == case_id)
+    assert dismissed["close_reason"] == "야간 배송 장애 대응 — 사전 승인됨"
+    assert dismissed["handled_by"] == "officer"
+    assert dismissed["explanation"] is None  # 소명 요청 기록이 없는 건
+
+
+def test_unsubmitted_draft_attachments_are_not_counted(as_user, march, admin_engine):
+    # 취급자가 고치는 중인 차수(미제출)의 첨부는 담당자에게도 보이지 않는다 — 보고서도 같다
+    with admin_engine.begin() as conn:
+        conn.execute(
+            insert(explanation).values(
+                detection_id=march, round=2, requested_by=_officer_id(conn), ticket_ids=[]
+            )
+        )
+        draft = conn.execute(
+            select(explanation.c.id).where(
+                explanation.c.detection_id == march, explanation.c.round == 2
+            )
+        ).scalar()
+        conn.execute(
+            insert(explanation_attachment).values(
+                explanation_id=draft,
+                original_name="draft.png",
+                stored_path="/data/attachments/d",
+                content_type="image/png",
+                size_bytes=10,
+                sha256="0" * 64,
+            )
+        )
+    summary = as_user("officer").post(REPORTS, json=MARCH).json()["summary"]
+    [case] = summary["paths"]["APP"]["cases"]
+    assert case["explanation"]["round"] == 2 and case["explanation"]["content"] is None
+    assert case["explanation"]["attachment_count"] == 0

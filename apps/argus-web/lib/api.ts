@@ -223,6 +223,21 @@ export type ReportCase = {
   subject_count_sum: number;
   distinct_subject_count: number;
   subjects: string[]; // 마스킹 값 앞 몇 개만 — 화면에서 "외 N명"
+  // 처리 내용 (v0.1 보강 B) — 이전에 만든 보고서 스냅샷에는 없다
+  explanation?: ReportExplanation | null;
+  handled_by?: string | null;
+  handled_at?: string | null;
+  close_reason?: string | null;
+};
+// 마지막 차수의 소명 — 자유 입력은 앞 200자 요지
+export type ReportExplanation = {
+  round: number;
+  content: string | null;
+  submitted_at: string | null;
+  review_result: "APPROVED" | "REJECTED" | null;
+  review_comment: string | null;
+  ticket_ids: string[];
+  attachment_count: number;
 };
 export type ReportSection = {
   logs: {

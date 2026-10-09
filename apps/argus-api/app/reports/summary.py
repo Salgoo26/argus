@@ -9,6 +9,8 @@
   (policy 6-1, 2026-10-07 사용자 결정).
   DB 직접 기록은 회원번호 추출 보류로 식별값이 없어 "미특정 N건"으로 표시된다
 - 감시 대상(플랫폼) 기록만 집계한다. Argus 자체 접속기록은 점검 행위의 기록이라 섹션에 섞지 않는다
+- 탐지건마다 처리 내용을 싣는다(v0.1 보강 B): 마지막 차수 소명 요지·검토 결과와 의견·관련 티켓·
+  첨부 개수, 처리 담당자·일시, 요청 취소 사유. 자유 입력은 앞 200자만
 """
 
 from datetime import datetime
@@ -20,10 +22,13 @@ from app.detections.masking import mask_subject
 from app.ledger.hashchain import verify_chain
 from app.models import (
     access_log,
+    argus_user,
     detection,
     detection_batch_run,
     detection_log,
+    detection_status_history,
     explanation,
+    explanation_attachment,
     handler,
     source_system,
 )
@@ -32,6 +37,7 @@ PLATFORM = "PLATFORM"
 PATHS = ("APP", "DB")
 CASES_MAX = 50  # 보고서에 싣는 탐지건 목록 상한 — 심각도 높은 순
 SUBJECT_PREVIEW = 3  # 탐지건마다 보여 주는 마스킹 식별값 수 ("외 N명")
+EXCERPT_CHARS = 200  # 소명·검토 의견·취소 사유 요지 길이 (v0.1 보강 B 【기본값】)
 _SEVERITY_ORDER = {"HIGH": 0, "MEDIUM": 1, "LOW": 2}
 
 
@@ -180,9 +186,73 @@ def _cases(conn: Connection, where) -> list[dict[str, Any]]:
                 "distinct_subject_count": summary.get("distinct_subject_count") or 0,
                 # 원본 식별값은 싣지 않는다 — 마스킹 값 앞 몇 개만 (policy 6-1)
                 "subjects": _masked_subjects(conn, row["id"]),
+                # 어떻게 처리했는지 (v0.1 보강 B — 실무 결재문서처럼 사유까지 남긴다)
+                "explanation": _latest_explanation(conn, row["id"]),
+                **_handled(conn, row["id"]),
+                "close_reason": (
+                    excerpt(row["close_reason"]) if row["status"] == "DISMISSED" else None
+                ),
             }
         )
     return result
+
+
+def excerpt(text: str | None) -> str | None:
+    """자유 입력 요지 — 앞 EXCERPT_CHARS자, 넘으면 "…". 자동 마스킹은 하지 않는다(오탐·누락이 커서)
+    — 소명 제출 화면에서 개인정보를 적지 말라고 안내한다"""
+    if text is None:
+        return None
+    return text if len(text) <= EXCERPT_CHARS else text[:EXCERPT_CHARS] + "…"
+
+
+def _latest_explanation(conn: Connection, detection_id: int) -> dict[str, Any] | None:
+    """마지막 차수의 소명 — 요청만 있고 아직 제출 전이면 내용·첨부는 비어 있다"""
+    e = explanation.c
+    row = (
+        conn.execute(
+            select(explanation)
+            .where(e.detection_id == detection_id)
+            .order_by(e.round.desc())
+            .limit(1)
+        )
+        .mappings()
+        .first()
+    )
+    if row is None:
+        return None
+    submitted = row["submitted_at"] is not None
+    attachments = (
+        conn.execute(
+            select(func.count()).where(explanation_attachment.c.explanation_id == row["id"])
+        ).scalar_one()
+        if submitted  # 고치는 중인 초안의 첨부는 담당자에게도 보이지 않는다 — 보고서도 같다
+        else 0
+    )
+    return {
+        "round": row["round"],
+        "content": excerpt(row["content"]) if submitted else None,
+        "submitted_at": row["submitted_at"].isoformat() if submitted else None,
+        "review_result": row["review_result"],
+        "review_comment": excerpt(row["review_comment"]),
+        "ticket_ids": list(row["ticket_ids"] or []) if submitted else [],
+        "attachment_count": attachments,
+    }
+
+
+def _handled(conn: Connection, detection_id: int) -> dict[str, Any]:
+    """처리 담당자·일시 = 담당자가 마지막으로 상태를 바꾼 기록 (시스템 요청·취급자 제출 제외)"""
+    h = detection_status_history.c
+    row = conn.execute(
+        select(argus_user.c.login_id, h.created_at)
+        .join(argus_user, argus_user.c.id == h.actor_user_id)
+        .where(h.detection_id == detection_id, argus_user.c.role == "OFFICER")
+        .order_by(h.id.desc())
+        .limit(1)
+    ).first()
+    return {
+        "handled_by": row.login_id if row else None,
+        "handled_at": row.created_at.isoformat() if row else None,
+    }
 
 
 def _masked_subjects(conn: Connection, detection_id: int) -> list[str]:

@@ -2,10 +2,10 @@
 
 import Link from "next/link";
 import { useParams } from "next/navigation";
-import { useEffect, useState } from "react";
+import { Fragment, useEffect, useState } from "react";
 
 import { AppHeader, useMe } from "@/components/app-header";
-import { api, type Report, type ReportSection } from "@/lib/api";
+import { api, type Report, type ReportCase, type ReportSection } from "@/lib/api";
 import {
   ACTION_LABELS,
   type AccessPath,
@@ -24,6 +24,55 @@ function counts(values: Record<string, number>, labels: Record<string, string>):
   const entries = Object.entries(values);
   if (entries.length === 0) return "-";
   return entries.map(([key, n]) => `${labels[key] ?? key} ${n}`).join(" · ");
+}
+
+const REVIEW_LABELS = { APPROVED: "승인", REJECTED: "반려" } as const;
+
+function hasHandling(c: ReportCase): boolean {
+  return Boolean(c.explanation || c.handled_by || c.close_reason);
+}
+
+// 탐지건별 처리 내용 (v0.1 보강 B) — 소명 요지·검토·티켓·첨부·처리 담당자, 요청 취소 사유
+function Handling({ c }: { c: ReportCase }) {
+  const e = c.explanation;
+  return (
+    <dl className="handling">
+      {e && (
+        <div>
+          <dt>소명 ({e.round}차)</dt>
+          <dd>
+            {e.content ?? <span className="muted">미제출</span>}
+            {e.ticket_ids.length > 0 && <span className="muted"> · 티켓 {e.ticket_ids.join(", ")}</span>}
+            {e.attachment_count > 0 && <span className="muted"> · 첨부 {e.attachment_count}개</span>}
+          </dd>
+        </div>
+      )}
+      {e?.review_result && (
+        <div>
+          <dt>검토</dt>
+          <dd>
+            {REVIEW_LABELS[e.review_result]}
+            {e.review_comment && ` — ${e.review_comment}`}
+          </dd>
+        </div>
+      )}
+      {c.close_reason && (
+        <div>
+          <dt>요청 취소 사유</dt>
+          <dd>{c.close_reason}</dd>
+        </div>
+      )}
+      {c.handled_by && (
+        <div>
+          <dt>처리</dt>
+          <dd>
+            {c.handled_by}
+            {c.handled_at && <span className="muted"> · {formatDateTime(c.handled_at)}</span>}
+          </dd>
+        </div>
+      )}
+    </dl>
+  );
 }
 
 function Section({ path, section }: { path: AccessPath; section: ReportSection }) {
@@ -115,7 +164,8 @@ function Section({ path, section }: { path: AccessPath; section: ReportSection }
           </thead>
           <tbody>
             {section.cases.map((c) => (
-              <tr key={c.id}>
+              <Fragment key={c.id}>
+              <tr className={hasHandling(c) ? "case-row has-handling" : "case-row"}>
                 <td className="num">#{c.id}</td>
                 <td>{c.rule_name}</td>
                 <td>
@@ -134,6 +184,15 @@ function Section({ path, section }: { path: AccessPath; section: ReportSection }
                   {c.round > 0 && <span className="muted">{c.round}차</span>}
                 </td>
               </tr>
+              {hasHandling(c) && (
+                <tr className="case-handling">
+                  <td />
+                  <td colSpan={7}>
+                    <Handling c={c} />
+                  </td>
+                </tr>
+              )}
+              </Fragment>
             ))}
             {section.cases.length === 0 && (
               <tr>
