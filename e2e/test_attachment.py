@@ -105,6 +105,8 @@ def test_officer_uses_same_id_on_platform():
         "officer",
         "--password-env",
         "E2E_NEW_PASSWORD",
+        "--reason",
+        "E2E 플랫폼 아이디와 같은 담당자",
         env={"E2E_NEW_PASSWORD": password},
     )
     assert result.returncode == 0, result.stderr
@@ -125,5 +127,7 @@ def _synced(login_id: str) -> bool:
         "app.scripts.users",
         "unlock",
         login_id,
+        "--reason",
+        "E2E 동기화 확인",  # 사유가 있어야 계정 존재 여부까지 확인한다
     )
     return "없는 계정" not in result.stderr
