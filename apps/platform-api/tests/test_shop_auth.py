@@ -7,7 +7,7 @@ import pytest
 from sqlalchemy import func, inspect, select, update
 
 from app.auth.tokens import ADMIN, CUSTOMER, issue_token
-from app.models import member, member_consent, shipping_address
+from app.models import consent_item, member, member_consent, shipping_address
 
 from conftest import (
     CUSTOMER_PASSWORD,
@@ -41,7 +41,8 @@ def _member_count(engine) -> int:
 def test_consent_items_show_purpose_items_and_retention(client):
     items = client.get("/shop/consent-items").json()
 
-    assert {i["code"] for i in items} == {"TOS", "PRIVACY_REQUIRED", "AGE_OVER_14", "MARKETING"}
+    # 계약 이행 항목은 동의 대신 안내 (§15①4·§22③, 0010) — 개인정보 수집·이용 (필수) 동의는 없다
+    assert {i["code"] for i in items} == {"TOS", "AGE_OVER_14", "MARKETING"}
     marketing = next(i for i in items if i["code"] == "MARKETING")
     assert marketing["required"] is False
     # §15② — 목적·항목·기간을 알리고 받는다
@@ -60,16 +61,14 @@ def test_signup_records_every_consent_with_version_time_and_ip(client, engine):
     assert {r["item_code"]: r["agreed"] for r in rows} == {
         "AGE_OVER_14": True,
         "MARKETING": True,
-        "PRIVACY_REQUIRED": True,
         "TOS": True,
     }
-    # 동의 당시 버전 — 개인정보 수집·이용 동의는 가입 항목 변경으로 v2 (0006)
+    # 동의 당시 버전 — 이용약관은 v2 (0010)
     versions = {r["item_code"]: r["item_version"] for r in rows}
     assert versions == {
         "AGE_OVER_14": "v1",
         "MARKETING": "v1",
-        "PRIVACY_REQUIRED": "v2",
-        "TOS": "v1",
+        "TOS": "v2",
     }
     assert all(r["acted_at"] for r in rows)
     assert all(str(r["client_ip"]) == TEST_CLIENT_ADDR[0] for r in rows)
@@ -83,7 +82,7 @@ def test_optional_consent_is_not_required_and_refusal_is_recorded(client, engine
     assert marketing["agreed"] is False
 
 
-@pytest.mark.parametrize("missing", ["TOS", "PRIVACY_REQUIRED", "AGE_OVER_14"])
+@pytest.mark.parametrize("missing", ["TOS", "AGE_OVER_14"])
 def test_signup_without_required_consent_is_rejected(client, engine, missing):
     res = signup(client, consents={**REQUIRED_CONSENTS, missing: False})
 
@@ -158,13 +157,19 @@ def test_signup_collects_only_the_required_items(client, engine):
     assert "1990" not in str(dict(row)) and "가상로" not in str(dict(row))
 
 
-def test_privacy_consent_lists_phone(client):
-    """§15②2호 — 동의받을 때 알리는 항목 = 실제 수집 항목. 문안이 바뀌면 버전도 바뀐다"""
-    items = {i["code"]: i for i in client.get("/shop/consent-items").json()}
-    privacy = items["PRIVACY_REQUIRED"]
-    assert privacy["version"] == "v2"
-    assert "휴대전화번호" in privacy["items"].split("/")[0]  # 가입 시 필수 항목 쪽
-    assert "생년월일" not in privacy["items"] and "성별" not in privacy["items"]
+def test_retired_privacy_consent_is_rejected_but_its_history_is_kept(client, engine):
+    """받지 않게 된 개인정보 수집·이용 (필수) 동의(0010) — 항목 행은 지난 동의 이력의 증적으로 남고,
+    보내면 모르는 항목으로 거부된다(가입 화면이 이 항목을 보여 주지 않으므로)"""
+    res = signup(client, consents={**REQUIRED_CONSENTS, "PRIVACY_REQUIRED": True})
+    assert res.status_code == 400
+    assert _member_count(engine) == 0
+    with engine.connect() as conn:
+        row = (
+            conn.execute(select(consent_item).where(consent_item.c.code == "PRIVACY_REQUIRED"))
+            .mappings()
+            .one()
+        )
+    assert row["active"] is False and row["version"] == "v2"
 
 
 def test_phone_is_normalized(client, engine):

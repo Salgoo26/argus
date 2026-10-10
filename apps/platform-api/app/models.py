@@ -80,6 +80,8 @@ consent_item = Table(
     Column("items", Text, nullable=False),
     Column("retention", Text, nullable=False),
     Column("effective_from", DateTime(timezone=True), nullable=False),
+    # 받지 않는 항목(false)도 지난 동의 이력의 증적이라 행은 남긴다 (0010)
+    Column("active", Boolean, nullable=False),
 )
 
 member_consent = Table(

@@ -42,7 +42,7 @@ class WithdrawRequest(BaseModel):
 
 
 def _current_consents(conn, member_id: int) -> list[dict]:
-    """항목별 가장 최근 동의·철회 상태"""
+    """지금 받는 항목별 가장 최근 동의·철회 상태 (받지 않게 된 항목의 지난 이력은 DB에만 — 0010)"""
     ranked = (
         select(
             member_consent.c.item_code,
@@ -70,6 +70,7 @@ def _current_consents(conn, member_id: int) -> list[dict]:
             latest.c.acted_at,
         )
         .select_from(consent_item.outerjoin(latest, latest.c.item_code == consent_item.c.code))
+        .where(consent_item.c.active)
         .order_by(consent_item.c.required.desc(), consent_item.c.code)
     ).mappings()
     return [
@@ -138,7 +139,11 @@ def change_consent(code: str, body: ConsentChange, request: Request, me: Current
     """선택 동의의 철회·재동의 (§37). 필수 동의는 철회 대신 탈퇴로 — 서비스 계약의 전제다"""
     with request.app.state.engine.begin() as conn:
         item = (
-            conn.execute(select(consent_item).where(consent_item.c.code == code)).mappings().first()
+            conn.execute(
+                select(consent_item).where(consent_item.c.code == code, consent_item.c.active)
+            )
+            .mappings()
+            .first()
         )
         if item is None:
             raise ApiError(404, "NOT_FOUND", "consent item not found")

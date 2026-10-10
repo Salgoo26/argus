@@ -6,7 +6,7 @@ Create Date: 2026-10-02
 
 - consent_item·member_consent: db-schema 4절 DDL 그대로
 - member에 로그인 실패 횟수·잠금 해제 시각 (설계 변경 — 5회 실패 → 15분 자동 해제)
-- 동의 항목 4개 시드. 문안(목적·항목·기간)은 자리표시 — Cowork 기획 방에서 작성해 버전을 올린다
+- 동의 항목 4개 시드. 문안(목적·항목·기간)이 바뀌면 행을 고쳐 쓰지 않고 버전을 올린다
 """
 
 from alembic import op

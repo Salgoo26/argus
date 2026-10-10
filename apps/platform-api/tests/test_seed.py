@@ -143,7 +143,9 @@ def test_backfill_gives_seeded_members_consent_history_once(engine):
             select(member_consent.c.item_code, member_consent.c.agreed, member_consent.c.client_ip)
         ).all()
 
-    assert len(rows) == MEMBERS * 4
+    # 지금 받는 항목만(TOS·AGE_OVER_14·MARKETING) — 받지 않게 된 PRIVACY_REQUIRED(0010)는 없다
+    assert len(rows) == MEMBERS * 3
+    assert "PRIVACY_REQUIRED" not in {code for code, *_ in rows}
     assert all(agreed for code, agreed, _ in rows if code != "MARKETING")  # 필수는 모두 동의
     marketing = [agreed for code, agreed, _ in rows if code == "MARKETING"]
     assert 0 < sum(marketing) < MEMBERS  # 선택은 일부만

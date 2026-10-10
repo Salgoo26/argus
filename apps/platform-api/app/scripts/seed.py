@@ -170,9 +170,12 @@ def backfill_consents(conn: Connection) -> int:
 
     seed()와 따로 매번 실행한다 — 고객 화면 이전에 시드된 개발 스택의 회원 500명에게도
     동의 이력이 생기게. 이미 이력이 있는 회원은 건드리지 않으므로 재실행해도 늘지 않는다.
-    필수 동의는 모두, 마케팅은 일부만 동의. 접속 IP는 알 수 없어 비운다(지어내지 않는다).
+    지금 받는 항목(active)만 — 필수 동의는 모두, 마케팅은 일부만 동의. 접속 IP는 알 수 없어
+    비운다(지어내지 않는다).
     """
-    items = conn.execute(select(consent_item.c.code, consent_item.c.version)).all()
+    items = conn.execute(
+        select(consent_item.c.code, consent_item.c.version).where(consent_item.c.active)
+    ).all()
     targets = conn.execute(
         select(member.c.id, member.c.created_at)
         .where(~exists().where(member_consent.c.member_id == member.c.id))
