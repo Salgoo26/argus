@@ -233,20 +233,13 @@ export default function DetectionDetailPage() {
                 )}
                 {me?.role === "HANDLER" && (
                   // 소명은 자유 입력이라 점검 보고서에 요지가 그대로 실린다 (v0.1 보강 B)
-                  <p className="privacy-note">
-                    고객 이름·연락처 등 개인정보는 적지 말고 회원번호·주문번호로 적어 주세요. 소명
-                    요지는 점검 보고서에 실립니다.
-                  </p>
+                  <p className="privacy-note">고객 개인정보는 적지 말고 회원번호·주문번호로 적어 주세요.</p>
                 )}
                 <textarea
                   value={text}
                   onChange={(e) => setText(e.target.value)}
                   maxLength={me?.role === "HANDLER" ? 5000 : 1000}
-                  placeholder={
-                    me?.role === "HANDLER"
-                      ? "위 안내에 따라 행위 사유를 구체적으로 작성하세요."
-                      : "요청 메시지 또는 사유·의견 (불요·요청 취소·반려는 필수)"
-                  }
+                  placeholder={me?.role === "HANDLER" ? undefined : "사유·의견 (불요·요청 취소·반려는 필수)"}
                 />
                 {canAttach && <TicketInput value={tickets} onChange={setTickets} />}
                 {canAttach && detail && currentRound && (
@@ -274,9 +267,6 @@ export default function DetectionDetailPage() {
 
             <section className="card">
               <h2 className="card-title">하위 접속기록</h2>
-              <p className="muted" style={{ marginTop: -6 }}>
-                정보주체 식별값은 마스킹되어 표시됩니다(서버에서 가려서 전달).
-              </p>
               <div className="table-wrap">
                 <table className="data">
                   <thead>

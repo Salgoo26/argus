@@ -63,8 +63,7 @@ export default function MemberDetailPage() {
 
   async function reveal() {
     const ok = window.confirm(
-      "환불계좌 전체 번호를 조회합니다. 이 조회는 결제수단 조회로 기록되고 정보보호 담당자가 " +
-        "소명을 요청합니다. 계속할까요?",
+      "환불계좌 전체 번호를 조회합니다. 계속할까요?",
     );
     if (!ok) return;
     try {
@@ -81,7 +80,6 @@ export default function MemberDetailPage() {
       <AppHeader me={me} />
       <main className="container">
         <h1 className="page-title">회원 상세 {member && <span className="muted">#{member.id}</span>}</h1>
-        <p className="page-subtitle">이 화면의 조회는 접속기록으로 남아 정보보호 담당자가 점검합니다.</p>
         {error && <div className="alert-error">{error}</div>}
 
         {member && (
@@ -118,7 +116,6 @@ export default function MemberDetailPage() {
                     <div className="reveal">
                       {revealed.bank_name} <span className="mono">{revealed.account_number}</span> ·
                       예금주 {revealed.account_holder}
-                      <div className="hint">결제수단 조회로 기록되었습니다.</div>
                     </div>
                   )}
                 </div>

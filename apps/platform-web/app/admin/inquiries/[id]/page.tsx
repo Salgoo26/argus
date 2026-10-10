@@ -68,10 +68,6 @@ export default function AdminInquiryDetailPage() {
         <h1 className="page-title">
           문의 상세 {item && <span className="muted mono">{item.ticket_id}</span>}
         </h1>
-        <p className="page-subtitle">
-          이 조회는 티켓 번호와 함께 접속기록으로 남습니다. 고객 정보 확인이 필요하면 아래 회원 링크로
-          이동하세요.
-        </p>
         {error && <div className="alert-error">{error}</div>}
         {item && (
           <>
@@ -113,7 +109,9 @@ export default function AdminInquiryDetailPage() {
                 </div>
               ) : (
                 <form className="stack" onSubmit={answer}>
-                  <textarea name="answer" required maxLength={5000} />
+                  {/* 답변은 고객에게 그대로 보인다 — 다른 고객 정보가 섞이지 않게 (v0.1 보강 M) */}
+                  <p className="hint">고객 개인정보는 적지 마세요.</p>
+                  <textarea name="answer" aria-label="답변" required maxLength={5000} />
                   <div>
                     <button className="btn btn-primary" type="submit">
                       답변 등록

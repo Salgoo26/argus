@@ -91,8 +91,8 @@ export function formatDateTime(iso: string | null): string {
 export type AccessPath = "APP" | "DB";
 
 export const PATH_LABELS: Record<AccessPath, string> = {
-  APP: "화면 경유(3티어)",
-  DB: "DB 직접(2티어)",
+  APP: "화면 경유",
+  DB: "DB 직접",
 };
 
 export function pathBadgeClass(path: AccessPath): string {

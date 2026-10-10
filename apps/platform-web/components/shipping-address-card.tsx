@@ -114,7 +114,6 @@ export function ShippingAddressCard() {
               id="addr_label"
               name="label"
               defaultValue={current?.label ?? ""}
-              placeholder="집, 회사"
               required
               maxLength={30}
             />
@@ -187,7 +186,6 @@ export function ShippingAddressCard() {
           </div>
         </form>
       )}
-      <p className="hint">가상의 주소만 입력하세요. 주문에는 주문할 때의 배송지 내용이 복사되어 남습니다.</p>
     </section>
   );
 }

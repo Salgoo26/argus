@@ -80,10 +80,6 @@ export default function AdminInquiriesPage() {
       <AppHeader me={me} />
       <main className="container">
         <h1 className="page-title">1:1 문의</h1>
-        <p className="page-subtitle">
-          문의 조회·답변은 접속기록으로 남습니다. 문의를 연 뒤 고객 정보를 확인하면 그 문의 번호가
-          조회의 업무 근거가 됩니다.
-        </p>
         {error && <div className="alert-error">{error}</div>}
         <section className="card">
           <h2 className="card-title">문의 검색</h2>

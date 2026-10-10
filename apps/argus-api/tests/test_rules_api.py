@@ -174,7 +174,8 @@ def test_detail_includes_history_newest_first(as_user):
 
     detail = officer.get(f"/api/rules/{bulk['id']}").json()
     assert [(h["version"], h["change_type"], h["changed_by"]) for h in detail["history"]] == [
-        (2, "UPDATE", "officer"),
+        (3, "UPDATE", "officer"),
+        (2, "UPDATE", None),  # 설명 문구 정리 (0022) — 시스템
         (1, "CREATE", None),  # 마이그레이션 시드 — 시스템
     ]
     assert detail["history"][0]["snapshot"]["severity"] == "MEDIUM"
@@ -262,7 +263,8 @@ def test_unchanged_save_does_not_bump_version(as_user):
     weekend = rule_by_name(officer, "주말 접속")
     saved = officer.put(f"/api/rules/{weekend['id']}", json=editable(weekend)).json()
     assert saved["version"] == weekend["version"]
-    assert len(officer.get(f"/api/rules/{weekend['id']}").json()["history"]) == 1
+    history = officer.get(f"/api/rules/{weekend['id']}").json()["history"]
+    assert [h["changed_by"] for h in history] == [None] * len(history)  # 시스템 이력뿐
 
 
 # ── 켜기·끄기 ─────────────────────────────────────────────
@@ -285,7 +287,8 @@ def test_disable_and_enable_are_recorded(as_user):
     assert on.json()["enabled"] is True
 
     history = officer.get(f"/api/rules/{rule['id']}").json()["history"]
-    assert [h["change_type"] for h in history] == ["ENABLE", "DISABLE", "CREATE"]
+    assert [h["change_type"] for h in history[:2]] == ["ENABLE", "DISABLE"]
+    assert history[-1]["change_type"] == "CREATE"  # 그 앞은 시드·문구 정리(시스템)
 
 
 # ── 권한·접속기록 ─────────────────────────────────────────

@@ -50,10 +50,6 @@ export default function ReportsPage() {
       <AppHeader me={me} />
       <main className="container">
         <h1 className="page-title">점검 보고서</h1>
-        <p className="page-subtitle">
-          기간의 접속기록·탐지·소명 처리 결과를 경로별로 모은 점검 증적입니다(§8②). 정보주체 식별값은 마스킹되어
-          실리고, 만든 순간의 내용이 그대로 보관됩니다. 보고서 생성은 Argus 접속기록에 &ldquo;보고서 출력&rdquo;으로 남습니다.
-        </p>
         {error && <div className="alert-error">{error}</div>}
 
         <section className="card">

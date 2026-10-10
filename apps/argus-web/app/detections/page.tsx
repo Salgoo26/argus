@@ -98,11 +98,6 @@ export default function DetectionsPage() {
       <AppHeader me={me} />
       <main className="container">
         <h1 className="page-title">{isOfficer ? "탐지건" : "내 소명 요청"}</h1>
-        <p className="page-subtitle">
-          {isOfficer
-            ? "탐지 룰에 걸린 접속기록입니다. 탐지 즉시 해당 취급자에게 소명이 자동 요청됩니다 — 오탐이면 요청을 취소하세요."
-            : "본인 접속기록 중 소명이 요청된 건입니다. 행위 사유를 작성해 제출하세요."}
-        </p>
 
         {error && <div className="alert-error">{error}</div>}
 
@@ -167,8 +162,7 @@ export default function DetectionsPage() {
               </button>
             </form>
             <p className="muted" style={{ margin: "12px 0 0", fontSize: 12 }}>
-              기간은 탐지 시각의 한국 날짜(양 끝 포함) — 점검 보고서와 같은 기준입니다.
-              {isOfficer ? " 기본은 이번 달입니다." : " 비우면 전체 기간입니다."}
+              기간은 탐지 날짜 기준입니다.{isOfficer ? " 기본은 이번 달입니다." : " 비우면 전체 기간입니다."}
             </p>
           </section>
         )}

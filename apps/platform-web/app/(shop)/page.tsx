@@ -19,10 +19,6 @@ export default function ShopHome() {
     <>
       <section className="card hero">
         <h1 className="page-title">데모 커머스</h1>
-        <p className="page-subtitle">
-          Argus(접속기록 점검 시스템)가 감시하는 가상의 쇼핑몰입니다. 실제 결제는 일어나지 않으며,
-          고객의 행위는 접속기록 대상이 아닙니다.
-        </p>
       </section>
       {error && <div className="alert-error">{error}</div>}
       <div className="grid">
