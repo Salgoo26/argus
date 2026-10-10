@@ -29,7 +29,7 @@ from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
 from app.agent.client_ip import IPNetwork, resolve_client_ip
 from app.agent.context import AccessRecord, end_record, start_record
-from app.agent.decorators import AccessLogSpec, is_admin_path, spec_of
+from app.agent.decorators import SESSION_ACTIONS, AccessLogSpec, is_admin_path, spec_of
 from app.errors import error_body
 from app.outbox import enqueue
 
@@ -70,7 +70,7 @@ def build_event(spec: AccessLogSpec, record: AccessRecord, route_path: str, resu
         "result": result,
         "context": record.context or {},
     }
-    if spec.action != "LOGIN":
+    if spec.action not in SESSION_ACTIONS:
         # 정보주체를 기록하기 전에 실패했으면 건수 0 (2026-09-30 결정)
         ids = record.subject_ids or []
         count = record.subject_count if record.subject_count is not None else len(ids)

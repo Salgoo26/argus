@@ -22,7 +22,10 @@ from fastapi.routing import APIRoute
 ADMIN_PREFIX = "/admin"
 
 # api-spec 2-3. Argus 전용 코드값(EXPORT·UNMASK / ACCESS_LOG)은 플랫폼이 쓸 수 없다
-ACTIONS = frozenset({"LOGIN", "READ", "CREATE", "UPDATE", "DELETE", "DOWNLOAD"})
+ACTIONS = frozenset({"LOGIN", "LOGOUT", "READ", "CREATE", "UPDATE", "DELETE", "DOWNLOAD"})
+# 정보주체를 처리하지 않는 행위 — 데이터 유형 NONE, 정보주체 생략
+# (LOGOUT: v0.1 보강 A — 안내서 FAQ 147 "로그인·로그아웃·로그인 실패")
+SESSION_ACTIONS = frozenset({"LOGIN", "LOGOUT"})
 DATA_CATEGORIES = frozenset({"MEMBER_BASIC", "PAYMENT", "ORDER", "INQUIRY", "NONE"})
 
 _SPEC_ATTR = "__access_log__"
@@ -40,9 +43,9 @@ def access_log(*, action: str, data_category: str) -> Callable:
         raise ValueError(f"unknown access log action: {action}")
     if data_category not in DATA_CATEGORIES:
         raise ValueError(f"unknown access log data_category: {data_category}")
-    if (action == "LOGIN") != (data_category == "NONE"):
-        # 로그인은 데이터 처리가 없고, 데이터 처리가 없는 행위는 로그인뿐이다 (api-spec 2-4)
-        raise ValueError("LOGIN must use data_category NONE (and only LOGIN may)")
+    if (action in SESSION_ACTIONS) != (data_category == "NONE"):
+        # 로그인·로그아웃은 데이터 처리가 없고, 데이터 처리가 없는 행위는 이 둘뿐이다 (api-spec 2-4)
+        raise ValueError("LOGIN/LOGOUT must use data_category NONE (and only they may)")
     spec = AccessLogSpec(action, data_category)
 
     def mark(fn: Callable) -> Callable:

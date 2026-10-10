@@ -190,12 +190,29 @@ def _rule_query():
 @router.get("")
 @access_log_exempt(_EXEMPT)
 def list_rules(
-    request: Request, user: CurrentUser, enabled: Annotated[bool | None, Query()] = None
+    request: Request,
+    user: CurrentUser,
+    enabled: Annotated[bool | None, Query()] = None,
+    # v0.1 보강 C-3 — 룰 정의는 개인정보가 아니라 URL 쿼리로 받는다
+    name: Annotated[str | None, Query(min_length=1, max_length=100)] = None,
+    access_path: Annotated[Literal["APP", "DB", "ALL"] | None, Query()] = None,
+    severity: Annotated[Literal["HIGH", "MEDIUM", "LOW"] | None, Query()] = None,
+    rule_type: Annotated[Literal["EVENT", "AGGREGATE"] | None, Query()] = None,
 ) -> dict:
     _require_officer(user)
-    query = _rule_query().order_by(detection_rule.c.id)
-    if enabled is not None:
-        query = query.where(detection_rule.c.enabled == enabled)
+    r = detection_rule.c
+    query = _rule_query().order_by(r.id)
+    for column, value in (
+        (r.enabled, enabled),
+        (r.access_path, access_path),
+        (r.severity, severity),
+        (r.rule_type, rule_type),
+    ):
+        if value is not None:
+            query = query.where(column == value)
+    if name:
+        # 부분 일치 — 입력의 % _ 는 글자 그대로 (autoescape)
+        query = query.where(r.name.contains(name, autoescape=True))
     with request.app.state.engine.connect() as conn:
         items = [_summary(r) for r in conn.execute(query).mappings()]
     return {"items": items}

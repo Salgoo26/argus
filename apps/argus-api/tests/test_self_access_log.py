@@ -71,8 +71,28 @@ def test_unknown_id_and_unauthenticated_requests_are_not_recorded(client, app_en
 def test_exempt_routes_are_not_recorded(client, app_engine):
     login(client)
     client.get("/api/auth/me")
-    client.post("/api/auth/logout")
     assert [r["action"] for r in argus_logs(app_engine)] == ["LOGIN"]
+
+
+def test_logout_is_recorded(client, app_engine):
+    # 안내서 FAQ 147 — 로그아웃도 접속기록 (v0.1 보강 A, 갭 A6)
+    login(client)
+    assert client.post("/api/auth/logout").status_code == 204
+
+    login_row, logout_row = argus_logs(app_engine)
+    assert logout_row["action"] == "LOGOUT" and logout_row["result"] == "SUCCESS"
+    assert logout_row["actor_login_id"] == "officer"
+    assert logout_row["data_category"] == "NONE" and logout_row["subject_type"] is None
+    assert logout_row["request_path"] == "/api/auth/logout"
+    # 기록하느라 세션을 연장하지 않는다
+    assert client.get("/api/auth/me").status_code == 401
+    with app_engine.connect() as conn:
+        assert verify_chain(conn).ok
+
+
+def test_unauthenticated_logout_is_not_recorded(client, app_engine):
+    assert client.post("/api/auth/logout").status_code == 204
+    assert argus_logs(app_engine) == []
 
 
 def test_ingest_api_is_not_self_logged(client, app_engine):

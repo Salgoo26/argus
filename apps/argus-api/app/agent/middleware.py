@@ -28,7 +28,7 @@ from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
 from app.agent.client_ip import IPNetwork, resolve_client_ip
 from app.agent.context import AccessRecord, end_record, start_record
-from app.agent.decorators import AccessLogSpec, is_api_path, spec_of
+from app.agent.decorators import SESSION_ACTIONS, AccessLogSpec, is_api_path, spec_of
 from app.errors import error_body
 from app.ingest.validation import Rejection, validate_event
 from app.ledger.append import append_access_logs
@@ -65,7 +65,7 @@ def build_event(spec: AccessLogSpec, record: AccessRecord, route_path: str, resu
         "result": result,
         "context": record.context or {},
     }
-    if spec.action != "LOGIN":
+    if spec.action not in SESSION_ACTIONS:
         # 건수만, ids 없음 — 회원 PK를 Argus 원장에 다시 쌓지 않는다 (api-spec 2-7, policy 6-3)
         event["subject"] = {"type": "MEMBER", "count": record.subject_count}
     return event

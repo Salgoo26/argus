@@ -31,6 +31,7 @@ export const SOURCE_LABELS: Record<string, string> = { PLATFORM: "플랫폼", AR
 
 export const ACTION_LABELS: Record<string, string> = {
   LOGIN: "로그인",
+  LOGOUT: "로그아웃",
   READ: "조회",
   CREATE: "입력",
   UPDATE: "수정",

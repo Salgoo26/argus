@@ -97,6 +97,20 @@ export type CaseSummary = {
   closed_at: string | null;
 };
 
+// 탐지건 검색 (v0.1 보강 C-1) — POST /api/detections/search 본문
+export type CaseSearch = {
+  status?: Status;
+  access_path?: "APP" | "DB";
+  severity?: "HIGH" | "MEDIUM" | "LOW";
+  rule_id?: number;
+  actor?: string;
+  date_from?: string; // 탐지 시각의 한국 날짜 YYYY-MM-DD, 양 끝 포함
+  date_to?: string;
+  sort?: "LATEST" | "SEVERITY";
+  page: number;
+  size: number;
+};
+
 export type CaseLog = {
   access_log_id: number;
   occurred_at: string;
@@ -175,6 +189,10 @@ export type AccessLogSearch = {
   action?: string;
   subject?: string; // 회원번호 — 10293 또는 member_10293
   access_path?: "APP" | "DB";
+  // v0.1 보강 C-2 — 접속지는 완전한 주소면 정확히 일치, 아니면 앞부분 일치
+  client_ip?: string;
+  data_category?: string;
+  result?: "SUCCESS" | "FAILURE";
   source: Source;
   page: number;
   size: number;
@@ -205,7 +223,8 @@ export type AccessLogPage = {
   page: number;
   size: number;
   total: number;
-  period: { from: string; to: string };
+  period: { from: string; to: string } | null;
+  linked: boolean; // 취급자: 명부와 연결돼 본인 기록을 특정할 수 있는가 (담당자는 늘 true)
 };
 
 // ── 점검 보고서 (기능 레이어 9) — 생성 시점의 스냅샷 ──
@@ -223,6 +242,21 @@ export type ReportCase = {
   subject_count_sum: number;
   distinct_subject_count: number;
   subjects: string[]; // 마스킹 값 앞 몇 개만 — 화면에서 "외 N명"
+  // 처리 내용 (v0.1 보강 B) — 이전에 만든 보고서 스냅샷에는 없다
+  explanation?: ReportExplanation | null;
+  handled_by?: string | null;
+  handled_at?: string | null;
+  close_reason?: string | null;
+};
+// 마지막 차수의 소명 — 자유 입력은 앞 200자 요지
+export type ReportExplanation = {
+  round: number;
+  content: string | null;
+  submitted_at: string | null;
+  review_result: "APPROVED" | "REJECTED" | null;
+  review_comment: string | null;
+  ticket_ids: string[];
+  attachment_count: number;
 };
 export type ReportSection = {
   logs: {

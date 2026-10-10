@@ -49,7 +49,7 @@ def wait_for_detection(officer_browser, actor: str, subject_count: int) -> dict:
 
     def probe():
         run_detection_batch()
-        response = officer_browser.get("/api/detections", params={"size": 100})
+        response = officer_browser.post("/api/detections/search", json={"size": 100})
         assert response.status_code == 200, response.text
         for item in response.json()["items"]:
             if (
@@ -103,12 +103,13 @@ def test_bulk_download_to_approval(officer, handler_password):
 
     # ── F-06 취급자: 본인 건만 보인다 ─────────────────────────────────
     handler = argus_login("ops_park", handler_password("ops_park"))
-    listed = handler.get("/api/detections").json()["items"]
+    listed = handler.post("/api/detections/search", json={}).json()["items"]
     assert detection_id in [item["id"] for item in listed]
     assert handler.get(f"/api/detections/{detection_id}").status_code == 200
 
     other = argus_login("cs_kim", handler_password("cs_kim"))
-    assert detection_id not in [item["id"] for item in other.get("/api/detections").json()["items"]]
+    others = other.post("/api/detections/search", json={}).json()["items"]
+    assert detection_id not in [item["id"] for item in others]
     # 남의 건은 존재 여부도 드러나지 않게 404 (403 아님)
     assert other.get(f"/api/detections/{detection_id}").status_code == 404
     assert transition(other, detection_id, "submit", {"content": "대리 제출"}).status_code == 404

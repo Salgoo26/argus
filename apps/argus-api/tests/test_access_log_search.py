@@ -227,13 +227,77 @@ def test_detected_logs_link_to_their_cases(app_engine, as_user):
 # ── 권한·자체 접속기록 ────────────────────────────────────
 
 
-def test_handler_cannot_search_and_the_attempt_is_logged(app_engine, as_user):
-    handler_client = as_user("ops_park")
-    response = handler_client.post(SEARCH, json={"subject": "10050"})
+def test_ip_category_and_result_filters(app_engine, as_user):
+    # v0.1 보강 C-2 — 접속지(정확히 일치·앞부분 일치)·데이터 유형·결과
+    office = add(app_engine, client_ip="10.20.3.55")
+    vpn = add(app_engine, client_ip="10.20.30.7", data_category="PAYMENT")
+    outside = add(app_engine, client_ip="203.0.113.9", result="FAILURE")
+    v6 = add(app_engine, client_ip="2001:db8::5")
+    officer = as_user("officer")
 
-    assert response.status_code == 403
-    [attempt] = argus_search_logs(app_engine)
-    assert attempt["actor_login_id"] == "ops_park" and attempt["result"] == "FAILURE"
+    assert ids_of(officer.post(SEARCH, json={"client_ip": "10.20.3.55"})) == [office]
+    assert ids_of(officer.post(SEARCH, json={"client_ip": "10.20.3"})) == [vpn, office]
+    assert ids_of(officer.post(SEARCH, json={"client_ip": "2001:db8:"})) == [v6]
+    assert ids_of(officer.post(SEARCH, json={"data_category": "PAYMENT"})) == [vpn]
+    assert ids_of(officer.post(SEARCH, json={"result": "FAILURE"})) == [outside]
+
+
+@pytest.mark.parametrize(
+    "body",
+    [{"client_ip": "10.20.%"}, {"client_ip": "10_20"}, {"result": "OK"}, {"data_category": "X"}],
+)
+def test_invalid_new_conditions_are_400(as_user, body):
+    # LIKE 와일드카드(% _)는 받지 않는다 — 앞부분 일치는 서버가 만든다
+    assert as_user("officer").post(SEARCH, json=body).status_code == 400
+
+
+# ── 취급자 "내 접속기록" (v0.1 보강 D) ──────────────────────
+
+
+def test_handler_sees_only_own_platform_logs(app_engine, as_user):
+    mine_app = add(app_engine, actor_login_id="ops_park")
+    mine_db = add(
+        app_engine, actor_login_id="ops_park", access_path="DB", context=DB_CONTEXT, subject_ids=[]
+    )
+    add(app_engine, actor_login_id="mkt_lee")  # 남의 기록
+    handler_client = as_user("ops_park")  # 이 로그인은 Argus 자체 기록(ARGUS) — 대상 아님
+
+    response = handler_client.post(SEARCH, json={})
+
+    assert ids_of(response) == [mine_db, mine_app]  # 경로 APP·DB 모두, 행위자는 서버가 고정
+    body = response.json()
+    assert body["linked"] is True
+    assert all(item["subjects"] in ([], ["member_10***"]) for item in body["items"])  # 마스킹
+
+
+def test_handler_cannot_search_others_or_argus_logs(app_engine, as_user):
+    add(app_engine, actor_login_id="mkt_lee")
+    handler_client = as_user("ops_park")
+    assert handler_client.post(SEARCH, json={"actor": "mkt_lee"}).status_code == 403
+    assert handler_client.post(SEARCH, json={"source": "ARGUS"}).status_code == 403
+    # 본인 아이디를 적은 요청은 그대로 본인 조회
+    assert handler_client.post(SEARCH, json={"actor": "ops_park"}).status_code == 200
+
+
+def test_handler_self_search_is_logged(app_engine, as_user):
+    add(app_engine, actor_login_id="ops_park", subject_ids=["10050"])
+    handler_client = as_user("ops_park")
+    handler_client.post(SEARCH, json={"actor": "mkt_lee"})  # 거부된 시도도 남는다
+    handler_client.post(SEARCH, json={"action": "READ"})
+
+    denied, allowed = argus_search_logs(app_engine)
+    assert denied["actor_login_id"] == "ops_park" and denied["result"] == "FAILURE"
+    assert allowed["result"] == "SUCCESS" and allowed["request_query_keys"] == ["action"]
+    assert allowed["subject_count"] == 1 and allowed["subject_ids"] is None
+
+
+def test_handler_period_and_filters_still_apply(app_engine, as_user):
+    now = datetime.now(UTC)
+    add(app_engine, actor_login_id="ops_park", occurred_at=now - timedelta(days=10))
+    recent = add(app_engine, actor_login_id="ops_park", action="DOWNLOAD", occurred_at=now)
+    handler_client = as_user("ops_park")
+    assert ids_of(handler_client.post(SEARCH, json={})) == [recent]  # 기본 최근 7일
+    assert ids_of(handler_client.post(SEARCH, json={"action": "READ"})) == []
 
 
 def test_search_is_logged_with_condition_names_but_not_values(app_engine, as_user):

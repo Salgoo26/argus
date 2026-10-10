@@ -646,6 +646,46 @@ tr.clickable {
   margin: 16px 0 8px;
 }
 
+/* 소명 작성 칸 위 개인정보 안내 (v0.1 보강 B) */
+.privacy-note {
+  margin: 0 0 8px;
+  padding: 8px 12px;
+  border-radius: var(--radius);
+  background: var(--warn-soft);
+  font-size: 13px;
+}
+
+/* 탐지건별 처리 내용 (v0.1 보강 B) — 탐지건 행 바로 아래 한 줄 */
+tr.case-row.has-handling td {
+  border-bottom: none;
+}
+
+tr.case-handling td {
+  padding-top: 0;
+}
+
+.handling {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 2px 12px;
+  margin: 0;
+  font-size: 13px;
+}
+
+.handling div {
+  display: contents;
+}
+
+.handling dt {
+  color: var(--muted);
+  font-weight: 600;
+}
+
+.handling dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
 @media print {
   .no-print {
     display: none !important;

@@ -2,12 +2,18 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useEffect, useState } from "react";
+import { type FormEvent, useEffect, useState } from "react";
 
 import { AppHeader, useMe } from "@/components/app-header";
 import { api } from "@/lib/api";
 import { SEVERITY_LABELS, formatDateTime } from "@/lib/labels";
-import { RULE_TYPE_LABELS, type RuleSummary, describeRule, severityBadgeClass } from "@/lib/rules";
+import {
+  ACCESS_PATH_LABELS,
+  RULE_TYPE_LABELS,
+  type RuleSummary,
+  describeRule,
+  severityBadgeClass,
+} from "@/lib/rules";
 
 // 삭제는 없다 — 쓰지 않는 룰은 끄고, 기본 목록은 켜진 룰만 보여 준다 (2026-10-01 결정)
 const FILTERS = [
@@ -16,21 +22,40 @@ const FILTERS = [
   { key: "", label: "전체" },
 ];
 
+// 이름(부분 일치)·적용 경로·심각도·유형 (v0.1 보강 C-3) — 룰 정의는 개인정보가 아니라 URL 쿼리로
+const FILTER_KEYS = ["name", "access_path", "severity", "rule_type"] as const;
+type RuleFilters = Partial<Record<(typeof FILTER_KEYS)[number], string>>;
+
 export default function RulesPage() {
   const router = useRouter();
   const { me, handleError } = useMe();
   const [enabled, setEnabled] = useState("true");
+  const [filters, setFilters] = useState<RuleFilters>({});
   const [items, setItems] = useState<RuleSummary[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const isOfficer = me?.role === "OFFICER";
 
   useEffect(() => {
     if (!isOfficer) return;
-    const query = enabled ? `?enabled=${enabled}` : "";
+    const params = new URLSearchParams();
+    if (enabled) params.set("enabled", enabled);
+    for (const [key, value] of Object.entries(filters)) if (value) params.set(key, value);
+    const query = params.size > 0 ? `?${params}` : "";
     api<{ items: RuleSummary[] }>(`/rules${query}`)
       .then((page) => setItems(page.items))
       .catch((e) => setError(handleError(e)));
-  }, [enabled, isOfficer, handleError]);
+  }, [enabled, filters, isOfficer, handleError]);
+
+  function onSearch(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const form = new FormData(event.currentTarget);
+    const next: RuleFilters = {};
+    for (const key of FILTER_KEYS) {
+      const value = String(form.get(key) ?? "").trim();
+      if (value) next[key] = value;
+    }
+    setFilters(next);
+  }
 
   return (
     <>
@@ -51,6 +76,56 @@ export default function RulesPage() {
 
         {me && !isOfficer && <div className="alert-error">정보보호 담당자 전용 화면입니다.</div>}
         {error && <div className="alert-error">{error}</div>}
+
+        {isOfficer && (
+          <section className="card">
+            <form className="toolbar" onSubmit={onSearch} onReset={() => setFilters({})}>
+              <div className="field">
+                <label htmlFor="name">이름</label>
+                <input id="name" name="name" placeholder="야간" maxLength={100} size={14} />
+              </div>
+              <div className="field">
+                <label htmlFor="access_path">적용 경로</label>
+                <select id="access_path" name="access_path" defaultValue="">
+                  <option value="">전체</option>
+                  {(["APP", "DB", "ALL"] as const).map((p) => (
+                    <option key={p} value={p}>
+                      {p === "ALL" ? "두 경로 모두" : ACCESS_PATH_LABELS[p]}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div className="field">
+                <label htmlFor="severity">심각도</label>
+                <select id="severity" name="severity" defaultValue="">
+                  <option value="">전체</option>
+                  {(["HIGH", "MEDIUM", "LOW"] as const).map((s) => (
+                    <option key={s} value={s}>
+                      {SEVERITY_LABELS[s]}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div className="field">
+                <label htmlFor="rule_type">유형</label>
+                <select id="rule_type" name="rule_type" defaultValue="">
+                  <option value="">전체</option>
+                  {(["EVENT", "AGGREGATE"] as const).map((t) => (
+                    <option key={t} value={t}>
+                      {RULE_TYPE_LABELS[t]}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <button className="btn btn-primary" type="submit">
+                검색
+              </button>
+              <button className="btn btn-secondary" type="reset">
+                초기화
+              </button>
+            </form>
+          </section>
+        )}
 
         <div className="tabs">
           {FILTERS.map((f) => (

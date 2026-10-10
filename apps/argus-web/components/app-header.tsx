@@ -34,13 +34,19 @@ export function useMe(): { me: Me | null; handleError: (e: unknown) => string | 
 }
 
 // 담당자 메뉴 — 탐지건(결재함)과 접속기록(원장 검색)은 하는 일이 달라 화면을 나눈다.
-// 취급자는 자기 소명 건만 보므로 메뉴가 없다 (메뉴 숨김은 편의, 권한 판단은 서버)
-const OFFICER_MENU = [
-  { href: "/detections", label: "탐지건" },
-  { href: "/access-logs", label: "접속기록" },
-  { href: "/rules", label: "룰" },
-  { href: "/reports", label: "점검 보고서" },
-];
+// 취급자는 내 소명 요청과 내 접속기록(v0.1 보강 D)만 (메뉴 숨김은 편의, 권한 판단은 서버)
+const MENUS = {
+  OFFICER: [
+    { href: "/detections", label: "탐지건" },
+    { href: "/access-logs", label: "접속기록" },
+    { href: "/rules", label: "룰" },
+    { href: "/reports", label: "점검 보고서" },
+  ],
+  HANDLER: [
+    { href: "/detections", label: "내 소명 요청" },
+    { href: "/access-logs", label: "내 접속기록" },
+  ],
+} as const;
 
 export function AppHeader({ me }: { me: Me | null }) {
   const router = useRouter();
@@ -60,9 +66,9 @@ export function AppHeader({ me }: { me: Me | null }) {
           접속기록 점검
         </span>
       </Link>
-      {me?.role === "OFFICER" && (
+      {me && (
         <nav className="header-nav">
-          {OFFICER_MENU.map((item) => (
+          {MENUS[me.role].map((item) => (
             <Link
               key={item.href}
               href={item.href}

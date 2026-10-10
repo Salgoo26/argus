@@ -29,6 +29,45 @@
 
 ---
 
+## 2026-10-10 — v0.1 보강 PR 1: 로그아웃 기록·보고서 소명 내용·Argus 검색·취급자 내 접속기록
+
+> 배경: 10/09 갭 분석 실측(증적은 `_gap/`, 레포 밖) → 사용자 결정(10/10 00:15)으로 기능 동결을 풀고
+> v0.1 보강 설계(`_gap/v01_보강설계.md`, Cowork 작성 — 원본에 합칠 예정)를 구현한다. PR 4개를 쌓아서 올리고
+> 머지는 사용자가 순서대로 한다. 이 항목은 PR 1(설계 A·B·C·D)
+
+**한 일**
+- **A 로그아웃 기록**(갭 A6, 안내서 FAQ 147): 수행업무 `LOGOUT` 추가 — 플랫폼 Agent·Argus 자체 기록·수집 검증·원장 CHECK(마이그레이션 0014)·검색/룰 빌더 선택지. 플랫폼·Argus 로그아웃을 `@access_log(LOGOUT, NONE)`으로. 로그인한 사용자만 기록(쿠키 없음·만료는 행위자가 없어 미기록, 응답은 같은 204). 행위자 확인 때 재발급한 세션 쿠키는 로그아웃 응답에 싣지 않음
+- **B 보고서 소명 내용**: 탐지건 항목에 마지막 차수 소명 요지(200자)·검토 결과/의견·관련 티켓·첨부 개수, 처리 담당자·일시, 요청 취소 사유. 소명 작성 칸에 "개인정보는 적지 말고 회원번호·주문번호로" 안내
+- **C-1 탐지건 검색**: `GET /api/detections` → `POST /api/detections/search`(기간·룰·취급자·심각도·상태·경로, 최신순/심각도순). 화면 기본 기간 = 담당자 이번 달, 취급자 제한 없음
+- **C-2 접속기록 검색**: 접속지(IP 정확히/앞부분 일치)·데이터 유형·결과 추가
+- **C-3 룰 목록**: 이름(부분 일치)·적용 경로·심각도·유형 필터
+- **D 취급자 "내 접속기록"**: 같은 검색 API·화면. 행위자를 서버가 명부의 본인으로 고정, 남의 아이디·Argus 자체 기록 요청은 403. 취급자 메뉴(내 소명 요청 / 내 접속기록)
+- 테스트(추가·변경): platform `test_agent.py::test_logout_is_recorded`, `::test_unauthenticated_logout_is_not_recorded` / argus `test_self_access_log.py::test_logout_is_recorded`, `::test_unauthenticated_logout_is_not_recorded`, `test_ingest.py::test_logout_without_subject_is_accepted`, `test_reports_api.py::test_cases_carry_the_latest_explanation_and_who_handled_it`, `::test_dismissed_case_carries_the_cancel_reason`, `::test_unsubmitted_draft_attachments_are_not_counted`, `test_detections_api.py::test_search_by_period_rule_actor_and_severity`, `::test_search_sorts_latest_or_by_severity`, `::test_invalid_search_is_400`, `::test_handler_search_cannot_reach_others_by_actor`, `::test_search_values_are_not_recorded`, `test_access_log_search.py::test_ip_category_and_result_filters`, `::test_invalid_new_conditions_are_400`, `::test_handler_sees_only_own_platform_logs`, `::test_handler_cannot_search_others_or_argus_logs`, `::test_handler_self_search_is_logged`, `::test_handler_period_and_filters_still_apply`, `test_rules_api.py::test_list_filters_by_name_path_severity_and_type` / E2E `test_v01_reinforcement.py` 3개
+- 결과: argus-api 423 passed, platform-api 241 passed, argus-web lint·typecheck, E2E 16 passed
+
+**결정사항**
+- 탐지건 목록은 GET을 남기지 않고 POST 검색으로 **대체**(설계 【기본값】 "통일") — 경로가 둘이면 접근 통제·기록 규칙을 두 번 지켜야 함. E2E·테스트 호출도 함께 바꿈
+- 탐지건 기간을 비우면 서버는 **전체 기간**, "이번 달" 기본값은 담당자 화면에만. 취급자 화면은 기간 기본값 없음 — 지난달에 받은 미제출 요청이 안 보이면 안 되므로
+- 처리 담당자 = 상태 이력에서 **담당자(OFFICER)가 마지막으로 상태를 바꾼 기록**(시스템 자동 요청·취급자 제출은 제외)
+- 보고서의 제출 전 초안은 내용·첨부 개수를 싣지 않음 — 담당자 화면(제출된 차수의 첨부만)과 같은 기준
+- 취급자 "내 접속기록"에서 남의 아이디·`source=ARGUS`는 **조용히 바꾸지 않고 403** — 시도가 자체 기록에 FAILURE로 남아 점검 대상이 된다. 본인 아이디를 적은 요청은 허용
+- IP 앞부분 일치: 완전한 주소면 `inet` 비교, 아니면 표준 표기의 문자열 앞부분 일치. 입력은 `[0-9A-Fa-f:.]`만 받아 LIKE 와일드카드가 들어올 수 없게
+- 룰 목록 필터는 URL 쿼리 — 룰 정의는 개인정보가 아니라 원칙 2의 대상이 아님
+
+**설계 변경**
+- 무엇을: 위 보강 A~D (설계 기준 `_gap/v01_보강설계.md`). 수행업무 코드 `LOGOUT`, `POST /api/detections/search`, 접속기록 검색 조건 3개, 취급자의 접속기록 검색 허용(본인 고정), 보고서 탐지건 항목 확장
+- 왜: 갭 분석(10/09) — 안내서 FAQ 147(로그아웃), 실무 결재문서 수준의 보고서, 점검 편의
+- 영향 문서: api-spec 2-3(수행업무 코드)·2-7(Argus 자체 기록)·탐지건/접속기록/룰 API 절, db-schema access_log CHECK(0014)·보고서 summary 구조, policy 6-2(검색 조건 기록)·6절(취급자 열람), actor-flows F-06(취급자 메뉴), architecture 3-2(로그아웃 제외 문구 삭제), CLAUDE.md 6절
+
+**미결·이슈**
+- 명부와 연결되지 않은 HANDLER는 로그인 자체가 막혀(`block_reason`) "빈 결과 + 안내" 분기는 실제로 닿지 않는다 — 방어용으로만 두고 API 테스트는 없음
+- 보고서 소명 요지는 자유 입력 그대로(자동 마스킹 없음) — 설계대로 한계로 기록
+
+**다음 할 일**
+- PR 2(플랫폼 관리자 검색) → PR 3(2티어 회원번호 추출) → PR 4(알림)
+
+---
+
 ## 2026-10-08 — 가상 PG 결제창의 카드번호 형식 검사 제거
 
 **한 일**

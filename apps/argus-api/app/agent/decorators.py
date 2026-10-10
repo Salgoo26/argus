@@ -15,7 +15,10 @@ from fastapi.routing import APIRoute
 API_PREFIX = "/api"
 
 # Argus 자체 기록에서 쓰는 코드값 (api-spec 2-3·2-7). UNMASK는 해당 기능을 만들 때 추가(v0.2)
-ACTIONS = frozenset({"LOGIN", "READ", "EXPORT"})  # EXPORT = 점검 보고서 생성 (기능 레이어 9)
+# EXPORT = 점검 보고서 생성 (기능 레이어 9)
+ACTIONS = frozenset({"LOGIN", "LOGOUT", "READ", "EXPORT"})
+# 정보주체를 처리하지 않는 행위 — 데이터 유형 NONE, 정보주체 생략 (LOGOUT: v0.1 보강 A)
+SESSION_ACTIONS = frozenset({"LOGIN", "LOGOUT"})
 DATA_CATEGORIES = frozenset({"NONE", "ACCESS_LOG"})
 
 _SPEC_ATTR = "__access_log__"
@@ -33,8 +36,8 @@ def access_log(*, action: str, data_category: str) -> Callable:
         raise ValueError(f"unknown access log action: {action}")
     if data_category not in DATA_CATEGORIES:
         raise ValueError(f"unknown access log data_category: {data_category}")
-    if (action == "LOGIN") != (data_category == "NONE"):
-        raise ValueError("LOGIN must use data_category NONE (and only LOGIN may)")
+    if (action in SESSION_ACTIONS) != (data_category == "NONE"):
+        raise ValueError("LOGIN/LOGOUT must use data_category NONE (and only they may)")
     spec = AccessLogSpec(action, data_category)
 
     def mark(fn: Callable) -> Callable:

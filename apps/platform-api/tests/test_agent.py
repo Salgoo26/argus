@@ -133,9 +133,22 @@ def test_unauthenticated_request_is_not_recorded(client, engine):
     assert outbox_payloads(engine) == []  # 식별자가 없다 = 취급자 행위가 아니다
 
 
-def test_logout_is_explicitly_exempt(logged_in, engine):
-    logged_in.post("/admin/auth/logout")
-    assert [p["action"] for p in outbox_payloads(engine)] == ["LOGIN"]
+def test_logout_is_recorded(logged_in, engine):
+    # 안내서 FAQ 147 — 로그아웃도 접속기록 (v0.1 보강 A, 갭 A6)
+    assert logged_in.post("/admin/auth/logout").status_code == 204
+    assert [p["action"] for p in outbox_payloads(engine)] == ["LOGIN", "LOGOUT"]
+    event = _only(engine, "LOGOUT")
+    assert event["actor"] == {"login_id": "ops_park"}
+    assert event["result"] == "SUCCESS" and event["data_category"] == "NONE"
+    assert "subject" not in event  # 로그아웃은 정보주체 없음 (LOGIN과 같다)
+    # 기록하느라 세션을 연장하지 않는다 — 로그아웃 뒤에는 바로 401
+    assert logged_in.get("/admin/members").status_code == 401
+
+
+def test_unauthenticated_logout_is_not_recorded(client, engine):
+    # 쿠키 없음·만료 — 행위자가 없으니 기록하지 않는다. 응답은 그대로 204(쿠키 지우기)
+    assert client.post("/admin/auth/logout").status_code == 204
+    assert outbox_payloads(engine) == []
 
 
 # ── CLAUDE.md M2 필수 테스트 ──────────────────────────────
@@ -285,6 +298,7 @@ def test_exempt_and_non_admin_routes_pass_the_check():
         {"action": "EXPORT", "data_category": "MEMBER_BASIC"},  # Argus 전용
         {"action": "READ", "data_category": "ACCESS_LOG"},  # Argus 전용
         {"action": "LOGIN", "data_category": "MEMBER_BASIC"},
+        {"action": "LOGOUT", "data_category": "MEMBER_BASIC"},
         {"action": "READ", "data_category": "NONE"},
     ],
 )

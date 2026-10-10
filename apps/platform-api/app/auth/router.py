@@ -1,4 +1,4 @@
-"""관리자 로그인·로그아웃 (PLT-02, PLT-10)
+"""관리자 로그인·로그아웃 (PLT-02, PLT-10) — 둘 다 접속기록 대상(LOGIN·LOGOUT)
 
 로그인 실패 정책 (implementation-log 2026-09-29 설계 변경 3):
 - 연속 5회 실패 → 잠금. 성공하면 0으로. 해제는 app.scripts.unlock_operator
@@ -14,7 +14,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy import select, update
 
 from app.agent import access_log, access_log_exempt, record_actor
-from app.auth.deps import MAX_FAILED_LOGINS, CurrentOperator
+from app.auth.deps import MAX_FAILED_LOGINS, CurrentOperator, OptionalOperator
 from app.auth.passwords import dummy_password_hash, verify_password
 from app.auth.tokens import clear_session_cookie, issue_token, set_session_cookie
 from app.config import Settings
@@ -88,8 +88,12 @@ def login(body: LoginRequest, request: Request, response: Response) -> dict:
 
 
 @router.post("/logout", status_code=204)
-@access_log_exempt("개인정보 처리 없음 — api-spec 수행업무 코드에 로그아웃 없음")
-def logout(request: Request, response: Response) -> None:
+@access_log(action="LOGOUT", data_category="NONE")
+def logout(request: Request, response: Response, _operator: OptionalOperator) -> None:
+    """로그아웃도 접속기록 (v0.1 보강 A — 안내서 FAQ 147). 쿠키가 없거나 만료된 요청은
+    행위자가 없어 기록하지 않고, 응답은 똑같이 쿠키를 지운다."""
+    # 행위자를 확인하느라 재발급한 세션을 응답에 싣지 않는다 (main.py 쿠키 연장 미들웨어)
+    request.state.session_cookie = None
     clear_session_cookie(response, request.app.state.settings)
 
 

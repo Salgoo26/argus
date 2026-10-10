@@ -79,3 +79,15 @@ def current_user(request: Request) -> AuthenticatedUser:
 
 
 CurrentUser = Annotated[AuthenticatedUser, Depends(current_user)]
+
+
+def optional_user(request: Request) -> AuthenticatedUser | None:
+    """인증돼 있으면 그 사용자, 아니면 None — 비인증 요청도 받아야 하는 라우트(로그아웃)용.
+    인증된 경우에만 current_user가 기록지에 식별자를 적으므로, 비인증 요청은 기록되지 않는다."""
+    try:
+        return current_user(request)
+    except ApiError:
+        return None
+
+
+OptionalUser = Annotated[AuthenticatedUser | None, Depends(optional_user)]

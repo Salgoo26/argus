@@ -1,8 +1,8 @@
 """탐지건 조회·소명 흐름 API (LOG-05~08, actor-flows F-05·F-06)
 
 조회
-- GET /api/detections                 목록
-    담당자: 전체 / 취급자: 본인 건 중 소명 요청을 받은 건(round ≥ 1)
+- POST /api/detections/search         목록 — 조건(기간·룰·취급자·심각도·상태·경로)·정렬은 본문
+    담당자: 전체 / 취급자: 본인 건 중 소명 요청을 받은 건(round ≥ 1) (v0.1 보강 C-1로 GET에서 바꿈)
 - GET /api/detections/{detection_id}  상세
     하위 접속기록(정보주체 마스킹), 요약, 차수별 소명, 상태 이력
 
@@ -26,14 +26,16 @@
 - 상태 전이는 접속기록이 아니라 **상태 이력(detection_status_history)**에 누가·언제·사유를 남긴다
 """
 
-from typing import Annotated
+from datetime import date, datetime, time, timedelta
+from typing import Annotated, Literal
 
-from fastapi import APIRouter, Query, Request
-from pydantic import BaseModel, BeforeValidator, Field, StringConstraints
-from sqlalchemy import Connection, and_, func, insert, select, update
+from fastapi import APIRouter, Request
+from pydantic import BaseModel, BeforeValidator, Field, StringConstraints, model_validator
+from sqlalchemy import Connection, and_, case, func, insert, select, update
 
-from app.agent import access_log, access_log_exempt, record_subject_count
+from app.agent import access_log, access_log_exempt, record_query_keys, record_subject_count
 from app.auth.deps import AuthenticatedUser, CurrentUser
+from app.detection.rules import KST
 from app.detections.db_detail import db_detail
 from app.detections.masking import mask_subject
 from app.detections.transitions import ACTION_ROLES, HANDLER, TRANSITIONS
@@ -58,6 +60,8 @@ RequiredText = Annotated[
     str, StringConstraints(strip_whitespace=True, min_length=1, max_length=1000)
 ]
 OptionalText = Annotated[str, StringConstraints(strip_whitespace=True, max_length=1000)] | None
+
+LoginId = Annotated[str, StringConstraints(strip_whitespace=True, pattern=r"^[\x21-\x7e]{1,64}$")]
 
 MAX_TICKETS = 3
 # 플랫폼 1:1 문의 티켓 번호 — INQ-{문의 번호}. 링크 주소에 그대로 들어가므로 형식을 엄격히
@@ -134,31 +138,68 @@ def _case_query():
 # ── 조회 ──────────────────────────────────────────────────
 
 
-@router.get("")
+class CaseSearch(BaseModel):
+    """탐지건 검색 조건 (v0.1 보강 C-1) — URL이 아니라 본문으로 받는다(취급자 아이디가 서버
+    접근 로그·방문 기록에 남지 않게, 접속기록 검색과 같은 방식).
+    기간은 탐지 시각의 한국 날짜, 양 끝 포함. 비우면 기간 제한 없음(화면 기본값은 이번 달)"""
+
+    status: Literal[STATUSES] | None = None
+    access_path: Literal["APP", "DB"] | None = None
+    severity: Literal["HIGH", "MEDIUM", "LOW"] | None = None
+    rule_id: Annotated[int, Field(ge=1)] | None = None
+    actor: LoginId | None = None
+    date_from: date | None = None
+    date_to: date | None = None
+    sort: Literal["LATEST", "SEVERITY"] = "LATEST"
+    page: Annotated[int, Field(ge=1)] = 1
+    size: Annotated[int, Field(ge=1, le=100)] = 20
+
+    @model_validator(mode="after")
+    def _period(self):
+        if self.date_from and self.date_to and self.date_from > self.date_to:
+            raise ValueError("date_from must not be after date_to")
+        return self
+
+
+_SEVERITY_RANK = case(
+    (detection.c.severity == "HIGH", 0), (detection.c.severity == "MEDIUM", 1), else_=2
+)
+
+
+@router.post("/search")
 @access_log(action="READ", data_category="ACCESS_LOG")
-def list_detections(
-    request: Request,
-    user: CurrentUser,
-    status: Annotated[str | None, Query(pattern="^(" + "|".join(STATUSES) + ")$")] = None,
-    access_path: Annotated[str | None, Query(pattern="^(APP|DB)$")] = None,
-    page: Annotated[int, Query(ge=1)] = 1,
-    size: Annotated[int, Query(ge=1, le=100)] = 20,
-) -> dict:
+def search_detections(body: CaseSearch, request: Request, user: CurrentUser) -> dict:
+    """목록 — 담당자: 전체 / 취급자: 본인 건 중 소명 요청을 받은 건(조건보다 노출 범위가 먼저)"""
+    # 검색어 값이 아니라 어떤 조건으로 찾았는지만 (policy 6-2)
+    record_query_keys(sorted(body.model_dump(exclude_unset=True, exclude_none=True)))
+    d = detection.c
     query = _visible(_case_query(), user)
-    if status is not None:
-        query = query.where(detection.c.status == status)
-    if access_path is not None:
-        query = query.where(detection.c.access_path == access_path)
+    for column, value in (
+        (d.status, body.status),
+        (d.access_path, body.access_path),
+        (d.severity, body.severity),
+        (d.rule_id, body.rule_id),
+        (d.actor_login_id, body.actor),
+    ):
+        if value is not None:
+            query = query.where(column == value)
+    if body.date_from:
+        query = query.where(d.detected_at >= datetime.combine(body.date_from, time(), KST))
+    if body.date_to:
+        end = datetime.combine(body.date_to + timedelta(days=1), time(), KST)
+        query = query.where(d.detected_at < end)
+    order = (d.detected_at.desc(), d.id.desc())
+    if body.sort == "SEVERITY":
+        order = (_SEVERITY_RANK, *order)
+
     with request.app.state.engine.connect() as conn:
         total = conn.execute(select(func.count()).select_from(query.subquery())).scalar_one()
         rows = conn.execute(
-            query.order_by(detection.c.detected_at.desc(), detection.c.id.desc())
-            .limit(size)
-            .offset((page - 1) * size)
+            query.order_by(*order).limit(body.size).offset((body.page - 1) * body.size)
         ).mappings()
         items = [_case_summary(r) for r in rows]
     record_subject_count(0)  # 목록에는 정보주체 식별값이 없다 (건수 합계만)
-    return {"items": items, "page": page, "size": size, "total": total}
+    return {"items": items, "page": body.page, "size": body.size, "total": total}
 
 
 @router.get("/{detection_id}")

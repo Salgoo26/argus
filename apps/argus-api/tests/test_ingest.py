@@ -51,6 +51,16 @@ def test_login_without_subject_is_accepted(client, app_engine):
     assert row["subject_type"] is None and row["subject_count"] == 0
 
 
+def test_logout_without_subject_is_accepted(client, app_engine):
+    # v0.1 보강 A — LOGOUT도 LOGIN처럼 데이터 유형 NONE, 정보주체 없음
+    event = make_event(action="LOGOUT", data_category="NONE", subject=None)
+    del event["subject"]
+    res = post_events(client, [event])
+    assert res.json() == {"accepted": 1, "duplicates": 0, "rejected": []}
+    row = _rows(app_engine)[0]
+    assert row["action"] == "LOGOUT" and row["subject_type"] is None
+
+
 def test_past_occurred_at_is_accepted_for_seeding(client):
     # 시드 주입: occurred_at은 과거, X-Argus-Timestamp는 현재 (api-spec 4절)
     past = (datetime.now(UTC) - timedelta(days=60)).isoformat()

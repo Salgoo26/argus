@@ -19,7 +19,9 @@ from datetime import datetime, timedelta
 from typing import Any
 
 # 코드값 (api-spec 2-3). EXPORT·UNMASK·ACCESS_LOG는 Argus 자체 기록 전용
-EXTERNAL_ACTIONS = frozenset({"LOGIN", "READ", "CREATE", "UPDATE", "DELETE", "DOWNLOAD"})
+EXTERNAL_ACTIONS = frozenset({"LOGIN", "LOGOUT", "READ", "CREATE", "UPDATE", "DELETE", "DOWNLOAD"})
+# 정보주체 없이 받는 행위 (LOGOUT: v0.1 보강 A — 안내서 FAQ 147)
+SESSION_ACTIONS = frozenset({"LOGIN", "LOGOUT"})
 ARGUS_ONLY_ACTIONS = frozenset({"EXPORT", "UNMASK"})
 EXTERNAL_CATEGORIES = frozenset({"MEMBER_BASIC", "PAYMENT", "ORDER", "INQUIRY", "NONE"})
 ARGUS_ONLY_CATEGORIES = frozenset({"ACCESS_LOG"})
@@ -120,8 +122,8 @@ def _parse_ip(value: Any) -> str:
 
 def _parse_subject(raw: Any, action: str) -> dict[str, Any]:
     if raw is None:
-        if action != "LOGIN":
-            raise _Reject("SUBJECT_REQUIRED", "subject is required unless action is LOGIN")
+        if action not in SESSION_ACTIONS:
+            raise _Reject("SUBJECT_REQUIRED", "subject is required unless action is LOGIN/LOGOUT")
         return {
             "subject_type": None,
             "subject_ids": None,
@@ -206,7 +208,7 @@ def _string_list(value: Any, limit: int, pattern: re.Pattern) -> bool:
 def _check_db_context(raw: dict, action: str, check) -> None:
     """2티어 기록 필드 (api-spec 2-2 "`access_path=DB` 기록 규칙", v0.5)"""
     required = DB_REQUIRED_KEYS
-    if action != "LOGIN":
+    if action not in SESSION_ACTIONS:
         required += DB_REQUIRED_KEYS_UNLESS_LOGIN
     for key in required:
         if raw.get(key) in (None, ""):
