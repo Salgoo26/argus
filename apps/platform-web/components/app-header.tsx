@@ -13,7 +13,7 @@ const MENU: { href: string; label: string; permission: Permission }[] = [
   { href: "/admin/members", label: "회원", permission: "MEMBERS" },
   { href: "/admin/orders", label: "주문", permission: "ORDERS" },
   { href: "/admin/inquiries", label: "1:1 문의", permission: "INQUIRIES" },
-  { href: "/admin/db-token", label: "DB 접속", permission: "DB_TOKEN" },
+  { href: "/admin/db-token", label: "DB 직접 접근", permission: "DB_TOKEN" },
   { href: "/admin/accounts", label: "계정·권한", permission: "ACCOUNTS" },
 ];
 

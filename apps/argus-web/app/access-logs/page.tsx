@@ -96,7 +96,7 @@ export default function AccessLogsPage() {
             {isOfficer && (
               <div className="field">
                 <label htmlFor="actor">계정</label>
-                <input id="actor" name="actor" placeholder="ops_park" maxLength={64} size={12} />
+                <input id="actor" name="actor" maxLength={64} size={12} />
               </div>
             )}
             <div className="field">
@@ -123,7 +123,6 @@ export default function AccessLogsPage() {
               <input
                 id="subject"
                 name="subject"
-                placeholder="10293"
                 maxLength={64}
                 size={12}
                 autoComplete="off"
@@ -142,7 +141,6 @@ export default function AccessLogsPage() {
               <input
                 id="client_ip"
                 name="client_ip"
-                placeholder="10.20.3 또는 전체 주소"
                 maxLength={45}
                 size={14}
                 pattern="[0-9A-Fa-f:.]+"

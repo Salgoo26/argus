@@ -92,7 +92,7 @@ export default function MyPage() {
   async function withdraw(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const form = new FormData(event.currentTarget);
-    if (!window.confirm("탈퇴하면 회원 정보가 즉시 파기되어 되돌릴 수 없습니다. 탈퇴할까요?")) return;
+    if (!window.confirm("탈퇴 시 회원 정보가 즉시 파기되어 되돌릴 수 없습니다. 탈퇴를 진행할까요?")) return;
     try {
       await api("/shop/me/withdraw", {
         method: "POST",
@@ -191,7 +191,6 @@ export default function MyPage() {
             </tbody>
           </table>
         </div>
-        <p className="hint">필수 동의는 서비스 이용의 전제라 철회 대신 회원 탈퇴로 처리합니다.</p>
       </section>
 
       <ShippingAddressCard />
@@ -232,7 +231,7 @@ export default function MyPage() {
       <section className="card danger-zone">
         <h2 className="card-title">회원 탈퇴</h2>
         <p className="hint">
-          탈퇴하면 회원 정보와 동의 내역이 <strong>즉시 파기</strong>됩니다. 관계 법령에 따라 보존해야
+          탈퇴 시 회원 정보와 동의 내역이 <strong>즉시 파기</strong>됩니다. 관계 법령에 따라 보존해야
           하는 거래 기록은 해당 기간 동안 분리 보관한 뒤 파기합니다.
         </p>
         <form className="toolbar" onSubmit={withdraw}>

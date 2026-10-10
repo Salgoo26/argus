@@ -39,9 +39,9 @@ export function useMe(): { me: Me | null; handleError: (e: unknown) => string | 
 // 취급자는 내 소명 요청과 내 접속기록(v0.1 보강 D)만 (메뉴 숨김은 편의, 권한 판단은 서버)
 const MENUS = {
   OFFICER: [
-    { href: "/detections", label: "탐지건" },
+    { href: "/detections", label: "행위 탐지" },
     { href: "/access-logs", label: "접속기록" },
-    { href: "/rules", label: "룰" },
+    { href: "/rules", label: "룰 설정" },
     { href: "/reports", label: "점검 보고서" },
     { href: "/protection", label: "보호 대상" },
     { href: "/users", label: "계정" },

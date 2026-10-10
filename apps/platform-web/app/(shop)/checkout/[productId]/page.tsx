@@ -201,7 +201,6 @@ function PgWindow({
           id="pg_expiry"
           inputMode="numeric"
           autoComplete="off"
-          placeholder="12/30"
           value={expiry}
           onChange={(e) => setExpiry(e.target.value)}
           maxLength={5}
