@@ -39,12 +39,13 @@ export function useMe(): { me: Me | null; handleError: (e: unknown) => string | 
 // 취급자는 내 소명 요청과 내 접속기록(v0.1 보강 D)만 (메뉴 숨김은 편의, 권한 판단은 서버)
 const MENUS = {
   OFFICER: [
-    { href: "/detections", label: "탐지건" },
+    { href: "/detections", label: "행위 탐지" },
     { href: "/access-logs", label: "접속기록" },
-    { href: "/rules", label: "룰" },
+    { href: "/rules", label: "룰 설정" },
     { href: "/reports", label: "점검 보고서" },
-    { href: "/protection", label: "보호 대상" },
-    { href: "/users", label: "계정" },
+    // 개인정보 DB/테이블/항목 등록 및 관리 기능과 계정 권한 이력 관리 기능은 다음 버전에서 보완 후 노출 예정
+    // { href: "/protection", label: "보호 대상" },
+    // { href: "/users", label: "계정" },
   ],
   HANDLER: [
     { href: "/detections", label: "내 소명 요청" },

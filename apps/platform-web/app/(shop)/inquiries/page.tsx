@@ -56,7 +56,7 @@ export default function MyInquiriesPage() {
   return (
     <>
       <h1 className="page-title">1:1 문의</h1>
-      <p className="page-subtitle">비밀번호·카드번호는 적지 마세요.</p>
+      <p className="page-subtitle">비밀번호·카드번호 등 개인정보 작성에 유의해주세요.</p>
       {error && <div className="alert-error">{error}</div>}
 
       <section className="card">

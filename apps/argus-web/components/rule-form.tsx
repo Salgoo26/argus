@@ -439,7 +439,7 @@ export function RuleForm({
 
       <label className="inline" style={{ marginTop: 16 }}>
         <input type="checkbox" checked={autoRequest} onChange={(e) => setAutoRequest(e.target.checked)} />
-        탐지 즉시 해당 취급자에게 소명을 자동 요청
+        탐지 즉시 해당 취급자에게 자동으로 소명 요청
       </label>
 
       <button className="btn btn-primary" type="submit" disabled={pending}>

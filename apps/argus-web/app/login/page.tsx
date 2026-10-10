@@ -36,7 +36,7 @@ export default function LoginPage() {
           <span className="brand-mark" />
           Argus
         </div>
-        <p className="page-subtitle">접속 및 개인정보 처리 내역은 기록됩니다.</p>
+        <p className="page-subtitle">개인정보 접속기록을 관리하기 위한 시스템입니다.</p>
         {error && <div className="alert-error">{error}</div>}
         <form onSubmit={onSubmit}>
           <div className="field">

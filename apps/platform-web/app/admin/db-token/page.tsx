@@ -54,12 +54,12 @@ export default function AdminDbTokenPage() {
     <>
       <AppHeader me={me} />
       <main className="container">
-        <h1 className="page-title">DB 접속 토큰</h1>
-        <p className="page-subtitle">DB 툴 접속용 토큰입니다. 1시간 동안 쓸 수 있습니다.</p>
+        <h1 className="page-title">DB 접근 관리</h1>
+        <p className="page-subtitle">DB 접속을 위한 토큰을 발급합니다. 토큰은 1시간 뒤 만료됩니다.</p>
         {error && <div className="alert-error">{error}</div>}
 
         <section className="card">
-          <h2 className="card-title">토큰 발급</h2>
+          <h2 className="card-title">접속 토큰 발급</h2>
           <div className="stack">
             <div className="toolbar">
               <button className="btn btn-primary" onClick={issue} disabled={busy}>
@@ -90,16 +90,12 @@ export default function AdminDbTokenPage() {
         </section>
 
         <section className="card">
-          <h2 className="card-title">DB 툴 설정</h2>
+          <h2 className="card-title">DB 접속 설정</h2>
           <dl className="kv">
             <dt>사용자 이름</dt>
             <dd>본인 아이디 {me && <span className="mono">({me.login_id})</span>}</dd>
             <dt>비밀번호</dt>
-            <dd>위에서 발급한 토큰</dd>
-            <dt>SSL</dt>
-            <dd>
-              필수 — DBeaver는 Driver properties에서 <span className="mono">sslmode=require</span>
-            </dd>
+            <dd>발급한 토큰</dd>
             <dt>접속 주소</dt>
             <dd>
               <span className="mono">localhost:16432</span> (DB 게이트웨이)
