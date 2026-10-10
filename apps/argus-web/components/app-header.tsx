@@ -5,6 +5,7 @@ import { usePathname, useRouter } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
 
 import { NotificationBell } from "@/components/notifications";
+import { releaseBrowserPush, syncBrowserPush } from "@/components/push-toggle";
 import { ApiError, api, errorMessage, type Me } from "@/lib/api";
 
 const ROLE_LABELS = { OFFICER: "정보보호 담당자", HANDLER: "개인정보취급자" } as const;
@@ -54,8 +55,16 @@ const MENUS = {
 export function AppHeader({ me }: { me: Me | null }) {
   const router = useRouter();
   const pathname = usePathname();
+  const loginId = me?.login_id ?? null;
+
+  // 브라우저에 남은 웹 푸시 구독을 지금 로그인한 계정과 맞춘다 (계정마다 한 번)
+  useEffect(() => {
+    if (loginId) syncBrowserPush(loginId);
+  }, [loginId]);
 
   async function logout() {
+    // 브라우저 쪽 웹 푸시 구독도 해제 — 서버는 로그아웃 요청에서 구독을 지운다
+    await releaseBrowserPush();
     await api("/auth/logout", { method: "POST" }).catch(() => undefined);
     router.replace("/login");
   }
