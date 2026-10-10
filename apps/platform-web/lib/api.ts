@@ -11,6 +11,19 @@ export class ApiError extends Error {
   }
 }
 
+// 관리자 검색 본문 (v0.1 보강 E) — 검색어는 URL이 아니라 POST 본문으로
+export type SearchBody = { page: number; size: number } & Record<string, string | number>;
+
+// 폼에서 값이 있는 칸만 골라 검색 본문으로 (번호 칸은 숫자로)
+export function formCriteria(form: FormData, keys: string[], numeric: string[] = []): SearchBody {
+  const body: SearchBody = { page: 1, size: 20 };
+  for (const key of keys) {
+    const value = String(form.get(key) ?? "").trim();
+    if (value) body[key] = numeric.includes(key) ? Number(value) : value;
+  }
+  return body;
+}
+
 export async function api<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(`/api${path}`, {
     ...init,

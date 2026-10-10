@@ -5,17 +5,39 @@
 처리한 정보주체 = 화면에 표시된 주문의 회원(탈퇴로 끊긴 주문은 정보주체 없음).
 """
 
-from typing import Annotated
+from datetime import date
+from typing import Annotated, Literal
 
 from fastapi import APIRouter, Query, Request
+from pydantic import Field, model_validator
 from sqlalchemy import func, select
 
+from app.admin_search import SearchPage, check_period, kst_period
 from app.agent import access_log, record_subjects
 from app.auth.deps import CurrentOperator
 from app.errors import ApiError
 from app.models import SHIP_COLUMNS, member, orders, payment, product
 
 router = APIRouter(prefix="/admin/orders")
+
+
+def _list_query():
+    """목록·검색 공통 — 결제수단 정보는 카드사 이름뿐"""
+    return select(
+        orders.c.id,
+        orders.c.member_id,
+        member.c.name.label("member_name"),
+        product.c.name.label("product_name"),
+        orders.c.amount,
+        orders.c.status,
+        orders.c.ordered_at,
+        payment.c.card_company,
+        payment.c.pg_tid,
+    ).select_from(
+        orders.join(product, product.c.id == orders.c.product_id)
+        .outerjoin(member, member.c.id == orders.c.member_id)
+        .outerjoin(payment, payment.c.order_id == orders.c.id)
+    )
 
 
 @router.get("")
@@ -29,22 +51,7 @@ def list_orders(
     with request.app.state.engine.connect() as conn:
         total = conn.execute(select(func.count()).select_from(orders)).scalar_one()
         rows = conn.execute(
-            select(
-                orders.c.id,
-                orders.c.member_id,
-                member.c.name.label("member_name"),
-                product.c.name.label("product_name"),
-                orders.c.amount,
-                orders.c.status,
-                orders.c.ordered_at,
-                payment.c.card_company,
-                payment.c.pg_tid,
-            )
-            .select_from(
-                orders.join(product, product.c.id == orders.c.product_id)
-                .outerjoin(member, member.c.id == orders.c.member_id)
-                .outerjoin(payment, payment.c.order_id == orders.c.id)
-            )
+            _list_query()
             .order_by(orders.c.ordered_at.desc(), orders.c.id.desc())
             .limit(size)
             .offset((page - 1) * size)
@@ -53,6 +60,49 @@ def list_orders(
     # 같은 회원의 주문이 여럿이어도 정보주체는 한 번만
     record_subjects(dict.fromkeys(i["member_id"] for i in items if i["member_id"] is not None))
     return {"items": items, "page": page, "size": size, "total": total}
+
+
+class OrderSearch(SearchPage):
+    order_id: Annotated[int, Field(ge=1)] | None = None
+    member_id: Annotated[int, Field(ge=1)] | None = None
+    status: Literal["PAID"] | None = None  # 지금 주문 상태는 결제 완료뿐 (db-schema 4절)
+    ordered_from: date | None = None  # 한국 날짜, 양 끝 포함
+    ordered_to: date | None = None
+
+    @model_validator(mode="after")
+    def _period(self):
+        check_period(self.ordered_from, self.ordered_to)
+        return self
+
+
+@router.post("/search")
+@access_log(action="READ", data_category="ORDER")
+def search_orders(body: OrderSearch, request: Request, _operator: CurrentOperator) -> dict:
+    """주문 검색 (v0.1 보강 E) — 조건은 본문, 접속기록에는 키 이름만 (app/admin_search.py)"""
+    body.record_keys()
+    o = orders.c
+    conditions = kst_period(o.ordered_at, body.ordered_from, body.ordered_to)
+    for column, value in (
+        (o.id, body.order_id),
+        (o.member_id, body.member_id),
+        (o.status, body.status),
+    ):
+        if value is not None:
+            conditions.append(column == value)
+    with request.app.state.engine.connect() as conn:
+        total = conn.execute(
+            select(func.count()).select_from(orders).where(*conditions)
+        ).scalar_one()
+        rows = conn.execute(
+            _list_query()
+            .where(*conditions)
+            .order_by(o.ordered_at.desc(), o.id.desc())
+            .limit(body.size)
+            .offset((body.page - 1) * body.size)
+        ).mappings()
+        items = [dict(r) for r in rows]
+    record_subjects(dict.fromkeys(i["member_id"] for i in items if i["member_id"] is not None))
+    return {"items": items, "page": body.page, "size": body.size, "total": total}
 
 
 @router.get("/{order_id}")

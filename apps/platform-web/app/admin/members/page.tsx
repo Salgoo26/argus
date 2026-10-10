@@ -5,7 +5,15 @@ import { useRouter } from "next/navigation";
 import { type FormEvent, useCallback, useEffect, useState } from "react";
 
 import { AppHeader } from "@/components/app-header";
-import { ApiError, adminLoginPath, api, errorMessage, type Operator } from "@/lib/api";
+import {
+  ApiError,
+  adminLoginPath,
+  api,
+  errorMessage,
+  formCriteria,
+  type Operator,
+  type SearchBody,
+} from "@/lib/api";
 
 type Member = {
   id: number;
@@ -18,6 +26,8 @@ type Member = {
 type MemberPage = { items: Member[]; page: number; size: number; total: number };
 
 const PAGE_SIZE = 20;
+const FIRST_PAGE: SearchBody = { page: 1, size: PAGE_SIZE };
+const SEARCH_KEYS = ["name", "email", "phone", "status", "joined_from", "joined_to"];
 
 function formatDate(iso: string): string {
   return new Date(iso).toLocaleDateString("ko-KR", { timeZone: "Asia/Seoul" });
@@ -27,7 +37,8 @@ export default function MembersPage() {
   const router = useRouter();
   const [me, setMe] = useState<Operator | null>(null);
   const [data, setData] = useState<MemberPage | null>(null);
-  const [page, setPage] = useState(1);
+  const [criteria, setCriteria] = useState<SearchBody>(FIRST_PAGE);
+  const page = criteria.page;
   const [error, setError] = useState<string | null>(null);
   const [downloading, setDownloading] = useState(false);
 
@@ -44,11 +55,17 @@ export default function MembersPage() {
   }, [handleError]);
 
   useEffect(() => {
-    // 목록 조회도 접속기록(READ, 화면에 표시된 회원 PK)으로 남는다
-    api<MemberPage>(`/admin/members?page=${page}&size=${PAGE_SIZE}`)
+    // 목록·검색 모두 접속기록(READ, 화면에 표시된 회원 PK)으로 남는다. 검색어는 URL이 아니라
+    // 본문으로 보낸다 — 이름·이메일·연락처가 서버 로그·방문 기록에 남지 않게 (v0.1 보강 E)
+    api<MemberPage>("/admin/members/search", { method: "POST", body: JSON.stringify(criteria) })
       .then(setData)
       .catch(handleError);
-  }, [page, handleError]);
+  }, [criteria, handleError]);
+
+  function onSearch(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setCriteria(formCriteria(new FormData(event.currentTarget), SEARCH_KEYS));
+  }
 
   async function onDownload(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -117,6 +134,58 @@ export default function MembersPage() {
         </section>
 
         <section className="card">
+          <h2 className="card-title">회원 검색</h2>
+          <form className="toolbar" onSubmit={onSearch} onReset={() => setCriteria(FIRST_PAGE)}>
+            <div className="field">
+              <label htmlFor="s_name">이름</label>
+              <input id="s_name" name="name" maxLength={100} size={10} autoComplete="off" />
+            </div>
+            <div className="field">
+              <label htmlFor="s_email">이메일</label>
+              <input id="s_email" name="email" maxLength={100} size={16} autoComplete="off" />
+            </div>
+            <div className="field">
+              <label htmlFor="s_phone">연락처</label>
+              <input
+                id="s_phone"
+                name="phone"
+                maxLength={20}
+                size={12}
+                pattern="[0-9][0-9\-]*"
+                title="숫자(하이픈 있어도 됨)"
+                autoComplete="off"
+              />
+            </div>
+            <div className="field">
+              <label htmlFor="s_status">상태</label>
+              <select id="s_status" name="status" defaultValue="">
+                <option value="">전체</option>
+                <option value="ACTIVE">정상</option>
+                <option value="WITHDRAWN">탈퇴</option>
+              </select>
+            </div>
+            <div className="field">
+              <label htmlFor="s_joined_from">가입일 시작</label>
+              <input id="s_joined_from" name="joined_from" type="date" />
+            </div>
+            <div className="field">
+              <label htmlFor="s_joined_to">가입일 끝</label>
+              <input id="s_joined_to" name="joined_to" type="date" />
+            </div>
+            <button className="btn btn-primary" type="submit">
+              검색
+            </button>
+            <button className="btn btn-secondary" type="reset">
+              초기화
+            </button>
+          </form>
+          <p className="muted" style={{ margin: "12px 0 0", fontSize: 12 }}>
+            이름·이메일·연락처는 부분 일치입니다. 검색 결과로 표시된 회원도 접속기록으로 남습니다
+            (검색어는 남지 않습니다).
+          </p>
+        </section>
+
+        <section className="card">
           <h2 className="card-title">
             회원 목록 <span className="muted">총 {data?.total ?? "-"}명</span>
           </h2>
@@ -156,7 +225,7 @@ export default function MembersPage() {
             <button
               className="btn btn-secondary"
               disabled={page <= 1}
-              onClick={() => setPage((p) => p - 1)}
+              onClick={() => setCriteria((c) => ({ ...c, page: c.page - 1 }))}
             >
               이전
             </button>
@@ -166,7 +235,7 @@ export default function MembersPage() {
             <button
               className="btn btn-secondary"
               disabled={page >= lastPage}
-              onClick={() => setPage((p) => p + 1)}
+              onClick={() => setCriteria((c) => ({ ...c, page: c.page + 1 }))}
             >
               다음
             </button>

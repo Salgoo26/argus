@@ -29,6 +29,34 @@
 
 ---
 
+## 2026-10-10 (2) — v0.1 보강 PR 2: 플랫폼 관리자 검색 (설계 E)
+
+**한 일**
+- `POST /admin/members/search`(이름·이메일·연락처 부분 일치, 상태, 가입일), `POST /admin/orders/search`(주문번호·회원번호·상태·주문일), `POST /admin/inquiries/search`(상태·회원번호·작성일·제목 부분 일치)
+- 플랫폼 Agent에 `record_query_keys` — 본문 검색 조건의 키 이름만 기록. 정보주체 = 결과로 보인 회원 PK 전부, 0건도 READ(정보주체 0명)
+- 관리자 화면(회원·주문·문의)에 검색 폼 — 첫 진입도 같은 검색 API(조건 없음)
+- 테스트: platform `test_admin_search.py` — `test_member_search_by_name_email_phone_status_and_join_date`, `test_member_search_records_every_shown_member_and_key_names_only`(검색어 값이 기록에 없음 단언), `test_empty_result_is_still_recorded`, `test_like_wildcards_are_literal`, `test_invalid_member_search_is_400`, `test_search_requires_login`, `test_order_search_by_number_member_status_and_date`, `test_inquiry_search_by_status_member_date_and_title` / E2E `test_platform_member_search_records_shown_members_not_search_values` + `scripts/e2e.sh` 서버 로그 검색어 검사
+- 결과: platform-api 253 passed, platform-web lint·typecheck, E2E 17 passed
+
+**결정사항**
+- 기존 `GET /admin/{members,orders,inquiries}` 목록은 **남긴다** — 조건이 페이지 번호뿐이라 원칙 2(검색 값 비노출)에 걸리지 않고, 기존 테스트·기준선 시드의 경로와 맞물려 있음. 화면은 첫 진입부터 검색 API만 쓴다
+- 연락처는 하이픈을 지우고 숫자끼리 부분 일치(입력·저장 표기 차이 흡수). 입력은 숫자로 시작하는 `[0-9-]`만
+- 부분 일치는 `autoescape` — 검색어의 `%`·`_`가 와일드카드로 해석되지 않음(테스트로 고정)
+- 검색 키 이름은 정렬해 기록(Argus 쪽과 같은 형식)
+- 서버 로그 검사는 E2E 스크립트에 고유 검색어(needle) grep으로 — 카드번호 검사와 같은 방식
+
+**설계 변경**
+- 무엇을: 플랫폼 관리자 검색 API 3개, Agent의 본문 검색 키 기록
+- 영향 문서: api-spec(플랫폼 관리자 API — 내부 API지만 접속기록 규칙 2-2 "query_keys"에 본문 키 포함 명시), requirements PLT-11·16·17(검색), actor-flows F-02·F-03(검색 단계), architecture 3-2(검색 조건 기록)
+
+**미결·이슈**
+- 주문 상태는 지금 `PAID`뿐이라 상태 조건은 사실상 형식만 있음
+
+**다음 할 일**
+- PR 3(2티어 회원번호 추출)
+
+---
+
 ## 2026-10-10 — v0.1 보강 PR 1: 로그아웃 기록·보고서 소명 내용·Argus 검색·취급자 내 접속기록
 
 > 배경: 10/09 갭 분석 실측(증적은 `_gap/`, 레포 밖) → 사용자 결정(10/10 00:15)으로 기능 동결을 풀고

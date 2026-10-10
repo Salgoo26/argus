@@ -6,10 +6,10 @@
 | ThreadLocal         | context (contextvars)                 |
 | URL → 업무 매핑 설정 | decorators.access_log                 |
 
-핸들러가 쓰는 것은 아래 셋뿐이다.
+핸들러가 쓰는 것은 아래 record_* 함수뿐이다.
 """
 
-from app.agent.context import record_actor, record_context, record_subjects
+from app.agent.context import record_actor, record_context, record_query_keys, record_subjects
 from app.agent.decorators import access_log, access_log_exempt
 
 __all__ = [
@@ -17,5 +17,6 @@ __all__ = [
     "access_log_exempt",
     "record_actor",
     "record_context",
+    "record_query_keys",
     "record_subjects",
 ]
