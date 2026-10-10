@@ -2,6 +2,7 @@
 
 - I: 점검 보고서의 원장 기준점(마지막 id·해시·건수)과 직전 보고서 대조
 - J: 탐지건의 처리 성격(데이터 유형·행위 구분)과 소명 제출 뒤 추가 기록 수
+- K: 접속지·특정 회원 기반 기본 룰
 """
 
 from datetime import datetime, timedelta, timezone
@@ -40,4 +41,12 @@ def test_detections_carry_nature_and_after_submission_count(officer):
     assert downloads and {(c["data_category"], c["action_group"]) for c in downloads} == {
         ("MEMBER_BASIC", "DOWNLOAD")
     }
+    browser.close()
+
+
+def test_ip_and_subject_rules_are_seeded(officer):
+    # K — 접속지·특정 회원 기반 기본 룰 3개가 룰 빌더 목록에 있다
+    browser = argus_login(*officer)
+    names = {r["name"] for r in browser.get("/api/rules").json()["items"]}
+    assert {"허용 범위 밖 접속지", "짧은 시간 여러 접속지", "특정 회원 반복 처리"} <= names
     browser.close()

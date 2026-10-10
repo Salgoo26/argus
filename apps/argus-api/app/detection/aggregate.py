@@ -9,6 +9,7 @@
 - 판정은 언제나 occurred_at 기준 — 늦게 도착한 기록도 자기 윈도우를 다시 집계한다 (api-spec 2-6)
 """
 
+from collections import Counter
 from collections.abc import Iterable, Mapping
 from datetime import datetime, timedelta
 from typing import Any
@@ -53,14 +54,36 @@ def prev_month_same_period(month_start: datetime, as_of: datetime) -> tuple[date
 
 
 def measure(logs: Iterable[Mapping[str, Any]], kind: str) -> int:
-    """집계값 — LOG_COUNT: 기록 수, SUBJECT_COUNT: 처리 건수 합, DISTINCT_SUBJECT: 고유 정보주체 수
+    """집계값
+    - LOG_COUNT: 기록 수, SUBJECT_COUNT: 처리 건수 합, DISTINCT_SUBJECT: 고유 정보주체 수
+    - DISTINCT_IP: 고유 접속지 수 — "짧은 시간 여러 IP" (v0.1 보강 K-1)
+    - MAX_SUBJECT_REPEAT: 한 회원을 처리한 최대 횟수(그 회원이 든 기록 수) — "특정 정보주체 과도
+      조회". 회원번호가 있는 기록만 센다(DB 직접 기록 중 미특정은 빠짐)
 
-    DISTINCT_SUBJECT는 1,000명을 넘어 잘린 기록이 있으면 실제보다 작다(하한값)
-    — 탐지건 요약과 같은 한계
+    DISTINCT_SUBJECT·MAX_SUBJECT_REPEAT는 1,000명을 넘어 잘린 기록이 있으면 실제보다 작을 수 있다
+    (하한값) — 탐지건 요약과 같은 한계
     """
     logs = list(logs)
     if kind == "LOG_COUNT":
         return len(logs)
     if kind == "SUBJECT_COUNT":
         return sum(log["subject_count"] for log in logs)
+    if kind == "DISTINCT_IP":
+        return len({str(log["client_ip"]) for log in logs})
+    if kind == "MAX_SUBJECT_REPEAT":
+        top = most_repeated_subject(logs)
+        return top[1] if top else 0
     return len({s for log in logs for s in (log["subject_ids"] or [])})
+
+
+def most_repeated_subject(
+    logs: Iterable[Mapping[str, Any]],
+) -> tuple[tuple[str, str], int] | None:
+    """가장 여러 번 처리된 회원 ((정보주체 유형, 식별값), 횟수) — 같으면 식별값이 작은 쪽"""
+    counts: Counter[tuple[str, str]] = Counter()
+    for log in logs:
+        for subject in set(log["subject_ids"] or []):
+            counts[(log["subject_type"], subject)] += 1
+    if not counts:
+        return None
+    return min(counts.items(), key=lambda kv: (-kv[1], kv[0][1]))
