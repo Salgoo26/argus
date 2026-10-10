@@ -43,6 +43,8 @@ DB_CONTEXT_KEYS = frozenset(
         "raw_fingerprint",
         "subject_unresolved",
         "token_id",
+        # 판정에 쓴 보호 대상 등록부 버전 (v0.1 보강 N-3) — r{이력 id} 또는 고정 표 builtin
+        "registry_version",
     }
 )
 DB_REQUIRED_KEYS = ("db_user", "raw_ref", "raw_fingerprint")
@@ -59,6 +61,7 @@ _DB_USER = re.compile(r"^[A-Za-z0-9_]{1,63}$")
 _DB_OBJECT = re.compile(r'^[A-Za-z0-9_."]{1,128}$')  # 테이블·컬럼 이름 (스키마·별칭 포함)
 _RAW_REF = re.compile(r"^[A-Za-z0-9:_-]{1,128}$")
 _FINGERPRINT = re.compile(r"^sha256:[0-9a-f]{64}$")
+_REGISTRY_VERSION = re.compile(r"^(builtin|r[0-9]{1,18})$")
 _DOLLAR_QUOTE = re.compile(r"\$(?:[A-Za-z_][A-Za-z0-9_]*)?\$")  # $$·$tag$ (자리표시 $1은 제외)
 SQL_NORMALIZED_MAX = 4000
 
@@ -238,6 +241,12 @@ def _check_db_context(raw: dict, action: str, check) -> None:
     check("subject_unresolved", isinstance(raw.get("subject_unresolved"), bool), "a boolean")
     token_id = raw.get("token_id")
     check("token_id", isinstance(token_id, str) and _UUID.fullmatch(token_id), "a UUID")
+    version = raw.get("registry_version")
+    check(
+        "registry_version",
+        isinstance(version, str) and _REGISTRY_VERSION.fullmatch(version),
+        "builtin or r<number>",
+    )
 
 
 def _parse_context(raw: Any, action: str, access_path: str) -> dict[str, Any] | None:

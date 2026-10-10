@@ -283,3 +283,56 @@ argus_user_history = Table(
     Column("actor_login_id", String(64)),
     Column("created_at", DateTime(timezone=True), nullable=False),
 )
+
+# ── 보호 대상 등록부 (v0.1 보강 N, 0021) ───────────────────
+
+protected_column = Table(
+    "protected_column",
+    metadata,
+    Column("id", BigInteger, primary_key=True),
+    Column("source_system_id", SmallInteger, nullable=False),
+    Column("db_name", String(63), nullable=False),
+    Column("table_name", String(63), nullable=False),
+    Column("column_name", String(63), nullable=False),
+    Column("item", String(16), nullable=False),  # 개인정보 항목 (NOT_PERSONAL = 개인정보 아님)
+    Column("data_category", String(16)),  # 개인정보 아님이면 NULL
+    Column("member_key", Boolean, nullable=False),  # 회원 식별 열 (2티어 회원번호 추출)
+    Column("active", Boolean, nullable=False),  # 해제 = false (삭제하지 않음)
+    Column("updated_by", BigInteger),
+    Column("updated_at", DateTime(timezone=True), nullable=False),
+)
+
+protected_column_history = Table(
+    "protected_column_history",
+    metadata,
+    Column("id", BigInteger, primary_key=True),
+    Column("column_id", BigInteger, nullable=False),
+    Column("change_type", String(8), nullable=False),  # REGISTER / CHANGE / RELEASE
+    Column("snapshot", JSONB, nullable=False),
+    Column("reason", String(500), nullable=False),
+    Column("changed_by", BigInteger),  # NULL = 시스템(초기 등록)
+    Column("changed_at", DateTime(timezone=True), nullable=False),
+)
+
+# 게이트웨이가 보낸 DB 구조 목록 — 테이블·컬럼 이름과 자료형만 (데이터 값 없음)
+db_schema_column = Table(
+    "db_schema_column",
+    metadata,
+    Column("source_system_id", SmallInteger, primary_key=True),
+    Column("db_name", String(63), primary_key=True),
+    Column("table_name", String(63), primary_key=True),
+    Column("column_name", String(63), primary_key=True),
+    Column("data_type", String(64), nullable=False),
+    Column("ordinal", Integer, nullable=False),
+)
+
+db_schema_receipt = Table(
+    "db_schema_receipt",
+    metadata,
+    Column("id", BigInteger, primary_key=True),
+    Column("source_system_id", SmallInteger, nullable=False),
+    Column("db_name", String(63), nullable=False),
+    Column("table_count", Integer, nullable=False),
+    Column("column_count", Integer, nullable=False),
+    Column("received_at", DateTime(timezone=True), nullable=False),
+)

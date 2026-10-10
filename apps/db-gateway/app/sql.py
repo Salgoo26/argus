@@ -14,6 +14,7 @@ PostgreSQL 자체 파서를 쓰는 pglast로 읽는다
 """
 
 import re
+from collections.abc import Mapping
 from dataclasses import dataclass
 
 from pglast import ast, parse_sql, split
@@ -30,6 +31,8 @@ _COMMENT_TOKENS = frozenset({"C_COMMENT", "SQL_COMMENT"})
 _DOLLAR_QUOTE = re.compile(r"\$(?:[A-Za-z_][A-Za-z0-9_]*)?\$")
 
 # 데이터 유형 — 문장이 건드린 테이블 중 가장 민감한 것 (architecture 3-4 "데이터 유형")
+# v0.1 보강 N: 판정은 Argus 보호 대상 등록부에서 받은 표로 한다(app/registry.py). 이 표는 등록부를
+# 한 번도 받지 못했을 때의 기본값(builtin)이자 Argus 초기 등록 데이터의 원본
 TABLE_CATEGORY = {
     "refund_account": "PAYMENT",  # 계좌번호는 암호문이지만 결제수단 테이블 접근 자체가 점검 대상
     "member": "MEMBER_BASIC",
@@ -141,8 +144,14 @@ def _is_system_table(name: str) -> bool:
     return schema in SYSTEM_SCHEMAS or (not schema and relname.startswith("pg_"))
 
 
-def category_of(tables: list[str] | tuple[str, ...], opaque: bool = False) -> str:
-    found = [TABLE_CATEGORY.get(t.rpartition(".")[2], "NONE") for t in tables]
+def category_of(
+    tables: list[str] | tuple[str, ...],
+    opaque: bool = False,
+    table_category: Mapping[str, str] | None = None,
+) -> str:
+    """table_category: 보호 대상 등록부에서 받은 표(v0.1 보강 N-3). 없으면 고정 표(builtin)"""
+    known = TABLE_CATEGORY if table_category is None else table_category
+    found = [known.get(t.rpartition(".")[2], "NONE") for t in tables]
     if opaque:
         found.append("MEMBER_BASIC")
     return max(found, key=SENSITIVITY.index, default="NONE")
@@ -159,7 +168,11 @@ def _target_columns(stmt) -> list[str]:
     return [f"{table}.{t.name}" for t in targets if getattr(t, "name", None)]
 
 
-def analyze(sql: str, user_functions: frozenset[str] = frozenset()) -> Analysis:
+def analyze(
+    sql: str,
+    user_functions: frozenset[str] = frozenset(),
+    table_category: Mapping[str, str] | None = None,
+) -> Analysis:
     normalized = normalize(sql)
     try:
         statements = parse_sql(sql)
@@ -197,7 +210,7 @@ def analyze(sql: str, user_functions: frozenset[str] = frozenset()) -> Analysis:
     return Analysis(
         action,
         None,
-        category_of(user_tables, opaque),
+        category_of(user_tables, opaque, table_category),
         user_tables,
         tuple(_target_columns(stmt)),
         opaque,

@@ -33,6 +33,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 
 from app.catalog import Catalog
+from app.registry import Registry
 from app.sql import Analysis, analyze, split_statements
 from app.store import Store
 
@@ -177,9 +178,12 @@ class Session:
         token_id: str | None,
         db_user: str,
         clock: Callable[[], datetime],
+        registry: Registry | None = None,
     ) -> None:
         self.store = store
         self.catalog = catalog
+        # 보호 대상 판정 표(v0.1 보강 N-3) — 문장마다 그 시점의 표를 쓴다
+        self.registry = registry or Registry()
         self.login_id = login_id
         self.client_ip = client_ip
         self.token_id = token_id
@@ -316,7 +320,9 @@ class Session:
         if execution.member_index is None:
             if self.member_columns is None:
                 try:
-                    self.member_columns = await self.catalog.member_columns()
+                    self.member_columns = await self.catalog.member_columns(
+                        self.registry.current.member_columns
+                    )
                 except Exception:
                     # 카탈로그를 못 보면 추출하지 않는다 — 사용자 질의는 막지 않고 미특정으로 남긴다
                     logger.warning("member column lookup failed — subjects stay unresolved")
@@ -361,7 +367,8 @@ class Session:
     ) -> bool:
         try:
             functions = await self.catalog.user_functions()
-            analysis = analyze(execution.sql, functions)
+            registry = self.registry.current
+            analysis = analyze(execution.sql, functions, registry.tables)
             failed = command_tag is None
             row_count = 0 if failed else _row_count(command_tag, execution.rows)
             event_id = str(uuid.uuid4())
@@ -405,6 +412,7 @@ class Session:
                 failed=failed,
                 columns=columns,
                 subject_ids=subject_ids,
+                registry_version=registry.version,
             )
             # 원문 저장소(raw)에는 결과 값을 넣지 않는다 — 회원번호는 원장(event)으로만
             await asyncio.to_thread(self.store.record, raw, event)
@@ -427,6 +435,7 @@ def statement_event(
     failed: bool,
     columns: list[str],
     subject_ids: set[str] | None = None,
+    registry_version: str | None = None,
 ) -> dict:
     """문장 1건의 접속기록 (api-spec 2-2 "access_path=DB 기록 규칙")
 
@@ -460,6 +469,9 @@ def statement_event(
         context["subject_unresolved"] = True
     if token_id:
         context["token_id"] = token_id
+    if registry_version:
+        # 판정에 쓴 보호 대상 등록부 버전 — "그때 기준으로 왜 이렇게 분류됐는지" (v0.1 보강 N-3)
+        context["registry_version"] = registry_version
     return {
         "event_id": event_id,
         "occurred_at": occurred_at,

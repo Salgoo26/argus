@@ -27,6 +27,8 @@ from app.ingest.router import router as ingest_router
 from app.notifications.push_router import router as push_router
 from app.notifications.router import router as notifications_router
 from app.notifications.webpush import vapid_from
+from app.protection.ingest import router as protection_ingest_router
+from app.protection.router import router as protection_router
 from app.reports.router import router as reports_router
 from app.rules.router import router as rules_router
 from app.users.router import router as users_router
@@ -55,6 +57,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(notifications_router)
     app.include_router(push_router)
     app.include_router(users_router)
+    app.include_router(protection_ingest_router)
+    app.include_router(protection_router)
 
     @app.middleware("http")
     async def api_response_headers(request: Request, call_next):

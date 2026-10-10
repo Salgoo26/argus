@@ -42,6 +42,7 @@ const MENUS = {
     { href: "/access-logs", label: "접속기록" },
     { href: "/rules", label: "룰" },
     { href: "/reports", label: "점검 보고서" },
+    { href: "/protection", label: "보호 대상" },
     { href: "/users", label: "계정" },
   ],
   HANDLER: [

@@ -58,6 +58,10 @@ const MESSAGES: Record<string, string> = {
   NOT_DISABLED: "비활성화된 계정이 아닙니다.",
   HANDLER_TERMINATED: "플랫폼에서 퇴직 처리된 사람의 계정은 되살릴 수 없습니다.",
   NOT_LOCKED: "잠긴 계정이 아닙니다.",
+  // 보호 대상 등록부 (v0.1 보강 N)
+  UNKNOWN_COLUMN: "받은 DB 구조 목록에 없는 컬럼입니다.",
+  NO_CHANGE: "바뀐 내용이 없습니다.",
+  ALREADY_RELEASED: "이미 해제된 컬럼입니다.",
 };
 
 export function errorMessage(error: unknown): string {
