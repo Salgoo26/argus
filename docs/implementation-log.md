@@ -29,6 +29,37 @@
 
 ---
 
+## 2026-10-10 (3) — v0.1 보강 PR 3: 2티어 회원번호 추출 (설계 G-1)
+
+**한 일**
+- 게이트웨이가 결과 열 설명(RowDescription)의 **테이블 OID·열 번호**로 회원을 가리키는 열을 찾고, 결과 행(DataRow)에서 **그 열의 값만** 읽어 `subject_ids`로 보낸다. SQL은 해석하지 않음
+- 회원 열 목록 `catalog.MEMBER_COLUMNS`(7개) + OID 조회(게이트웨이 자체 연결, 연결마다 처음 한 번)
+- Bind의 **결과 형식 코드**를 읽어 텍스트/바이너리(int2·int4·int8) 판단. 이름 있는 문장 재사용 시 기억한 열 설명 사용
+- 찾으면 고유 회원번호(1,000 상한·`truncated`, `count`=전체)·`subject_unresolved=false`. 없거나 해석 실패면 기존처럼 미특정 + 건수
+- 테스트: db-gateway `test_subjects.py` — `test_member_id_column_is_extracted_and_other_values_are_not_kept`(이름·이메일이 원장·원문 저장소에 없음), `test_alias_and_join_use_the_column_origin`, `test_repeated_members_are_counted_once`, `test_null_member_references_are_skipped`, `test_expression_is_not_a_member_column`, `test_query_without_member_column_stays_unresolved`, `test_empty_result_with_member_column_is_resolved_to_nobody`, `test_extended_query_text_format`, `test_extended_query_binary_format`, `test_reused_prepared_statement_keeps_extracting`, `test_more_than_1000_members_are_truncated_with_full_count`, `test_decode_subject`, `test_undecodable_value_raises` / `test_table_category.py::test_every_personal_table_with_a_member_reference_is_in_member_columns` / 변경 `test_statements.py::test_literal_query_reaches_argus_normalized_only`, E2E `test_db_gateway.py`(회원번호 = 조회한 행, 이름 값 없음, 배송지 조회는 미특정)
+- 결과: db-gateway 196 passed, argus-api lint, E2E 17 passed
+
+**결정사항**
+- **값 해석에 하나라도 실패하면 그 실행 전체를 미특정**으로 — 일부 회원번호만 적으면 "이 사람들만 봤다"로 오해될 수 있음
+- 회원 열이 결과에 있으나 0행이면 "아무도 처리하지 않음"(`ids=[]`, `count=0`, `unresolved=false`)
+- 결과를 돌려주지 않는 실행(UPDATE·DELETE without RETURNING)·COPY는 지금처럼 미특정 + 영향 행 수
+- 카탈로그 조회 실패 시 사용자 질의는 막지 않고 미특정으로 남긴다(기록 자체는 fail-closed 유지)
+- 회원 열 OID는 `public` 스키마의 실제 테이블만(`relkind r·p`) — 사용자가 만든 복사 테이블·뷰 결과(OID가 다름)는 미특정
+- 고유 회원번호 집합은 실행이 끝날 때까지 메모리에 — 수백만 행 결과의 메모리 상한은 두지 않음(관찰)
+
+**설계 변경**
+- 무엇을: 2티어 구현 순서 ②(보류)를 SQL 재현 방식이 아닌 **결과 열 기반 추출**로 구현(설계 G-1)
+- 영향 문서: architecture 3-4 "정보주체 기록 방식"(② 보류 → 결과 열 추출, PITR은 v0.2 문서만 — G-2), api-spec 2-2 "access_path=DB 기록 규칙"(`subject_unresolved=false`일 때 ids·truncated), CLAUDE.md 6절 8행(②), README 구현 현황(📋 → ✅)
+
+**미결·이슈**
+- DBeaver(pgjdbc) 실측은 하지 않음 — psycopg의 확장 질의·바이너리·이름 있는 문장 재사용 테스트로 대신(2026-10-06 실측에서 pgjdbc가 같은 메시지 흐름을 쓰는 것은 확인됨)
+- 회원 열이 없는 조회(예: `SELECT name, email FROM member`)는 여전히 미특정 — 시점 복구(PITR)는 v0.2
+
+**다음 할 일**
+- PR 4(알림)
+
+---
+
 ## 2026-10-10 (2) — v0.1 보강 PR 2: 플랫폼 관리자 검색 (설계 E)
 
 **한 일**

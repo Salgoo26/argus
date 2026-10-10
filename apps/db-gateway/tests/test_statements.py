@@ -55,9 +55,9 @@ def test_literal_query_reaches_argus_normalized_only(db, store):
     assert context["tables"] == ["member"]
     assert context["columns"] == ["member.id", "member.name", "member.email"]
     assert context["row_count"] == 1
-    # 구현 순서 ①: 회원번호 추출 전 — 건수만, 정보주체 미특정
-    assert event["subject"] == {"type": "MEMBER", "ids": [], "count": 1}
-    assert context["subject_unresolved"] is True
+    # 결과의 member.id 열에서 회원번호를 읽는다 (v0.1 보강 G-1 — test_subjects.py)
+    assert event["subject"] == {"type": "MEMBER", "ids": ["1"], "count": 1, "truncated": False}
+    assert context["subject_unresolved"] is False
     # 리터럴(이메일)은 Argus로 가지 않는다 — 원문 저장소에만, 지문으로 연결
     assert "one@example.com" not in str(event)
     [raw] = _raws(store)

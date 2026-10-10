@@ -1,4 +1,5 @@
-"""플랫폼 DB 카탈로그 조회 — 결과 컬럼의 이름과 사용자 함수 목록 (게이트웨이 자체 연결)
+"""플랫폼 DB 카탈로그 조회 — 결과 컬럼의 이름, 사용자 함수 목록, 회원을 가리키는 열
+(게이트웨이 자체 연결)
 
 - 결과 컬럼 설명(RowDescription)은 컬럼을 "테이블 OID + 컬럼 번호"로만 알려 준다
   → 이름으로 바꿔 기록한다. 테이블 구조는 거의 안 바뀌므로 OID별로 캐시한다
@@ -27,6 +28,28 @@ SELECT c.relname, a.attnum, a.attname
   FROM pg_catalog.pg_class c
   JOIN pg_catalog.pg_attribute a ON a.attrelid = c.oid
  WHERE c.oid = %s AND a.attnum > 0 AND NOT a.attisdropped
+"""
+
+
+# 회원을 가리키는 열 (v0.1 보강 G-1) — 이 열의 결과 값만 회원번호로 읽는다. 플랫폼 스키마가 바뀌면
+# 여기와 tests/test_table_category.py를 함께 고친다. 없는 테이블은 조용히 빠진다(축약 스키마)
+MEMBER_COLUMNS = (
+    ("member", "id"),
+    ("orders", "member_id"),
+    ("member_consent", "member_id"),
+    ("refund_account", "member_id"),
+    ("inquiry", "member_id"),
+    ("shipping_address", "member_id"),
+    ("retained_member_record", "original_member_id"),
+)
+_MEMBER_COLUMNS_SQL = """
+SELECT c.oid::bigint, a.attnum
+  FROM pg_catalog.pg_class c
+  JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace
+  JOIN pg_catalog.pg_attribute a ON a.attrelid = c.oid
+ WHERE n.nspname = 'public' AND c.relkind IN ('r', 'p')
+   AND (c.relname, a.attname) IN (SELECT * FROM unnest(%s::text[], %s::text[]))
+   AND NOT a.attisdropped
 """
 
 
@@ -62,6 +85,13 @@ class Catalog:
             names = frozenset(row[0] for row in await self._query(_USER_FUNCTIONS_SQL))
             self._functions = (time.monotonic(), names)
         return names
+
+    async def member_columns(self) -> frozenset[tuple[int, int]]:
+        """회원을 가리키는 열의 (테이블 OID, 열 번호) — 사용자 행위가 아닌 게이트웨이 자체 조회라
+        기록하지 않는다. 연결(Session)이 시작 후 처음 결과를 볼 때 한 번 받아 그 연결 동안 쓴다"""
+        tables, columns = zip(*MEMBER_COLUMNS, strict=True)
+        rows = await self._query(_MEMBER_COLUMNS_SQL, (list(tables), list(columns)))
+        return frozenset((int(oid), int(attnum)) for oid, attnum in rows)
 
     async def column_names(self, columns: list[tuple[int, int]]) -> list[str]:
         """[(테이블 OID, 컬럼 번호)] → ["member.email", …]. 시스템 테이블·계산 컬럼(OID 0)은 뺀다"""

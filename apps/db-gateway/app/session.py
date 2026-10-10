@@ -12,6 +12,10 @@ DB 툴과 DB가 주고받는 메시지를 보며 "실행 단위"를 맞춘다:
   맨 앞 실행이 끝난 것.
   오류가 나면 DB는 다음 Sync까지 나머지를 건너뛴다 → 그 실행들은 일어나지 않았으므로 기록하지 않는다
 
+처리한 정보주체(v0.1 보강 G-1): 결과 열 설명(RowDescription)의 테이블 OID·열 번호로 회원을
+가리키는 열을 찾고, 결과 행(DataRow)에서 그 열의 값만 읽어 회원번호로 남긴다. SQL은 해석하지 않는다.
+회원 열이 없거나(식·함수 결과 포함) 값을 해석하지 못하면 지금처럼 미특정 + 건수.
+
 기록 시점: 완료 신호를 DB 툴에 넘기기 **전에** 원문·접속기록을 남긴다.
 실패하면 완료 신호 대신 오류를 보내고
 연결을 끊는다 — 결과 행은 이미 흘렀어도 DB 툴에서는 쿼리 실패가 된다
@@ -25,7 +29,7 @@ import struct
 import uuid
 from collections import deque
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
 
 from app.catalog import Catalog
@@ -76,15 +80,72 @@ def decode_params(values: list[bytes | None], formats: list[int], oids: list[int
     return decoded
 
 
-def parse_row_description(body: bytes) -> list[tuple[int, int]]:
+@dataclass(frozen=True)
+class Column:
+    """결과 열 하나 (RowDescription) — 어느 테이블의 몇 번째 열인지, 값의 타입"""
+
+    table_oid: int  # 식·계산 열은 0
+    attnum: int
+    type_oid: int
+
+
+def parse_row_description(body: bytes) -> list[Column]:
     (count,) = struct.unpack("!H", body[:2])
     pos, columns = 2, []
     for _ in range(count):
         _, pos = _cstr(body, pos)
-        table_oid, attnum = struct.unpack("!Ih", body[pos : pos + 6])
-        columns.append((table_oid, attnum))
+        # 테이블 OID(4)·열 번호(2)·타입 OID(4)·타입 크기(2)·타입 수식자(4)·형식(2) = 18바이트.
+        # 형식은 쓰지 않는다 — 문장 Describe의 형식은 늘 0이라, 실제 형식은 Bind가 정한다
+        table_oid, attnum, type_oid = struct.unpack("!IhI", body[pos : pos + 10])
+        columns.append(Column(table_oid, attnum, type_oid))
         pos += 18
     return columns
+
+
+# ── 회원번호 추출 (v0.1 보강 G-1) ─────────────────────────
+# SQL을 해석하지 않는다. 결과 열 설명으로 회원을 가리키는 열(catalog.MEMBER_COLUMNS)을 찾고,
+# 결과 행에서 그 열의 값만 읽는다. 다른 열의 값은 읽지도 남기지도 않는다
+SUBJECT_IDS_MAX = 1000  # api-spec 2-2 — 넘으면 앞 1,000개만, count는 전체
+_INTEGER_TYPES = {20: "!q", 21: "!h", 23: "!i"}  # int8·int2·int4 (바이너리 형식)
+_DIGITS = re.compile(r"^-?[0-9]{1,19}$")
+
+
+class SubjectError(ValueError):
+    """회원 열의 값을 해석할 수 없음 — 그 실행은 미특정으로 남긴다"""
+
+
+def decode_subject(value: bytes, fmt: int, type_oid: int) -> str:
+    if fmt == 0:
+        text = value.decode("ascii", "replace")
+        if not _DIGITS.match(text):
+            raise SubjectError("member reference is not an integer")
+        return str(int(text))
+    layout = _INTEGER_TYPES.get(type_oid)
+    if layout is None or len(value) != struct.calcsize(layout):
+        raise SubjectError("unsupported binary member reference")
+    return str(struct.unpack(layout, value)[0])
+
+
+def _result_format(formats: list[int], index: int) -> int:
+    """Bind의 결과 형식 코드 — 없으면 전부 텍스트, 하나면 전부 그 형식, 아니면 열마다"""
+    if not formats:
+        return 0
+    return formats[0] if len(formats) == 1 else (formats[index] if index < len(formats) else 0)
+
+
+def _data_row_values(body: bytes, wanted: set[int]) -> dict[int, bytes | None]:
+    """DataRow에서 원하는 열의 값만 꺼낸다 — 나머지 값은 건너뛴다"""
+    (count,) = struct.unpack("!H", body[:2])
+    pos, found = 2, {}
+    for index in range(count):
+        if index > max(wanted):
+            break
+        (length,) = struct.unpack("!i", body[pos : pos + 4])
+        pos += 4
+        if index in wanted:
+            found[index] = None if length < 0 else body[pos : pos + length]
+        pos += max(length, 0)
+    return found
 
 
 @dataclass
@@ -96,8 +157,13 @@ class Execution:
     portal: str = ""
     params: list | None = None
     param_types: list[int] | None = None
-    columns: list[tuple[int, int]] | None = None  # 결과 컬럼 (테이블 OID, 컬럼 번호)
+    columns: list[Column] | None = None  # 결과 열 설명
+    result_formats: list[int] = field(default_factory=list)  # Bind의 결과 형식 (단순 질의 = 텍스트)
     rows: int = 0  # DB 툴로 흘려보낸 행 수 (나눠 가져오는 실행이면 누적)
+    # 회원번호 추출 (v0.1 보강 G-1) — member_index가 None이면 아직 열을 보지 않음
+    member_index: list[int] | None = None
+    subject_ids: set[str] = field(default_factory=set)
+    subject_failed: bool = False  # 값을 해석하지 못함 → 미특정
 
 
 class Session:
@@ -120,10 +186,13 @@ class Session:
         self.db_user = db_user
         self.clock = clock
         self.prepared: dict[str, tuple[str, list[int]]] = {}
-        self.portals: dict[str, tuple[str, list[bytes | None], list[int]]] = {}
-        self.row_descriptions: dict[str, list[tuple[int, int]]] = {}
+        # 포털 → (문장 이름, 매개변수 값, 매개변수 형식, 결과 형식)
+        self.portals: dict[str, tuple[str, list[bytes | None], list[int], list[int]]] = {}
+        self.row_descriptions: dict[str, list[Column]] = {}
         self.pending: deque = deque()
         self.suspended: dict[str, Execution] = {}
+        # 회원을 가리키는 열 — 이 연결에서 처음 결과를 볼 때 카탈로그에서 받아 둔다 (G-1)
+        self.member_columns: frozenset[tuple[int, int]] | None = None
 
     # ── DB 툴 → DB ──
 
@@ -149,12 +218,15 @@ class Session:
             if portal in self.suspended:  # 나눠 가져오는 실행의 다음 묶음
                 self.pending.append(self.suspended.pop(portal))
             else:
-                statement, values, formats = self.portals.get(portal, ("", [], []))
+                statement, values, formats, result_formats = self.portals.get(
+                    portal, ("", [], [], [])
+                )
                 sql, oids = self.prepared.get(statement, ("", []))
                 params = decode_params(values, formats, oids)
                 execution = Execution(
                     sql, "extended", self.clock(), statement, portal, params, oids
                 )
+                execution.result_formats = result_formats
                 execution.columns = self.row_descriptions.get(statement) if statement else None
                 self.pending.append(execution)
         elif tag == b"S":
@@ -189,7 +261,10 @@ class Session:
             else:
                 values.append(body[pos : pos + length])
                 pos += length
-        self.portals[portal] = (statement, values, formats)
+        # 결과 열 형식 (0 텍스트 / 1 바이너리) — 회원번호 값을 읽을 때 쓴다 (G-1)
+        (nres,) = struct.unpack("!H", body[pos : pos + 2])
+        result_formats = list(struct.unpack(f"!{nres}H", body[pos + 2 : pos + 2 + 2 * nres]))
+        self.portals[portal] = (statement, values, formats, result_formats)
         self.suspended.pop(portal, None)
 
     # ── DB → DB 툴 ──
@@ -212,6 +287,7 @@ class Session:
             execution = self._front()
             if execution:
                 execution.rows += 1
+                await self._collect_subjects(execution, body)
         elif tag == b"C":
             execution = self._pop()
             if execution:
@@ -234,6 +310,51 @@ class Session:
             if self.pending:
                 self.pending.popleft()
         return True
+
+    async def _member_index(self, execution: Execution) -> list[int]:
+        """이 실행의 결과 중 회원을 가리키는 열의 위치 — 처음 한 번 계산한다"""
+        if execution.member_index is None:
+            if self.member_columns is None:
+                try:
+                    self.member_columns = await self.catalog.member_columns()
+                except Exception:
+                    # 카탈로그를 못 보면 추출하지 않는다 — 사용자 질의는 막지 않고 미특정으로 남긴다
+                    logger.warning("member column lookup failed — subjects stay unresolved")
+                    execution.subject_failed = True
+                    execution.member_index = []
+                    return []
+            execution.member_index = [
+                i
+                for i, column in enumerate(execution.columns or [])
+                if (column.table_oid, column.attnum) in self.member_columns
+            ]
+        return execution.member_index
+
+    async def _collect_subjects(self, execution: Execution, body: bytes) -> None:
+        if execution.subject_failed or execution.columns is None:
+            return
+        index = await self._member_index(execution)
+        if not index:
+            return
+        try:
+            for i, value in _data_row_values(body, set(index)).items():
+                if value is None:
+                    continue  # 탈퇴로 끊긴 주문 등 — 회원 없음
+                fmt = _result_format(execution.result_formats, i)
+                execution.subject_ids.add(decode_subject(value, fmt, execution.columns[i].type_oid))
+        except (SubjectError, struct.error):
+            # 해석하지 못한 값이 하나라도 있으면 그 실행은 미특정 — 일부만 적어 오해를 사지 않게
+            execution.subject_failed = True
+            execution.subject_ids.clear()
+
+    async def _subjects_of(self, execution: Execution) -> set[str] | None:
+        """처리한 회원번호. None = 특정하지 못함(회원 열 없음·해석 실패·결과 열 없음)"""
+        if execution.columns is None:
+            return None  # 결과를 돌려주지 않는 실행(UPDATE 등) — 건수만
+        index = await self._member_index(execution)
+        if execution.subject_failed or not index:
+            return None
+        return execution.subject_ids
 
     async def _record(
         self, execution: Execution, command_tag: str | None = None, error_code: str | None = None
@@ -268,7 +389,10 @@ class Session:
                 await asyncio.to_thread(self.store.record_raw, raw)
                 return True
 
-            columns = await self.catalog.column_names(execution.columns or [])
+            columns = await self.catalog.column_names(
+                [(c.table_oid, c.attnum) for c in execution.columns or []]
+            )
+            subject_ids = None if failed else await self._subjects_of(execution)
             event = statement_event(
                 event_id=event_id,
                 occurred_at=occurred_at,
@@ -280,7 +404,9 @@ class Session:
                 row_count=row_count,
                 failed=failed,
                 columns=columns,
+                subject_ids=subject_ids,
             )
+            # 원문 저장소(raw)에는 결과 값을 넣지 않는다 — 회원번호는 원장(event)으로만
             await asyncio.to_thread(self.store.record, raw, event)
             return True
         except Exception:
@@ -300,10 +426,12 @@ def statement_event(
     row_count: int,
     failed: bool,
     columns: list[str],
+    subject_ids: set[str] | None = None,
 ) -> dict:
     """문장 1건의 접속기록 (api-spec 2-2 "access_path=DB 기록 규칙")
 
-    실제 중계(Session)와 기준선 시드(seed_baseline.py)가 같은 함수로 만든다 — 형식이 갈라지지 않게
+    실제 중계(Session)와 기준선 시드(seed_baseline.py)가 같은 함수로 만든다 — 형식이 갈라지지 않게.
+    subject_ids: 결과에서 읽은 회원번호(v0.1 보강 G-1). None이면 특정하지 못한 것 — 건수만 남긴다
     """
     tables = [t for t in analysis.tables if _DB_OBJECT.fullmatch(t)][:TABLES_MAX]
     all_columns = list(dict.fromkeys([*columns, *analysis.columns]))
@@ -315,9 +443,20 @@ def statement_event(
         "row_count": row_count,
     }
     processed = not failed and analysis.data_category != "NONE"
-    if processed:
-        # 회원번호 추출 전이라(구현 순서 ② 보류) 처리한 정보주체를 특정하지 못한다 — 건수만 남긴다
-        # (api-spec 2-2 "정보주체 미특정")
+    subject: dict = {"type": "MEMBER", "ids": [], "count": row_count if processed else 0}
+    if processed and subject_ids is not None:
+        # 3티어와 같은 규칙 — 고유 회원번호, 1,000개 넘으면 앞 1,000개만·truncated, count는 전체
+        ids = sorted(subject_ids, key=lambda s: (len(s), s))
+        subject = {
+            "type": "MEMBER",
+            "ids": ids[:SUBJECT_IDS_MAX],
+            "count": len(ids),
+            "truncated": len(ids) > SUBJECT_IDS_MAX,
+        }
+        context["subject_unresolved"] = False
+    elif processed:
+        # 결과에 회원을 가리키는 열이 없거나 해석하지 못함 — 건수만 남긴다
+        # (api-spec 2-2 "정보주체 미특정", 원문 SQL은 게이트웨이 저장소에)
         context["subject_unresolved"] = True
     if token_id:
         context["token_id"] = token_id
@@ -330,7 +469,7 @@ def statement_event(
         "access_path": "DB",
         "data_category": analysis.data_category,
         "result": "FAILURE" if failed else "SUCCESS",
-        "subject": {"type": "MEMBER", "ids": [], "count": row_count if processed else 0},
+        "subject": subject,
         "context": context,
     }
 

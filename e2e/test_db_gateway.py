@@ -1,4 +1,4 @@
-"""DB 직접 접속(2티어) E2E — 기능 레이어 8 구현 순서 ① (게이트 B 기준)
+"""DB 직접 접속(2티어) E2E — 기능 레이어 8 구현 순서 ① + v0.1 보강 G-1(회원번호 추출)
 
 관리자 화면에서 DB 접속 토큰 발급 → DB 툴처럼 게이트웨이에 접속(TLS + 플랫폼 아이디 + 토큰)
 → SQL 실행
@@ -70,7 +70,8 @@ def test_db_tool_access_reaches_argus_ledger(officer):
 
     def arrived():
         found = _ledger(
-            "SELECT action, result, data_category, subject_count, context FROM access_log"
+            "SELECT action, result, data_category, subject_count, context, subject_ids"
+            " FROM access_log"
             " WHERE access_path = 'DB' AND actor_login_id = 'ops_park'"
             " AND context->>'token_id' = %s ORDER BY id",
             (token_id,),
@@ -85,7 +86,13 @@ def test_db_tool_access_reaches_argus_ledger(officer):
     assert listing[2] == "MEMBER_BASIC" and listing[3] == 3
     assert listing[4]["tables"] == ["member"]
     assert listing[4]["columns"] == ["member.id", "member.name"]
-    assert listing[4]["row_count"] == 3 and listing[4]["subject_unresolved"] is True
+    assert listing[4]["row_count"] == 3
+    # 결과의 member.id에서 회원번호를 읽는다 (v0.1 보강 G-1) — 이름 값은 원장에 없다
+    assert listing[4]["subject_unresolved"] is False
+    assert sorted(listing[5], key=int) == [str(r[0]) for r in rows]
+    assert not any(r[1] in str(records) for r in rows)
+    # 회원을 가리키는 열이 없는 조회는 여전히 미특정 + 건수
+    assert shipping[4]["subject_unresolved"] is True and shipping[5] == []
     assert listing[4]["raw_fingerprint"].startswith("sha256:")
     assert shipping[2] == "MEMBER_BASIC" and shipping[4]["tables"] == ["shipping_address"]
     # 리터럴·토큰 값은 원장 어디에도 없다
