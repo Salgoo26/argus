@@ -13,9 +13,9 @@ platform-api app/scripts/baseline.py와 같은 원칙).
 - 모양 (모두 가상, 시드 실행 시점 기준):
   - DB 툴로 회원·주문·문의를 회원번호로 찾아보는 조회만 — 평일 09:00~17:59(한국 시각)
     → 야간·주말 룰에 걸리지 않는다
-  - 지난달: 하루 5건 / 이번 달(지금까지): 평소 3건, **mkt_lee만 15건** — 전월 대비 급증 시연용
-    (마케팅 담당자의 DB 직접 조회 급증 → 대량 추출 의심). 월초처럼 전월 같은 기간이 20건 미만이면
-    룰이 판정하지 않는다(min_baseline)
+  - 지난달: 하루 5건 / 이번 달(지금까지): 평소 3건, **admin_han만 15건** — 전월 대비 급증 시연용
+    (DB 접속 토큰을 받을 수 있는 관리자 계정의 DB 직접 조회 급증 → 대량 추출 의심). 월초처럼
+    전월 같은 기간이 20건 미만이면 룰이 판정하지 않는다(min_baseline)
 - 한 번만 넣는다 — 저장소에 완료 표시(meta)를 원문·버퍼와 **같은 트랜잭션**으로 남긴다
 - 이 컨테이너엔 DB 비밀번호·서명 키를 주지 않는다 — 원문 저장소 경로와 DB 계정 이름만 필요
 """
@@ -38,8 +38,8 @@ logger = logging.getLogger("gateway.seed")
 KST = timezone(timedelta(hours=9))
 MARK = "baseline_seeded_at"
 # (취급자, 접속지) — 3티어 기준선 시드와 같은 사내 PC(같은 사람은 같은 IP)
-ACTORS = (("ops_park", "10.20.3.11"), ("mkt_lee", "10.20.3.12"))
-SPIKE_ACTOR = "mkt_lee"
+ACTORS = (("ops_park", "10.20.3.11"), ("admin_han", "10.20.3.15"))
+SPIKE_ACTOR = "admin_han"
 PREV_MONTH_PER_DAY = 5
 THIS_MONTH_PER_DAY = 3
 SPIKE_PER_DAY = 15
