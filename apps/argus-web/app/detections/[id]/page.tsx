@@ -80,7 +80,9 @@ export default function DetectionDetailPage() {
     }
   }
 
-  const buttons = me && detail ? actionsFor(me.role, detail.status) : [];
+  // 본인 건은 열람만 — 처리는 다른 담당자가 (v0.1 보강 H, 서버도 403으로 막는다)
+  const ownCase = !!detail?.own_case;
+  const buttons = me && detail && !ownCase ? actionsFor(me.role, detail.status) : [];
   const needsText = buttons.length > 0;
   const isAggregate = detail?.rule.rule_type === "AGGREGATE";
   // 지금 차수의 소명 — 취급자가 요청 중일 때 첨부를 올리고 지울 수 있다
@@ -174,6 +176,14 @@ export default function DetectionDetailPage() {
                 </>
               )}
             </section>
+
+            {ownCase && (
+              <section className="card">
+                <p className="muted" style={{ margin: 0 }}>
+                  본인 건은 다른 담당자가 처리합니다.
+                </p>
+              </section>
+            )}
 
             {needsText && (
               <section className="card">

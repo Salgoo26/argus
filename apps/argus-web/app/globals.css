@@ -817,3 +817,13 @@ tr.case-handling td {
   border-bottom: 1px solid var(--border);
   font-size: 12px;
 }
+
+/* 원장 기준점 해시 (v0.1 보강 I) — 출력해 관리대장에 붙이므로 전체를 줄바꿈해 보인다 */
+.mono {
+  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+}
+
+.hash {
+  font-size: 12px;
+  word-break: break-all;
+}

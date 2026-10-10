@@ -28,6 +28,25 @@ function counts(values: Record<string, number>, labels: Record<string, string>):
 
 const REVIEW_LABELS = { APPROVED: "승인", REJECTED: "반려" } as const;
 
+type Anchor = NonNullable<Report["summary"]["integrity"]["previous"]>;
+
+// 직전 보고서의 마지막 기록이 같은 해시로 남아 있는가 (v0.1 보강 I — 끝부분 삭제 확인)
+function AnchorCheck({ previous }: { previous: Anchor }) {
+  if (previous.status === "NONE") return <span className="muted">비교 대상 없음</span>;
+  return (
+    <>
+      {previous.status === "MATCH" ? (
+        <span className="badge badge-accent">일치</span>
+      ) : (
+        <span className="badge badge-danger">불일치</span>
+      )}{" "}
+      <span className="muted">
+        보고서 #{previous.report_id} · 기록 #{previous.last_id}
+      </span>
+    </>
+  );
+}
+
 function hasHandling(c: ReportCase): boolean {
   return Boolean(c.explanation || c.handled_by || c.close_reason);
 }
@@ -246,6 +265,13 @@ export default function ReportPage() {
         {error && <div className="alert-error">{error}</div>}
         {report && summary && (
           <>
+            {summary.integrity.previous?.status === "MISMATCH" && (
+              <div className="alert-error">
+                직전 보고서 #{summary.integrity.previous.report_id}의 마지막 기록 #
+                {summary.integrity.previous.last_id}이(가) 원장에 없거나 바뀌었습니다. 접속기록 삭제·변조
+                여부를 확인하세요.
+              </div>
+            )}
             <h1 className="page-title">개인정보 접속기록 점검 보고서 #{report.id}</h1>
             <dl className="summary-grid report-meta">
               <div>
@@ -284,6 +310,25 @@ export default function ReportPage() {
                     <span className="muted">원장 {summary.integrity.checked}건 재계산</span>
                   </dd>
                 </div>
+                {summary.integrity.last_id !== undefined && (
+                  <div>
+                    <dt>원장 기준점 (보고서 생성 시점)</dt>
+                    <dd>
+                      전체 {summary.integrity.total}건 · 마지막 기록 #{summary.integrity.last_id ?? "-"}
+                      {summary.integrity.last_hash && (
+                        <div className="mono hash">{summary.integrity.last_hash}</div>
+                      )}
+                    </dd>
+                  </div>
+                )}
+                {summary.integrity.previous && (
+                  <div>
+                    <dt>직전 보고서 기준점 대조</dt>
+                    <dd>
+                      <AnchorCheck previous={summary.integrity.previous} />
+                    </dd>
+                  </div>
+                )}
                 <div>
                   <dt>자동 점검(탐지 배치)</dt>
                   <dd>

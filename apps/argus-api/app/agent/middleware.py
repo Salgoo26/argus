@@ -120,6 +120,9 @@ class AccessLogMiddleware:
     async def _log(self, scope: Scope, record: AccessRecord, status: int) -> bool:
         """기록했거나 기록 대상이 아니면 True, 기록에 실패하면 False"""
         spec = spec_of(scope.get("endpoint"))
+        if spec is None and record.refused is not None and status >= 400:
+            # 기록 제외 라우트라도 규칙으로 거부된 시도는 FAILURE로 (record_refused_change)
+            spec = AccessLogSpec(*record.refused)
         route = scope.get("route")
         if spec is None or route is None or record.actor_login_id is None:
             return True

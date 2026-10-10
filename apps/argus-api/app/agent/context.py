@@ -20,6 +20,9 @@ class AccessRecord:
     subject_count: int = 0
     # api-spec 2-3 context — 예: 첨부 다운로드의 대상 탐지건 {"target": {"detection_id": 12}}
     context: dict | None = None
+    # 기록 제외 라우트에서 **거부된 시도만** 남길 때의 (수행업무, 데이터 유형)
+    # — record_refused_change
+    refused: tuple[str, str] | None = None
 
 
 _current: ContextVar[AccessRecord | None] = ContextVar("argus_access_record", default=None)
@@ -57,6 +60,16 @@ def record_target(detection_id: int) -> None:
     """무엇을 대상으로 했는지 — 경로 변수 값은 원장에 남기지 않으므로(라우트 템플릿) context로"""
     record = _current.get()
     if record is not None:
+        record.context = {"target": {"detection_id": detection_id}}
+
+
+def record_refused_change(detection_id: int) -> None:
+    """상태 변경(기록 제외 라우트)이 **규칙 때문에 거부된** 시도 — UPDATE·ACCESS_LOG FAILURE로.
+    성공한 변경은 상태 이력이 증적이지만, 거부된 시도는 이력에 남지 않으므로 자체 기록으로
+    (v0.1 보강 H — 담당자의 본인 건 처리 시도). 입력한 사유 문장은 싣지 않는다"""
+    record = _current.get()
+    if record is not None:
+        record.refused = ("UPDATE", "ACCESS_LOG")
         record.context = {"target": {"detection_id": detection_id}}
 
 

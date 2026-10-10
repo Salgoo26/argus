@@ -10,7 +10,7 @@ from app.ledger.append import append_access_logs
 from app.ledger.hashchain import compute_hash, verify_chain
 from app.models import access_log
 
-from conftest import make_entry
+from conftest import ledger_triggers_off, make_entry
 
 
 def _append(engine, n: int, **overrides) -> list[int]:
@@ -70,7 +70,9 @@ def test_tampering_is_detected(admin_engine, app_engine):
 def test_deletion_is_detected(admin_engine, app_engine):
     ids = _append(app_engine, 3)
     with admin_engine.begin() as conn:
-        conn.execute(text("DELETE FROM access_log WHERE id = :id"), {"id": ids[1]})
+        # 소유자가 삭제 차단 트리거(0017)까지 끄고 가운데 레코드를 지운 상황
+        with ledger_triggers_off(conn, "trg_access_log_no_delete"):
+            conn.execute(text("DELETE FROM access_log WHERE id = :id"), {"id": ids[1]})
 
     with app_engine.connect() as conn:
         result = verify_chain(conn)

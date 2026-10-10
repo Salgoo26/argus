@@ -36,6 +36,23 @@ def test_trigger_blocks_update_even_for_owner(admin_engine, one_row):
             conn.exec_driver_sql("UPDATE access_log SET actor_login_id = 'someone_else'")
 
 
+@pytest.mark.parametrize(
+    "statement",
+    [
+        "DELETE FROM access_log",
+        "DELETE FROM access_log WHERE id = (SELECT max(id) FROM access_log)",  # 끝부분 삭제
+        "TRUNCATE access_log RESTART IDENTITY CASCADE",
+    ],
+)
+def test_trigger_blocks_delete_and_truncate_even_for_owner(admin_engine, one_row, statement):
+    # v0.1 보강 I (갭 A16) — 소유자는 권한과 무관하게 지울 수 있었다. 이제 트리거가 막는다
+    with pytest.raises(ProgrammingError, match="append-only"):
+        with admin_engine.begin() as conn:
+            conn.exec_driver_sql(statement)
+    with admin_engine.connect() as conn:
+        assert conn.exec_driver_sql("SELECT count(*) FROM access_log").scalar_one() == 1
+
+
 def test_app_role_cannot_write_reference_data(app_engine):
     with pytest.raises(ProgrammingError, match="permission denied"):
         with app_engine.begin() as conn:
