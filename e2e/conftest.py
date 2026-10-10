@@ -164,6 +164,8 @@ def officer() -> tuple[str, str]:
         login_id,
         "--password-env",
         "E2E_NEW_PASSWORD",
+        "--reason",
+        "E2E 담당자 계정",
         env={"E2E_NEW_PASSWORD": password},
     )
     assert result.returncode == 0, result.stderr

@@ -265,3 +265,21 @@ inspection_report = Table(
     Column("generated_by", BigInteger, nullable=False),
     Column("generated_at", DateTime(timezone=True), nullable=False),
 )
+
+# Argus 계정 이력 — append-only, FK 없이 아이디를 함께 남긴다 (v0.1 보강 L-4, 0020)
+argus_user_history = Table(
+    "argus_user_history",
+    metadata,
+    Column("id", BigInteger, primary_key=True),
+    Column("user_id", BigInteger, nullable=False),
+    Column("login_id", String(64), nullable=False),
+    Column("change_type", String(8), nullable=False),  # GRANT/CHANGE/REVOKE/RESTORE/UNLOCK
+    Column("before_role", String(16)),
+    Column("after_role", String(16), nullable=False),
+    Column("before_status", String(16)),
+    Column("after_status", String(16), nullable=False),
+    Column("reason", String(500), nullable=False),
+    Column("actor_user_id", BigInteger),  # NULL = 운영 스크립트·명부 동기화
+    Column("actor_login_id", String(64)),
+    Column("created_at", DateTime(timezone=True), nullable=False),
+)

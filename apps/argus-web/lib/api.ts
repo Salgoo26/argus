@@ -48,6 +48,16 @@ const MESSAGES: Record<string, string> = {
   // 관련 티켓 형식 오류는 서버가 BAD_REQUEST로 답한다 — 입력칸에서 먼저 형식을 검사한다
   ATTACHMENT_TAMPERED: "첨부 파일이 저장 뒤에 바뀌어(해시 불일치) 내려받을 수 없습니다. 관리자에게 알리세요.",
   ATTACHMENT_UNAVAILABLE: "첨부 파일을 찾을 수 없습니다.",
+  SELF_REVIEW_FORBIDDEN: "본인 건은 다른 담당자가 처리합니다.",
+  // 계정 관리 (v0.1 보강 L-4)
+  SELF_CHANGE_FORBIDDEN: "본인 계정은 바꿀 수 없습니다.",
+  NOT_A_HANDLER: "취급자 계정만 담당자로 바꿀 수 있습니다.",
+  NOT_AN_OFFICER: "담당자 계정만 취급자로 바꿀 수 있습니다.",
+  NO_HANDLER_LINK: "플랫폼 취급자 명부와 연결되지 않은 계정은 취급자로 바꿀 수 없습니다.",
+  ALREADY_DISABLED: "이미 비활성화된 계정입니다.",
+  NOT_DISABLED: "비활성화된 계정이 아닙니다.",
+  HANDLER_TERMINATED: "플랫폼에서 퇴직 처리된 사람의 계정은 되살릴 수 없습니다.",
+  NOT_LOCKED: "잠긴 계정이 아닙니다.",
 };
 
 export function errorMessage(error: unknown): string {

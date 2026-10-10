@@ -19,8 +19,14 @@ from sqlalchemy.dialects.postgresql import insert
 from app.auth.passwords import unusable_password_hash
 from app.ingest.handler_validation import HandlerState
 from app.models import argus_user, handler, push_subscription
+from app.users.history import record_user_change
 
 logger = logging.getLogger(__name__)
+
+
+# 명부 동기화가 바꾼 계정의 이력 사유 (v0.1 보강 L-4 — 처리자는 시스템)
+SYNC_CREATED = "취급자 명부 동기화 — 플랫폼 계정 생성"
+SYNC_TERMINATED = "취급자 명부 동기화 — 플랫폼 퇴직"
 
 
 def apply_handler_events(
@@ -72,11 +78,25 @@ def _sync_a5_account(conn: Connection, handler_id: int, state: HandlerState) -> 
     """A5(취급자) Argus 계정 — 여러 번 적용돼도 결과가 같게 "상태 기준"으로 (api-spec 3-1 #3)"""
     if state.employment_status == "TERMINATED":
         # 퇴직 → 로그인 차단. 진행 중인 소명 건은 담당자가 판단한다(DISMISS·ESCALATE)
-        conn.execute(
-            update(argus_user)
+        accounts = conn.execute(
+            select(argus_user.c.id, argus_user.c.login_id, argus_user.c.role, argus_user.c.status)
             .where(argus_user.c.handler_id == handler_id, argus_user.c.status != "DISABLED")
-            .values(status="DISABLED")
-        )
+            .with_for_update()
+        ).all()
+        for account in accounts:
+            conn.execute(
+                update(argus_user).where(argus_user.c.id == account.id).values(status="DISABLED")
+            )
+            # 계정 이력 — 처리자 시스템(명부 동기화) (v0.1 보강 L-4)
+            record_user_change(
+                conn,
+                user=account,
+                before=account,
+                change_type="REVOKE",
+                after_role=account.role,
+                after_status="DISABLED",
+                reason=SYNC_TERMINATED,
+            )
         # 막힌 계정의 웹 푸시 구독도 지운다 (v0.1 보강 F-4)
         conn.execute(
             delete(push_subscription).where(
@@ -102,8 +122,18 @@ def _sync_a5_account(conn: Connection, handler_id: int, state: HandlerState) -> 
             handler_id=handler_id,
         )
         .on_conflict_do_nothing(index_elements=[argus_user.c.login_id])
-        .returning(argus_user.c.id)
-    ).scalar_one_or_none()
+        .returning(argus_user.c.id, argus_user.c.login_id)
+    ).first()
+    if created is not None:
+        # 계정 이력 — 처리자 시스템(명부 동기화) (v0.1 보강 L-4)
+        record_user_change(
+            conn,
+            user=created,
+            change_type="GRANT",
+            after_role="HANDLER",
+            after_status="ACTIVE",
+            reason=SYNC_CREATED,
+        )
     if created is None and conn.execute(linked).first() is None:
         # 같은 login_id를 다른 Argus 계정(예: 정보보호 담당자)이 이미 쓰고 있다.
         # 남의 계정을 취급자 계정으로 바꿔치기하지 않고, 사람이 정리하도록 남긴다

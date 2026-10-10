@@ -58,7 +58,7 @@ Walking Skeleton이 관통하는 시나리오(CLAUDE.md 6절)를 두 화면으�
 **① Argus 계정 준비** — 담당자(A4) 계정은 직접 만들고, 취급자(A5) 계정은 플랫폼에서 자동 동기화되지만 비밀번호가 없어 설정해야 한다. 비밀번호는 실행 후 입력창에서 입력한다(12자 이상, 셸 기록에 남지 않게 명령줄에 쓰지 않음). **플랫폼 백오피스 아이디 = Argus 아이디** 원칙에 따라 담당자도 플랫폼에 같은 아이디(`officer`, 시드 취급자와 같은 비밀번호)의 계정이 있다 — 동기화로 Argus에 먼저 생긴 `officer` 취급자 계정(로그인 불가)은 아래 `create-officer`가 담당자 계정으로 전환한다.
 
 ```bash
-winpty docker compose exec argus-api python -m app.scripts.users create-officer officer   # 담당자
+winpty docker compose exec argus-api python -m app.scripts.users create-officer officer --reason "최초 담당자"   # 담당자
 winpty docker compose exec argus-api python -m app.scripts.users set-password ops_park    # 취급자
 ```
 
@@ -193,7 +193,7 @@ bash scripts/e2e.sh
 
 ```bash
 docker compose run --rm platform-migrate python -m app.scripts.unlock_operator ops_park   # 플랫폼 관리자
-docker compose exec argus-api python -m app.scripts.users unlock ops_park                # Argus 사용자
+docker compose exec argus-api python -m app.scripts.users unlock ops_park --reason "본인 확인 후 해제"   # Argus 사용자 (화면: 계정 관리)
 ```
 
 ### 단위·통합 테스트
