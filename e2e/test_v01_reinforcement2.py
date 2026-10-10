@@ -3,11 +3,15 @@
 - I: 점검 보고서의 원장 기준점(마지막 id·해시·건수)과 직전 보고서 대조
 - J: 탐지건의 처리 성격(데이터 유형·행위 구분)과 소명 제출 뒤 추가 기록 수
 - K: 접속지·특정 회원 기반 기본 룰
+- L: 플랫폼 역할별 접근 범위, 계정 부여(임시 비밀번호·변경 강제)·권한 이력
 """
 
+import os
 from datetime import datetime, timedelta, timezone
 
-from conftest import argus_login
+import psycopg
+
+from conftest import PLATFORM_URL, Browser, argus_login, platform_login, wait_until
 
 KST = timezone(timedelta(hours=9))
 
@@ -50,3 +54,74 @@ def test_ip_and_subject_rules_are_seeded(officer):
     names = {r["name"] for r in browser.get("/api/rules").json()["items"]}
     assert {"허용 범위 밖 접속지", "짧은 시간 여러 접속지", "특정 회원 반복 처리"} <= names
     browser.close()
+
+
+def _ledger(query: str, params: tuple) -> list[tuple]:
+    """운영자 확인 — Argus 앱 계정으로 원장 조회 (SELECT만 가능한 계정)"""
+    conninfo = psycopg.conninfo.make_conninfo(
+        host=os.environ["ARGUS_DB_HOST"],
+        dbname=os.environ["ARGUS_DB_NAME"],
+        user=os.environ["ARGUS_DB_USER"],
+        password=os.environ["ARGUS_DB_PASSWORD"],
+    )
+    with psycopg.connect(conninfo) as conn:
+        return conn.execute(query, params).fetchall()
+
+
+def test_marketing_cannot_open_orders_and_the_refusal_reaches_argus():
+    # L-1 — 마케팅 역할은 주문 화면 403, 거부된 시도도 접속기록(FAILURE)으로 Argus에 간다
+    marketing = platform_login("mkt_lee")
+    assert marketing.get("/api/admin/orders").status_code == 403
+    me = marketing.get("/api/admin/auth/me").json()
+    assert "ORDERS" not in me["permissions"] and "MEMBERS" in me["permissions"]
+
+    rows = wait_until(
+        "마케팅의 주문 조회 거부 기록 원장 도착",
+        lambda: (
+            _ledger(
+                "SELECT result FROM access_log a JOIN source_system s ON s.id = a.source_system_id"
+                " WHERE s.code = 'PLATFORM' AND actor_login_id = %s AND data_category = 'ORDER'"
+                " AND result = 'FAILURE'",
+                ("mkt_lee",),
+            )
+            or None
+        ),
+    )
+    assert ("FAILURE",) in rows
+
+
+def test_admin_grants_an_account_with_a_temporary_password():
+    # L-2·L-3 — 계정을 만들면 임시 비밀번호(한 번만) → 첫 로그인 때 변경 강제, 이력에 사유
+    admin = platform_login("admin_han")
+    created = admin.post(
+        "/api/admin/accounts",
+        json={
+            "login_id": "e2e_cs_new",
+            "name": "가상상담",
+            "team": "CS",
+            "role": "CS",
+            "reason": "E2E — CS팀 신규 입사",
+        },
+    )
+    assert created.status_code == 201, created.text
+    temp = created.json()["temporary_password"]
+
+    newbie = Browser(PLATFORM_URL, "platform_session")
+    login = newbie.post("/api/admin/auth/login", json={"login_id": "e2e_cs_new", "password": temp})
+    assert login.json()["must_change_password"] is True
+    assert newbie.get("/api/admin/members").status_code == 403
+    changed = newbie.post(
+        "/api/admin/auth/password",
+        json={"current_password": temp, "new_password": "e2e-changed-pass-1"},
+    )
+    assert changed.status_code == 204
+    assert newbie.get("/api/admin/inquiries").status_code == 200  # 상담 역할 — 문의 가능
+    assert newbie.get("/api/admin/members/export").status_code == 403  # 다운로드는 불가
+
+    history = admin.post(
+        "/api/admin/accounts/history/search", json={"login_id": "e2e_cs_new"}
+    ).json()["items"]
+    assert [(h["change_type"], h["reason"], h["actor_login_id"]) for h in history] == [
+        ("GRANT", "E2E — CS팀 신규 입사", "admin_han")
+    ]
+    assert temp not in str(history)

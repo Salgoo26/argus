@@ -116,7 +116,8 @@ def clean_tables(request):
             text(
                 "TRUNCATE operator, member, member_consent, outbox, orders, payment,"
                 " refund_account, shipping_address, inquiry, db_access_token,"
-                " retained_member_record, destruction_history RESTART IDENTITY"
+                " retained_member_record, destruction_history, operator_permission_history"
+                " RESTART IDENTITY"
             )
         )
     yield

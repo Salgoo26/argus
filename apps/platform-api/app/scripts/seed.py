@@ -20,6 +20,7 @@ import logging
 import random
 import sys
 from datetime import timedelta
+from typing import Any
 
 from faker import Faker
 from sqlalchemy import Connection, create_engine, exists, func, insert, select, text
@@ -34,6 +35,7 @@ from app.models import (
     member,
     member_consent,
     operator,
+    operator_permission_history,
     orders,
     payment,
     product,
@@ -58,6 +60,20 @@ SEED_OPERATORS = (
     ("cs_choi", "최유나", "CS", "CS"),
     ("admin_han", "한도윤", "OPS", "ADMIN"),
 )
+
+
+def record_initial_grant(conn: Connection, row: Any) -> None:
+    """시드 계정의 권한 부여 이력 — 사유 "초기 계정", 처리자 시스템(NULL) (v0.1 보강 L-3)"""
+    conn.execute(
+        insert(operator_permission_history).values(
+            operator_id=row.id,
+            change_type="GRANT",
+            after_role=row.role,
+            after_team=row.team,
+            after_status=row.employment_status,
+            reason="초기 계정",
+        )
+    )
 
 
 def is_seeded(conn: Connection) -> bool:
@@ -134,6 +150,7 @@ def seed(conn: Connection, operator_password: str, member_count: int = MEMBER_CO
             )
             .returning(operator)
         ).one()
+        record_initial_grant(conn, row)
         # 취급자 생성과 동기화 통지를 같은 트랜잭션으로 — 둘 다 커밋되거나 둘 다 취소
         enqueue(conn, "HANDLER", handler_event("HANDLER_CREATED", row, row.created_at))
 
@@ -349,6 +366,7 @@ def ensure_officer_operator(conn: Connection, operator_password: str) -> bool:
         )
         .returning(operator)
     ).one()
+    record_initial_grant(conn, row)
     # 다른 취급자와 같이 Argus 명부로 동기화 — 같은 아이디의 Argus 담당자 계정과 이어진다
     enqueue(conn, "HANDLER", handler_event("HANDLER_CREATED", row, row.created_at))
     return True

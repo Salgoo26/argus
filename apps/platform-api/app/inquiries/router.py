@@ -14,7 +14,7 @@ from sqlalchemy import func, select, true, update
 
 from app.admin_search import SearchPage, SearchText, check_period, kst_period
 from app.agent import access_log, record_context, record_subjects
-from app.auth.deps import CurrentOperator
+from app.auth.deps import InquiriesOperator
 from app.errors import ApiError
 from app.models import inquiry, member, operator
 from app.shop.inquiries import _not_blank
@@ -34,7 +34,7 @@ class AnswerRequest(BaseModel):
 @access_log(action="READ", data_category="INQUIRY")
 def list_inquiries(
     request: Request,
-    _operator: CurrentOperator,
+    _operator: InquiriesOperator,
     status: Literal["OPEN", "ANSWERED"] | None = None,
     page: Annotated[int, Query(ge=1)] = 1,
     size: Annotated[int, Query(ge=1, le=100)] = 20,
@@ -59,7 +59,7 @@ class InquirySearch(SearchPage):
 
 @router.post("/search")
 @access_log(action="READ", data_category="INQUIRY")
-def search_inquiries(body: InquirySearch, request: Request, _operator: CurrentOperator) -> dict:
+def search_inquiries(body: InquirySearch, request: Request, _operator: InquiriesOperator) -> dict:
     """문의 검색 (v0.1 보강 E) — 조건은 본문, 접속기록에는 키 이름만 (app/admin_search.py)"""
     body.record_keys()
     q = inquiry.c
@@ -131,7 +131,7 @@ def _detail(row) -> dict:
 
 @router.get("/{inquiry_id}")
 @access_log(action="READ", data_category="INQUIRY")
-def get_inquiry(inquiry_id: int, request: Request, _operator: CurrentOperator) -> dict:
+def get_inquiry(inquiry_id: int, request: Request, _operator: InquiriesOperator) -> dict:
     record_context(ticket_id=ticket_id(inquiry_id))
     with request.app.state.engine.connect() as conn:
         row = _load(conn, inquiry_id)
@@ -144,7 +144,7 @@ def get_inquiry(inquiry_id: int, request: Request, _operator: CurrentOperator) -
 @router.post("/{inquiry_id}/answer")
 @access_log(action="UPDATE", data_category="INQUIRY")
 def answer_inquiry(
-    inquiry_id: int, body: AnswerRequest, request: Request, operator_: CurrentOperator
+    inquiry_id: int, body: AnswerRequest, request: Request, operator_: InquiriesOperator
 ) -> dict:
     """답변 등록 — 한 번만(OPEN → ANSWERED). 고친 답변은 범위 밖(v0.2 후보)"""
     record_context(ticket_id=ticket_id(inquiry_id))

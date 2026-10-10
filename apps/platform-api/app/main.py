@@ -8,6 +8,7 @@ from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 from sqlalchemy import create_engine, text
 
+from app.accounts.router import router as accounts_router
 from app.agent.client_ip import parse_trusted_proxies
 from app.agent.decorators import check_admin_routes
 from app.agent.middleware import AccessLogMiddleware
@@ -43,6 +44,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     install_error_handlers(app)
     app.include_router(auth_router)
+    app.include_router(accounts_router)
     app.include_router(members_router)
     app.include_router(orders_router)
     app.include_router(inquiries_router)

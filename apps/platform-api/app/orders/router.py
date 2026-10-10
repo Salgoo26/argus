@@ -14,7 +14,7 @@ from sqlalchemy import func, select
 
 from app.admin_search import SearchPage, check_period, kst_period
 from app.agent import access_log, record_subjects
-from app.auth.deps import CurrentOperator
+from app.auth.deps import OrdersOperator
 from app.errors import ApiError
 from app.models import SHIP_COLUMNS, member, orders, payment, product
 
@@ -44,7 +44,7 @@ def _list_query():
 @access_log(action="READ", data_category="ORDER")
 def list_orders(
     request: Request,
-    _operator: CurrentOperator,
+    _operator: OrdersOperator,
     page: Annotated[int, Query(ge=1)] = 1,
     size: Annotated[int, Query(ge=1, le=100)] = 20,
 ) -> dict:
@@ -77,7 +77,7 @@ class OrderSearch(SearchPage):
 
 @router.post("/search")
 @access_log(action="READ", data_category="ORDER")
-def search_orders(body: OrderSearch, request: Request, _operator: CurrentOperator) -> dict:
+def search_orders(body: OrderSearch, request: Request, _operator: OrdersOperator) -> dict:
     """주문 검색 (v0.1 보강 E) — 조건은 본문, 접속기록에는 키 이름만 (app/admin_search.py)"""
     body.record_keys()
     o = orders.c
@@ -107,7 +107,7 @@ def search_orders(body: OrderSearch, request: Request, _operator: CurrentOperato
 
 @router.get("/{order_id}")
 @access_log(action="READ", data_category="ORDER")
-def get_order(order_id: int, request: Request, _operator: CurrentOperator) -> dict:
+def get_order(order_id: int, request: Request, _operator: OrdersOperator) -> dict:
     """주문 상세 — 배송 정보 포함 (운영팀 배송 업무, 7-4 ③). 주문 조회 접속기록 READ·ORDER
 
     배송 정보는 주문할 때 복사해 둔 값이다(회원의 현재 배송지가 아님). 탈퇴 회원의 주문은

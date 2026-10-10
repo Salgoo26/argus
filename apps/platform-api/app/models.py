@@ -36,6 +36,8 @@ operator = Table(
     Column("failed_login_count", Integer, nullable=False),
     Column("created_at", DateTime(timezone=True), nullable=False),
     Column("updated_at", DateTime(timezone=True), nullable=False),
+    # 계정 관리 화면이 만든 임시 비밀번호 — 첫 로그인 때 변경 강제 (v0.1 보강 L-2)
+    Column("must_change_password", Boolean, nullable=False),
 )
 
 member = Table(
@@ -215,4 +217,22 @@ shipping_address = Table(
     Column("is_default", Boolean, nullable=False),
     Column("created_at", DateTime(timezone=True), nullable=False),
     Column("updated_at", DateTime(timezone=True), nullable=False),
+)
+
+# 개인정보취급자 권한 부여·변경·말소 이력 — append-only, 최소 3년 (v0.1 보강 L-3, §5③)
+operator_permission_history = Table(
+    "operator_permission_history",
+    metadata,
+    Column("id", BigInteger, primary_key=True),
+    Column("operator_id", BigInteger, nullable=False),
+    Column("change_type", String(8), nullable=False),  # GRANT / CHANGE / REVOKE
+    Column("before_role", String(16)),
+    Column("after_role", String(16), nullable=False),
+    Column("before_team", String(50)),
+    Column("after_team", String(50), nullable=False),
+    Column("before_status", String(16)),
+    Column("after_status", String(16), nullable=False),
+    Column("reason", String(500), nullable=False),
+    Column("actor_id", BigInteger),  # NULL = 시스템(시드·마이그레이션)
+    Column("created_at", DateTime(timezone=True), nullable=False),
 )

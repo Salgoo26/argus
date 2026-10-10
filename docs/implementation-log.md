@@ -29,6 +29,40 @@
 
 ---
 
+## 2026-10-10 (8) — v0.1 보강 2차 PR 8: 플랫폼 역할별 접근 범위 + 계정·권한 관리 + 권한 이력 (설계 L-1~L-3)
+
+**한 일**
+- **L-1 역할별 접근 범위**(§5① 최소 권한): `app/auth/deps.py`에 역할 → 기능 표(`PERMISSIONS`)와 `require(...)` 의존성. 회원 목록·상세·검색 = 전원 / 주문·1:1 문의(답변 포함)·환불계좌 전체 보기 = ADMIN·OPS·CS / 회원 CSV·DB 접속 토큰 = ADMIN·OPS / 계정·권한 관리 = ADMIN. 거부는 403 `FORBIDDEN`, 식별자를 적은 뒤 거부하므로 **접속기록 FAILURE**(Agent 동작 유지). `/admin/auth/me`에 `permissions`. 화면은 권한 없는 메뉴·CSV 다운로드·전체 보기 버튼을 숨김
+- **L-2 계정·권한 화면**(ADMIN 전용, `/admin/accounts`): 목록(아이디·이름·팀·역할·재직·최근 변경), 부여(임시 비밀번호를 응답에서 한 번만, `must_change_password`), 변경(역할·팀), 말소(퇴직 — 이후 로그인·세션·DB 토큰 발급 불가), **모든 변경에 사유 필수**, **본인 계정 변경 불가**(403 `SELF_CHANGE_FORBIDDEN`), 권한 이력 탭(대상·기간 — 조건은 본문). 변경마다 Argus 명부 동기화 이벤트(HANDLER_CREATED/UPDATED/TERMINATED, 역할 미포함)를 같은 트랜잭션으로 outbox에
+- 첫 로그인 비밀번호 변경 강제: 임시 비밀번호 계정은 `/me`·비밀번호 변경·로그아웃 외에는 403 `PASSWORD_CHANGE_REQUIRED`. `POST /admin/auth/password` + 화면 `/admin/password`
+- **L-3 권한 이력**(0009): `operator_permission_history`(구분 GRANT/CHANGE/REVOKE, 변경 전·후 역할/팀/재직, 사유, 처리자, 일시), UPDATE·DELETE 트리거로 거부. 마이그레이션이 기존 계정에, 시드가 새 계정에 GRANT "초기 계정"(처리자 시스템)
+- 테스트: platform `test_roles.py` 51개(4역할 × 11기능 매트릭스, 표 일치, **거부도 FAILURE 기록**, 마케팅 회원 상세에 주문 없음, `/me` 권한 목록), `test_accounts.py` 18개(**임시 비밀번호 한 번만·평문 미저장·outbox에 없음**, 명부 동기화에 역할 없음, 첫 로그인 변경 강제, 사유 필수 3종, 변경·말소 이력, 본인 계정 불가, ADMIN 외 403, 이력 검색, append-only, 계정 화면은 접속기록 미대상), `test_seed.py::test_seed_operators_have_initial_grant_history` / E2E `test_marketing_cannot_open_orders_and_the_refusal_reaches_argus`, `test_admin_grants_an_account_with_a_temporary_password`
+- 결과: platform-api 323 passed, platform-web lint·typecheck
+
+**결정사항**
+- **E2E 계정 충돌 확인**(지시문): ① `test_commerce`가 마케팅(mkt_lee)으로 환불계좌 전체 보기 → 계정을 상담(cs_kim)으로 바꾸고 마케팅 403 단언 추가 ② `test_scenario` 오탐 시나리오가 마케팅으로 CSV 다운로드 → 다운로드 가능한 기존 계정은 같은 날 다른 탐지건과 묶이거나(ops_park·admin_han) 본인 건 차단(officer)에 걸려, 관리자 API로 **이 테스트 전용 운영 계정(ops_yoon)**을 만들어 사용(`create_operator`). 시드 계정 역할은 바꾸지 않음, 테스트를 끄거나 건너뛰지 않음 나머지(ops_park 다운로드·DB 토큰·주문, cs_choi 문의, admin_han, officer, mkt_lee 로그아웃·회원 목록)는 표와 맞음
+- 마케팅의 **회원 상세에는 최근 주문을 싣지 않음**(null) — 회원 상세는 허용이지만 주문 접근이 없는 역할에게 주문을 우회로 보여 주지 않게
+- 본인 계정은 역할·팀 변경과 말소 모두 불가(설계는 "역할 변경·말소" — 팀 변경까지 막아 단순하게)
+- 같은 값으로의 변경은 409 `NO_CHANGE`(빈 이력이 쌓이지 않게), 말소한 계정은 다시 바꿀 수 없음(재활성화는 설계 밖)
+- 임시 비밀번호는 `secrets` 기반 16자, 저장은 argon2 해시만. 새 비밀번호 규칙은 고객과 같은 규칙(10자 이상, 두 종류 이상)
+- 비밀번호 변경·계정 화면은 Agent 기록 대상이 아님(`@access_log_exempt` — 회원 개인정보 처리 아님, 권한 이력이 증적)
+- `operator_permission_history`는 게이트웨이 분류(TABLE_CATEGORY)에 넣지 않음 — `operator`와 같은 직원 정보이고 분류는 정보주체(회원) 기준
+- 이력 검색의 대상 아이디는 직원 개인정보라 URL이 아니라 본문으로
+
+**설계 변경**
+- 무엇을: 설계 L-1~L-3. 첫 로그인 변경 강제 방식(403 `PASSWORD_CHANGE_REQUIRED`), 마케팅 회원 상세 주문 제외, 본인 팀 변경도 불가
+- 영향 문서: policy 4-3(역할별 접근 범위 표, 임시 비밀번호·변경 강제, 권한 변경 사유 필수·본인 불가), db-schema 4절(`operator.must_change_password`, `operator_permission_history` + 트리거, 보관 3년 — 파기 v0.2), api-spec(관리자 API 403 `FORBIDDEN`, `/admin/accounts/*`, `/admin/auth/password`, `/me.permissions`), requirements PLT(계정·권한 관리), actor-flows(관리자 계정 부여·말소), architecture 3-4(직원 정보 테이블은 분류 대상 아님), README(시드 계정 역할 표)
+
+**미결·이슈**
+- 말소 직전에 발급된 DB 접속 토큰(최대 1시간)은 게이트웨이가 재직 상태를 다시 보지 않아 만료까지 유효 — v0.2 후보(게이트웨이 토큰 검증 시 재직 확인)
+- DB 직접 접근 기준선 시드(`db-gateway-seed`)의 행위자 `mkt_lee` — 마케팅은 이제 DB 토큰을 발급받을 수 없어 이야기가 어긋남(가상 과거 기록, 동작 영향 없음). 시드 행위자 변경은 Cowork 판단
+- 잠금 해제는 지금처럼 스크립트(`unlock_operator`) — 화면 기능은 설계 밖
+
+**다음 할 일**
+- PR 9(L-4 Argus 계정 관리 + 이력)
+
+---
+
 ## 2026-10-10 (7) — v0.1 보강 2차 PR 7: 접속지(IP)·특정 정보주체 기반 탐지 (설계 K)
 
 **한 일**

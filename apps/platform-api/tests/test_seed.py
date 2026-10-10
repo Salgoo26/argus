@@ -3,7 +3,14 @@
 from sqlalchemy import func, select
 
 from app.auth.passwords import verify_password
-from app.models import member, member_consent, operator, outbox, shipping_address
+from app.models import (
+    member,
+    member_consent,
+    operator,
+    operator_permission_history,
+    outbox,
+    shipping_address,
+)
 from app.scripts.seed import FIRST_MEMBER_ID, SEED_OPERATORS, backfill_consents, seed
 
 from conftest import TEST_PASSWORD
@@ -55,7 +62,7 @@ def test_seed_is_reproducible(engine):
     with engine.begin() as conn:
         conn.exec_driver_sql(
             "TRUNCATE operator, member, member_consent, outbox, orders, payment, refund_account,"
-            " shipping_address, inquiry, db_access_token"
+            " shipping_address, inquiry, db_access_token, operator_permission_history"
             " RESTART IDENTITY"
         )
     _seed(engine)
@@ -233,3 +240,26 @@ def test_officer_operator_has_same_id_as_argus_officer_and_is_synced(engine, cli
     assert login(client, "officer").status_code == 200
     synced = [p["handler"]["login_id"] for p in outbox_payloads(engine, "HANDLER")]
     assert synced.count("officer") == 1
+
+
+def test_seed_operators_have_initial_grant_history(engine):
+    # 시드 계정도 권한 이력에 GRANT 1건씩 — 사유 "초기 계정", 처리자 시스템 (v0.1 보강 L-3)
+    from app.scripts.seed import ensure_officer_operator
+
+    _seed(engine)
+    with engine.begin() as conn:
+        ensure_officer_operator(conn, TEST_PASSWORD)
+    with engine.connect() as conn:
+        rows = conn.execute(
+            select(
+                operator.c.login_id,
+                operator_permission_history.c.change_type,
+                operator_permission_history.c.after_role,
+                operator_permission_history.c.reason,
+                operator_permission_history.c.actor_id,
+            ).join(operator, operator.c.id == operator_permission_history.c.operator_id)
+        ).all()
+    expected = {login_id: role for login_id, _, _, role in SEED_OPERATORS} | {"officer": "ADMIN"}
+    assert {r.login_id: r.after_role for r in rows} == expected
+    assert len(rows) == len(expected)
+    assert {(r.change_type, r.reason, r.actor_id) for r in rows} == {("GRANT", "초기 계정", None)}
