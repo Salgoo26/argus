@@ -15,7 +15,7 @@ BODY = "배송이 언제 되나요? (E2E 가상 문의)"
 
 def test_inquiry_ticket_reaches_argus(officer):
     shop = Browser(PLATFORM_URL, "customer_session")
-    consents = {"TOS": True, "AGE_OVER_14": True}
+    consents = {"TOS": True, "PRIVACY_REQUIRED": True, "AGE_OVER_14": True}
     email = f"e2e-{secrets.token_hex(4)}@example.com"
     assert (
         shop.post(

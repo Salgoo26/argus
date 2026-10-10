@@ -9,7 +9,7 @@ import secrets
 from conftest import PLATFORM_URL, Browser
 
 PASSWORD = "e2e-buyer-pass-1"  # noqa: S105 — 테스트 전용 더미 값, 매번 새 가상 계정
-REQUIRED = {"TOS": True, "AGE_OVER_14": True}
+REQUIRED = {"TOS": True, "PRIVACY_REQUIRED": True, "AGE_OVER_14": True}
 
 
 def test_customer_signup_mypage_withdraw():
@@ -18,8 +18,6 @@ def test_customer_signup_mypage_withdraw():
 
     items = shop.get("/api/shop/consent-items").json()
     assert {i["code"] for i in items} >= set(REQUIRED) | {"MARKETING"}
-    # 계약 이행 항목은 동의 대신 안내 (§15①4·§22③) — 개인정보 수집·이용 (필수) 동의는 받지 않는다
-    assert "PRIVACY_REQUIRED" not in {i["code"] for i in items}
 
     profile = {"email": email, "password": PASSWORD, "name": "가상고객", "phone": "01000000001"}
 

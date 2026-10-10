@@ -42,7 +42,7 @@ class WithdrawRequest(BaseModel):
 
 
 def _current_consents(conn, member_id: int) -> list[dict]:
-    """지금 받는 항목별 가장 최근 동의·철회 상태 (받지 않게 된 항목의 지난 이력은 DB에만 — 0010)"""
+    """받는 항목별 가장 최근 동의·철회 상태 (받지 않기로 한 항목의 지난 이력은 DB에만 — 0010)"""
     ranked = (
         select(
             member_consent.c.item_code,

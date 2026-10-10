@@ -13,8 +13,7 @@ import {
 } from "@/lib/api";
 
 // 회원가입 — 필수·선택 동의를 따로 받는다 (PIPA §22①·⑤). "전체 동의" 버튼은 두지 않는다:
-// 선택 항목까지 한 번에 체크하게 유도하지 않기 위함 (명확한 의사 표시).
-// 계약 이행에 필요한 정보는 동의 대상이 아니라 안내 대상이다 (§15①4·§22③) — 동의 목록 밖에 안내한다
+// 선택 항목까지 한 번에 체크하게 유도하지 않기 위함 (명확한 의사 표시)
 export default function SignupPage() {
   const router = useRouter();
   const [items, setItems] = useState<ConsentItem[]>([]);
@@ -119,15 +118,6 @@ export default function SignupPage() {
             />
           </div>
 
-          {/* §22③ — 동의 없이 처리하는 정보(§15①4 계약 이행)는 동의 항목과 구분해 알린다 */}
-          <p className="hint">
-            회원가입·주문에 필요한 정보는 계약 이행을 위해 동의 없이 처리합니다(개인정보 보호법
-            제15조 제1항 제4호). 자세한 내용은{" "}
-            <Link href="/privacy" target="_blank">
-              개인정보 처리방침
-            </Link>
-            에서 확인할 수 있습니다.
-          </p>
           <fieldset className="consents">
             <legend>약관 및 동의</legend>
             {items.map((item) => (
@@ -155,6 +145,11 @@ export default function SignupPage() {
                 {item.code === "TOS" && (
                   <Link href="/terms" target="_blank" className="hint">
                     이용약관 전문 보기
+                  </Link>
+                )}
+                {item.code === "PRIVACY_REQUIRED" && (
+                  <Link href="/privacy" target="_blank" className="hint">
+                    개인정보 처리방침 보기
                   </Link>
                 )}
               </div>

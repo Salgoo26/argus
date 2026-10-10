@@ -30,6 +30,7 @@ def test_me_shows_profile_and_current_consents(client):
     consents = {c["code"]: c["agreed"] for c in me["consents"]}
     assert consents == {
         "TOS": True,
+        "PRIVACY_REQUIRED": True,
         "AGE_OVER_14": True,
         "MARKETING": False,
     }
@@ -110,12 +111,9 @@ def test_marketing_consent_withdraw_and_reagree_are_appended(client, engine):
 
 def test_required_consent_cannot_be_withdrawn(client):
     signup(client)
-    res = client.put("/shop/me/consents/TOS", json={"agreed": False})
+    res = client.put("/shop/me/consents/PRIVACY_REQUIRED", json={"agreed": False})
     assert res.status_code == 400 and res.json()["error"]["code"] == "REQUIRED_CONSENT"
     assert client.put("/shop/me/consents/NOPE", json={"agreed": True}).status_code == 404
-    # 받지 않게 된 항목(0010)은 없는 항목과 같다 — 지난 동의 이력은 바뀌지 않는다
-    res = client.put("/shop/me/consents/PRIVACY_REQUIRED", json={"agreed": False})
-    assert res.status_code == 404
 
 
 def test_withdraw_requires_password(client, engine):

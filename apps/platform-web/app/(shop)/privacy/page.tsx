@@ -3,7 +3,7 @@ import type { Metadata } from "next";
 export const metadata: Metadata = { title: "개인정보 처리방침 — 데모 커머스" };
 
 // 개인정보 처리방침 (PIPA §30①, 시행령 §31①) — v3.
-// 동의 없이 처리하는 항목(§15①4 계약 이행 등)과 동의 항목을 법적 근거로 구분해 공개한다 (§22③).
+// 항목별 법적 근거를 함께 적는다. 동의 항목(PRIVACY_REQUIRED v3)의 수집 항목과 2절이 같아야 한다.
 // 점검 포인트: 처리방침에 적은 항목·기간·위탁과 실제 저장(DB)이 일치하는지 (기능 레이어 7 결정 7)
 export default function PrivacyPage() {
   return (
@@ -21,7 +21,7 @@ export default function PrivacyPage() {
         필요한 조치를 합니다.
       </p>
       <ol>
-        <li>회원 관리: 회원 식별, 가입 의사 확인, 만 14세 미만 가입 제한, 부정 이용 방지</li>
+        <li>회원 관리: 회원 식별, 가입 의사 확인, 만 14세 미만 가입 제한</li>
         <li>주문 처리: 주문·결제·배송·환불, 배송 연락</li>
         <li>고객 응대: 1:1 문의 접수·답변</li>
         <li>마케팅(동의한 경우만): 이벤트·혜택 안내 이메일 발송</li>
@@ -30,8 +30,7 @@ export default function PrivacyPage() {
 
       <h2>2. 처리하는 개인정보 항목과 법적 근거</h2>
       <p>
-        동의 없이 처리하는 개인정보와 동의를 받아 처리하는 개인정보를 구분해 알립니다(개인정보
-        보호법 §22③).
+        회사는 회원가입 때 필수 항목과 선택 항목을 구분해 각각 동의를 받습니다.
       </p>
       <div className="table-wrap">
         <table className="data">
@@ -46,25 +45,25 @@ export default function PrivacyPage() {
           <tbody>
             <tr>
               <td>회원 가입·관리</td>
-              <td>계약 이행(§15①4)</td>
+              <td>동의(§15①1, 필수)</td>
               <td>이메일(아이디), 비밀번호(일방향 암호화), 이름, 휴대전화번호</td>
               <td>회원가입</td>
             </tr>
             <tr>
               <td>연령 확인</td>
-              <td>법령상 의무(§22의2)</td>
+              <td>가입 시 확인(§22의2)</td>
               <td>만 14세 이상 여부</td>
               <td>회원가입</td>
             </tr>
             <tr>
               <td>배송지</td>
-              <td>계약 이행(§15①4)</td>
-              <td>배송지 이름, 받는 사람, 휴대전화번호, 우편번호, 주소</td>
+              <td>동의(§15①1, 필수)</td>
+              <td>배송지 이름, 받는 사람, 휴대전화번호, 우편번호, 주소, 상세주소</td>
               <td>마이페이지에서 등록할 때</td>
             </tr>
             <tr>
               <td>주문·결제</td>
-              <td>계약 이행(§15①4)</td>
+              <td>동의(§15①1, 필수)</td>
               <td>
                 주문 상품·금액·일시, 배송 정보(주문할 때 고른 배송지의 사본), 결제 결과(카드사, PG
                 거래번호, 승인 일시)
@@ -73,13 +72,13 @@ export default function PrivacyPage() {
             </tr>
             <tr>
               <td>환불계좌</td>
-              <td>계약 이행(§15①4)</td>
+              <td>동의(§15①1, 필수)</td>
               <td>은행, 예금주, 계좌번호(암호화 저장)</td>
               <td>마이페이지에서 등록할 때</td>
             </tr>
             <tr>
               <td>1:1 문의</td>
-              <td>계약 이행(§15①4)</td>
+              <td>동의(§15①1, 필수)</td>
               <td>문의 제목·내용, 답변</td>
               <td>문의할 때</td>
             </tr>
@@ -90,9 +89,9 @@ export default function PrivacyPage() {
               <td>동의할 때</td>
             </tr>
             <tr>
-              <td>동의 증적</td>
-              <td>법령상 의무(§15①2)</td>
-              <td>동의·철회 일시, 접속 IP</td>
+              <td>동의 이력</td>
+              <td>동의 사실의 입증(§22)</td>
+              <td>동의 항목·버전, 동의·철회 일시, 접속 IP</td>
               <td>동의·철회할 때</td>
             </tr>
             <tr>
@@ -121,7 +120,7 @@ export default function PrivacyPage() {
           </thead>
           <tbody>
             <tr>
-              <td>회원 정보, 배송지, 환불계좌</td>
+              <td>회원 정보, 배송지, 환불계좌, 동의 이력</td>
               <td>회원 탈퇴 시까지(탈퇴 즉시 파기)</td>
             </tr>
             <tr>
@@ -261,7 +260,7 @@ export default function PrivacyPage() {
             </tr>
             <tr>
               <td>고충 처리 부서</td>
-              <td>정보보호팀 · privacy@example.com</td>
+              <td>정보보호팀 · 02-0000-0000 · privacy@example.com</td>
             </tr>
           </tbody>
         </table>
@@ -295,7 +294,7 @@ export default function PrivacyPage() {
               <td>v3</td>
               <td>2026-10-11</td>
               <td>
-                동의 없이 처리하는 항목과 법적 근거 구분, 보유 기간·파기·권익침해 구제 방법 보완
+                항목별 법적 근거, 보유 기간·파기·국외 이전·자동 수집 장치·권익침해 구제 방법 보완
               </td>
             </tr>
             <tr>

@@ -41,8 +41,7 @@ def _member_count(engine) -> int:
 def test_consent_items_show_purpose_items_and_retention(client):
     items = client.get("/shop/consent-items").json()
 
-    # 계약 이행 항목은 동의 대신 안내 (§15①4·§22③, 0010) — 개인정보 수집·이용 (필수) 동의는 없다
-    assert {i["code"] for i in items} == {"TOS", "AGE_OVER_14", "MARKETING"}
+    assert {i["code"] for i in items} == {"TOS", "PRIVACY_REQUIRED", "AGE_OVER_14", "MARKETING"}
     marketing = next(i for i in items if i["code"] == "MARKETING")
     assert marketing["required"] is False
     # §15② — 목적·항목·기간을 알리고 받는다
@@ -61,13 +60,15 @@ def test_signup_records_every_consent_with_version_time_and_ip(client, engine):
     assert {r["item_code"]: r["agreed"] for r in rows} == {
         "AGE_OVER_14": True,
         "MARKETING": True,
+        "PRIVACY_REQUIRED": True,
         "TOS": True,
     }
-    # 동의 당시 버전 — 이용약관은 v2 (0010)
+    # 동의 당시 버전 — 개인정보 수집·이용 동의 v3·이용약관 v2 (0010)
     versions = {r["item_code"]: r["item_version"] for r in rows}
     assert versions == {
         "AGE_OVER_14": "v1",
         "MARKETING": "v1",
+        "PRIVACY_REQUIRED": "v3",
         "TOS": "v2",
     }
     assert all(r["acted_at"] for r in rows)
@@ -82,7 +83,7 @@ def test_optional_consent_is_not_required_and_refusal_is_recorded(client, engine
     assert marketing["agreed"] is False
 
 
-@pytest.mark.parametrize("missing", ["TOS", "AGE_OVER_14"])
+@pytest.mark.parametrize("missing", ["TOS", "PRIVACY_REQUIRED", "AGE_OVER_14"])
 def test_signup_without_required_consent_is_rejected(client, engine, missing):
     res = signup(client, consents={**REQUIRED_CONSENTS, missing: False})
 
@@ -157,19 +158,36 @@ def test_signup_collects_only_the_required_items(client, engine):
     assert "1990" not in str(dict(row)) and "가상로" not in str(dict(row))
 
 
-def test_retired_privacy_consent_is_rejected_but_its_history_is_kept(client, engine):
-    """받지 않게 된 개인정보 수집·이용 (필수) 동의(0010) — 항목 행은 지난 동의 이력의 증적으로 남고,
-    보내면 모르는 항목으로 거부된다(가입 화면이 이 항목을 보여 주지 않으므로)"""
-    res = signup(client, consents={**REQUIRED_CONSENTS, "PRIVACY_REQUIRED": True})
-    assert res.status_code == 400
-    assert _member_count(engine) == 0
-    with engine.connect() as conn:
-        row = (
-            conn.execute(select(consent_item).where(consent_item.c.code == "PRIVACY_REQUIRED"))
-            .mappings()
-            .one()
+def test_privacy_consent_lists_phone(client):
+    """§15②2호 — 동의받을 때 알리는 항목 = 실제 수집 항목. 문안이 바뀌면 버전도 바뀐다"""
+    items = {i["code"]: i for i in client.get("/shop/consent-items").json()}
+    privacy = items["PRIVACY_REQUIRED"]
+    assert privacy["version"] == "v3"
+    assert "휴대전화번호" in privacy["items"].split("/")[0]  # 가입 시 필수 항목 쪽
+    assert "생년월일" not in privacy["items"] and "성별" not in privacy["items"]
+    # v3 — 처리방침 2절의 주문·문의 항목도 동의받을 때 알린다 (0010)
+    assert "주문 정보" in privacy["items"] and "문의 내용" in privacy["items"]
+
+
+def test_inactive_consent_item_is_not_offered_but_kept(client, engine):
+    """consent_item.active(0010) — 더는 받지 않는 항목은 가입 화면·검증·마이페이지에서 빠지고
+    행과 지난 동의 이력은 남는다. 지금 끈 항목은 없어 테스트에서 마케팅을 꺼 본다"""
+    assert signup(client, email="before@example.com").status_code == 201
+    marketing = consent_item.c.code == "MARKETING"
+    with engine.begin() as conn:
+        conn.execute(update(consent_item).where(marketing).values(active=False))
+    try:
+        assert "MARKETING" not in {i["code"] for i in client.get("/shop/consent-items").json()}
+        assert "MARKETING" not in {c["code"] for c in client.get("/shop/me").json()["consents"]}
+        assert client.put("/shop/me/consents/MARKETING", json={"agreed": True}).status_code == 404
+        res = signup(
+            client, email="after@example.com", consents={**REQUIRED_CONSENTS, "MARKETING": True}
         )
-    assert row["active"] is False and row["version"] == "v2"
+        assert res.status_code == 400  # 받지 않는 항목은 모르는 항목
+        assert any(r["item_code"] == "MARKETING" for r in _consents(engine))  # 지난 이력은 그대로
+    finally:  # 항목 정의는 마이그레이션 시드라 테스트 사이에 비워지지 않는다 — 되돌린다
+        with engine.begin() as conn:
+            conn.execute(update(consent_item).where(marketing).values(active=True))
 
 
 def test_phone_is_normalized(client, engine):

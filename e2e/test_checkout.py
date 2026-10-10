@@ -51,7 +51,7 @@ def test_checkout_requires_login_and_address_and_never_takes_card_number():
             "password": PASSWORD,
             "name": "가상결제자",
             "phone": "010-0000-0004",
-            "consents": {"TOS": True, "AGE_OVER_14": True},
+            "consents": {"TOS": True, "PRIVACY_REQUIRED": True, "AGE_OVER_14": True},
         },
     )
     assert joined.status_code == 201, joined.text

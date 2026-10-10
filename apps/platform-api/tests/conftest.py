@@ -155,7 +155,7 @@ def outbox_payloads(engine, topic: str = "ACCESS_LOG") -> list[dict]:
 
 
 CUSTOMER_PASSWORD = "customer-pass-1234"  # 테스트 전용 더미 값
-REQUIRED_CONSENTS = {"TOS": True, "AGE_OVER_14": True}
+REQUIRED_CONSENTS = {"TOS": True, "PRIVACY_REQUIRED": True, "AGE_OVER_14": True}
 
 
 def signup(client, email: str = "buyer@example.com", **overrides):

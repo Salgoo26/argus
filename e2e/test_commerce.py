@@ -26,7 +26,7 @@ def test_payment_full_view_is_detected(officer):
     # ── 고객: 가입 → 구매(가상 PG) → 환불계좌 등록 ─────────────
     shop = Browser(PLATFORM_URL, "customer_session")
     email = f"e2e-{secrets.token_hex(4)}@example.com"
-    consents = {"TOS": True, "AGE_OVER_14": True}
+    consents = {"TOS": True, "PRIVACY_REQUIRED": True, "AGE_OVER_14": True}
     joined = shop.post(
         "/api/shop/auth/signup",
         json={
