@@ -29,6 +29,34 @@
 
 ---
 
+## 2026-10-10 (6) — v0.1 보강 2차 PR 6: 소명 단위 보완 (설계 J)
+
+**한 일**
+- **J-1 제출 뒤에 붙은 기록**: 마이그레이션 0018 — `detection_log.attached_at`(기본값 `clock_timestamp()`, 기존 행은 NULL). 목록·상세에 `after_submission_count`(현재 차수 소명 제출 뒤 붙은 기록 수), 하위 기록마다 `after_submission_round`(N차 제출 뒤에 붙었고 그 뒤 제출이 없으면 N). 화면: 목록 배지 "소명 제출 뒤 추가 기록 N건", 상세 요약·하위 기록 행 강조("N차 소명 제출 뒤"), **승인 시 확인 창**(승인은 막지 않음). 보고서 탐지건 항목에 `after_submission`
+- **J-2 다른 성격의 처리는 다른 탐지건**: `detection.data_category`·`action_group`(READ/DOWNLOAD/CHANGE/SESSION) — EVENT 룰의 묶음 기준에 추가, AGGREGATE·기존 탐지건은 NULL. 진행 중 건 유일성 인덱스를 새 키로(`NULLS NOT DISTINCT`). 화면에 "처리 구분"(예: 회원 기본정보 · 조회)
+- 테스트: argus `test_explanation_scope.py` 11개 — `test_log_attached_after_submission_is_marked`, `test_approval_is_not_blocked`, `test_resubmission_covers_the_late_log`, `test_no_late_log_means_zero`, `test_report_case_carries_after_submission_count`, `test_action_groups`, `test_different_data_category_is_a_new_case`, `test_different_action_group_is_a_new_case`, `test_same_category_and_action_group_share_a_case`, `test_change_actions_share_one_case`, `test_aggregate_rule_is_not_split` / E2E `test_detections_carry_nature_and_after_submission_count`
+- 결과: argus-api 506 passed, argus-web lint·typecheck
+
+**결정사항**
+- 붙은 시각은 컬럼으로 둔다(설계 "컬럼 없이 충분하면"의 판단) — 접속기록 수신 시각(`received_at`)과 실제로 탐지건에 붙은 시각은 순찰 주기만큼 다르고, 제출 직전 수신·제출 직후 부착이면 취급자가 볼 수 없던 기록이라 수신 시각으로는 구분이 틀린다
+- `clock_timestamp()` 기본값 — 순찰 트랜잭션이 탐지건 잠금을 기다리는 사이 제출이 끼어든 경우에도 실제 부착 순간으로 비교
+- 이전 행(NULL)은 "제출 뒤"로 세지 않는다 — 모르는 것을 경고로 띄우지 않음
+- 재요청 후 다시 제출하면 그 소명이 앞서 붙은 기록까지 다룬다고 보고 표시를 지운다(현재 차수 기준)
+- 승인 확인 창 문구는 설계 문장("재요청하시겠습니까?")을 **"그래도 승인하시겠습니까? (재요청하려면 취소한 뒤 반려하세요)"**로 — 확인=승인 진행, 취소=멈춤. 확인 하나로 반려·재요청을 대신 실행하면 반려 사유 없이 상태가 두 번 바뀌므로
+- 행위 구분: EXPORT는 DOWNLOAD와 같은 "내려받기"(Argus 자체 기록은 평가 대상이 아니지만 표는 완전하게)
+
+**설계 변경**
+- 무엇을: 설계 J. 붙은 시각 컬럼 추가, 확인 창 문구 조정
+- 영향 문서: policy 2-2(EVENT 그룹 키에 데이터 유형·행위 구분, AGGREGATE 제외)·3절(제출 뒤 기록 — 승인 시 확인, 자동 재요청 없음), db-schema(`detection_log.attached_at`, `detection.data_category`·`action_group`, `ux_detection_open_group` NULLS NOT DISTINCT), api-spec(탐지건 응답 `data_category`·`action_group`·`after_submission_count`, 하위 기록 `attached_at`·`after_submission_round`, 보고서 `cases[].after_submission`), CLAUDE.md 9절(탐지 그룹 키)
+
+**미결·이슈**
+- 마이그레이션 직후 진행 중인 이전 탐지건(성격 NULL)이 있으면, 같은 날 같은 룰의 새 기록은 성격이 정해진 새 탐지건으로 간다(이전 건에 붙지 않음) — 경계 하루만의 일
+
+**다음 할 일**
+- PR 7(K IP·정보주체 기반 탐지)
+
+---
+
 ## 2026-10-10 (5) — v0.1 보강 2차 PR 5: 본인 건 처리 차단 + 원장 삭제 차단·보고서 기준점 (설계 H·I)
 
 **한 일**

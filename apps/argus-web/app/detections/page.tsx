@@ -10,6 +10,7 @@ import {
   PATH_LABELS,
   SEVERITY_LABELS,
   STATUS_LABELS,
+  caseNature,
   formatDateTime,
   pathBadgeClass,
   statusBadgeClass,
@@ -209,7 +210,15 @@ export default function DetectionsPage() {
                 {data?.items.map((c) => (
                   <tr key={c.id} className="clickable" onClick={() => router.push(`/detections/${c.id}`)}>
                     <td className="num">#{c.id}</td>
-                    <td>{c.rule_name}</td>
+                    <td>
+                      {c.rule_name}
+                      {caseNature(c) && <div className="muted small">{caseNature(c)}</div>}
+                      {c.after_submission_count > 0 && (
+                        <div>
+                          <span className="badge badge-warn">소명 제출 뒤 추가 기록 {c.after_submission_count}건</span>
+                        </div>
+                      )}
+                    </td>
                     <td>
                       <span className={severityBadgeClass(c.severity)}>
                         {SEVERITY_LABELS[c.severity]}

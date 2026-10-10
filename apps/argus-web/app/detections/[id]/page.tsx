@@ -18,6 +18,7 @@ import {
   SEVERITY_LABELS,
   STATUS_LABELS,
   actionsFor,
+  caseNature,
   formatDateTime,
   pathBadgeClass,
   statusBadgeClass,
@@ -57,6 +58,17 @@ export default function DetectionDetailPage() {
     const value = text.trim();
     if (button.required && !value) {
       setError(`${button.label}: 내용을 입력하세요.`);
+      return;
+    }
+    // 제출 뒤에 붙은 기록은 이 소명이 다루지 않았다 — 승인은 막지 않고 확인만 (v0.1 보강 J-1)
+    const late = detail?.after_submission_count ?? 0;
+    if (
+      button.action === "approve" &&
+      late > 0 &&
+      !window.confirm(
+        `제출 뒤 추가 기록 ${late}건은 이 소명에 포함되지 않습니다. 그래도 승인하시겠습니까?\n(재요청하려면 취소한 뒤 반려하세요.)`,
+      )
+    ) {
       return;
     }
     setPending(true);
@@ -118,6 +130,12 @@ export default function DetectionDetailPage() {
                   <dt>접근 경로</dt>
                   <dd>{PATH_LABELS[detail.access_path]}</dd>
                 </div>
+                {caseNature(detail) && (
+                  <div>
+                    <dt>처리 구분</dt>
+                    <dd>{caseNature(detail)}</dd>
+                  </div>
+                )}
                 <div>
                   <dt>취급자</dt>
                   <dd>
@@ -156,6 +174,14 @@ export default function DetectionDetailPage() {
                   <dt>소명 차수</dt>
                   <dd>{detail.round}차</dd>
                 </div>
+                {detail.after_submission_count > 0 && (
+                  <div>
+                    <dt>소명 제출 뒤 추가 기록</dt>
+                    <dd>
+                      <span className="badge badge-warn">{detail.after_submission_count}건</span>
+                    </dd>
+                  </div>
+                )}
                 <div>
                   <dt>탐지 시각</dt>
                   <dd>{formatDateTime(detail.detected_at)}</dd>
@@ -265,8 +291,16 @@ export default function DetectionDetailPage() {
                   </thead>
                   <tbody>
                     {detail.logs.map((log) => (
-                      <tr key={log.access_log_id}>
-                        <td>{formatDateTime(log.occurred_at)}</td>
+                      <tr
+                        key={log.access_log_id}
+                        className={log.after_submission_round ? "after-submission" : undefined}
+                      >
+                        <td>
+                          {formatDateTime(log.occurred_at)}
+                          {log.after_submission_round && (
+                            <div className="small">{log.after_submission_round}차 소명 제출 뒤</div>
+                          )}
+                        </td>
                         <td>{ACTION_LABELS[log.action] ?? log.action}</td>
                         <td>
                           <span className={log.result === "SUCCESS" ? "badge" : "badge badge-danger"}>

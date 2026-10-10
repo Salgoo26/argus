@@ -827,3 +827,12 @@ tr.case-handling td {
   font-size: 12px;
   word-break: break-all;
 }
+
+.small {
+  font-size: 12px;
+}
+
+/* 소명 제출 뒤에 붙은 하위 기록 (v0.1 보강 J-1) */
+tr.after-submission td {
+  background: var(--warn-soft);
+}
