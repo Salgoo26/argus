@@ -22,6 +22,8 @@ SKELETON_TABLES = {
     "detection_rule_history",  # 기능 레이어 6 (0008)
     "explanation_attachment",  # 기능 레이어 7 ③ (0010)
     "inspection_report",  # 기능 레이어 9 (0013)
+    "notification",  # v0.1 보강 F (0015)
+    "push_subscription",  # v0.1 보강 F-4 (0016)
 }
 
 

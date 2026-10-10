@@ -7,6 +7,7 @@ import { useCallback, useEffect, useState } from "react";
 import { AppHeader, useMe } from "@/components/app-header";
 import { AttachmentList, AttachmentUploader } from "@/components/attachments";
 import { DbStatement, SubjectsCell } from "@/components/db-statement";
+import { DueLabel } from "@/components/due-label";
 import { TicketInput } from "@/components/ticket-input";
 import { api, type CaseDetail } from "@/lib/api";
 import {
@@ -303,6 +304,12 @@ export default function DetectionDetailPage() {
                   </h3>
                   <p className="muted" style={{ margin: 0 }}>
                     요청 {formatDateTime(e.requested_at)} · {e.requested_by ?? "시스템(자동 요청)"}
+                    {e.due_at && (
+                      <>
+                        {" · "}
+                        <DueLabel due={e.due_at} submitted={e.submitted_at} />
+                      </>
+                    )}
                   </p>
                   {e.request_message && <div className="quote">{e.request_message}</div>}
                   {e.submitted_at ? (

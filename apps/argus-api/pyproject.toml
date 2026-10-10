@@ -14,6 +14,7 @@ dependencies = [
     "argon2-cffi==25.1.0",
     "pyjwt==2.15.1",
     "python-multipart==0.0.32",  # 소명 첨부 업로드(multipart/form-data) — FastAPI File()
+    "cryptography==50.0.2",  # 웹 푸시 VAPID(ES256)·내용 암호화(RFC 8291) — platform-api와 같은 버전
 ]
 
 [project.optional-dependencies]

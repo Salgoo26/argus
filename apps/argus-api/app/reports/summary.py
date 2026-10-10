@@ -16,7 +16,7 @@
 from datetime import datetime
 from typing import Any
 
-from sqlalchemy import Connection, and_, func, select
+from sqlalchemy import Connection, and_, func, or_, select
 
 from app.detections.masking import mask_subject
 from app.ledger.hashchain import verify_chain
@@ -119,6 +119,14 @@ def _section(
             func.count(e.submitted_at),
             func.count().filter(e.review_result == "APPROVED"),
             func.count().filter(e.review_result == "REJECTED"),
+            # 기한 초과 (v0.1 보강 F-3) — 기한 뒤에 제출했거나, 보고서를 만드는 지금 기한이 지났는데
+            # 아직 제출 전인 차수
+            func.count().filter(
+                or_(
+                    e.submitted_at > e.due_at,
+                    and_(e.submitted_at.is_(None), e.due_at < func.now()),
+                )
+            ),
         )
         .select_from(explanation.join(detection, detection.c.id == e.detection_id))
         .where(*cases)
@@ -147,6 +155,7 @@ def _section(
             "submitted": explanations[1],
             "approved": explanations[2],
             "rejected": explanations[3],
+            "overdue": explanations[4],
         },
         "cases": _cases(conn, cases),
     }

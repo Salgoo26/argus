@@ -128,3 +128,33 @@ def test_platform_member_search_records_shown_members_not_search_values():
     assert zero[1] == 0 and zero[2] == ["name"]
     everything = str(_ledger("SELECT request_query_keys, context FROM access_log", ()))
     assert SEARCH_NEEDLE not in everything and "user00" not in everything
+
+
+# ── 알림 (v0.1 보강 F) ───────────────────────────────────
+
+
+def test_notifications_reach_officer_and_handler(officer, handler_password):
+    # 앞 시나리오의 대량 다운로드(상) — 담당자에게 새 탐지건, 취급자에게 소명 요청 알림
+    officer_page = argus_login(*officer).get("/api/notifications")
+    assert officer_page.status_code == 200, officer_page.text
+    assert "DETECTED" in {i["kind"] for i in officer_page.json()["items"]}
+
+    handler = argus_login("ops_park", handler_password("ops_park"))
+    handler_page = handler.get("/api/notifications")
+    items = handler_page.json()["items"]
+    assert any(i["kind"] == "REQUESTED" for i in items)
+    # 알림에는 탐지건 번호·룰 이름·심각도만 — 회원번호는 없다
+    for response in (officer_page, handler_page):
+        assert not re.search(r'"1\d{4}"|member_1', response.text)
+
+    # 탐지건 목록에 소명 기한이 보인다(제출 대기 건)
+    cases = handler.post("/api/detections/search", json={"status": "REQUESTED"}).json()["items"]
+    assert cases and all(c["due_at"] for c in cases)
+
+
+def test_web_push_is_off_without_keys_and_service_worker_is_served(officer):
+    # E2E 환경은 VAPID 키를 넣지 않는다 — 웹 푸시만 꺼지고 화면 알림은 그대로 (F-4)
+    browser = argus_login(*officer)
+    assert browser.get("/api/push/config").json() == {"enabled": False, "public_key": None}
+    worker = browser.get("/sw.js")
+    assert worker.status_code == 200 and "showNotification" in worker.text

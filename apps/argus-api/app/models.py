@@ -168,6 +168,34 @@ explanation = Table(
     Column("review_result", String(16)),
     Column("review_comment", Text),
     Column("ticket_ids", ARRAY(String(32)), nullable=False),
+    Column("due_at", DateTime(timezone=True)),  # 소명 기한 (v0.1 보강 F-3, 0015)
+)
+
+# 화면 알림 (v0.1 보강 F-2, 0015) — 본문 없음: 종류·탐지건·심각도·차수만
+notification = Table(
+    "notification",
+    metadata,
+    Column("id", BigInteger, primary_key=True),
+    Column("user_id", BigInteger, nullable=False),
+    Column("kind", String(16), nullable=False),
+    Column("detection_id", BigInteger, nullable=False),
+    Column("severity", String(8), nullable=False),
+    Column("round", Integer, nullable=False),
+    Column("created_at", DateTime(timezone=True), nullable=False),
+    Column("read_at", DateTime(timezone=True)),
+    Column("push_pending", Boolean, nullable=False),  # 웹 푸시 발송 대기 (F-4, 0016)
+)
+
+# 웹 푸시 구독 (v0.1 보강 F-4, 0016) — 브라우저가 준 구독 정보
+push_subscription = Table(
+    "push_subscription",
+    metadata,
+    Column("id", BigInteger, primary_key=True),
+    Column("user_id", BigInteger, nullable=False),
+    Column("endpoint", String(1000), nullable=False),
+    Column("p256dh", String(128), nullable=False),
+    Column("auth", String(64), nullable=False),
+    Column("created_at", DateTime(timezone=True), nullable=False),
 )
 
 setting = Table(

@@ -24,6 +24,9 @@ from app.detections.attachments import router as attachments_router
 from app.detections.router import router as detections_router
 from app.errors import install_error_handlers
 from app.ingest.router import router as ingest_router
+from app.notifications.push_router import router as push_router
+from app.notifications.router import router as notifications_router
+from app.notifications.webpush import vapid_from
 from app.reports.router import router as reports_router
 from app.rules.router import router as rules_router
 
@@ -37,6 +40,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     # pool_pre_ping: DB 재기동 뒤 끊긴 커넥션을 조용히 교체
     app.state.engine = create_engine(settings.database_url(), pool_pre_ping=True)
     app.state.platform_admin_url = settings.require_platform_admin_url()
+    # 웹 푸시 키 — 없으면 None(웹 푸시만 꺼짐), 짝이 안 맞으면 기동 거부 (v0.1 보강 F-4)
+    app.state.vapid = vapid_from(settings)
 
     install_error_handlers(app)
     app.include_router(ingest_router)
@@ -46,6 +51,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(access_logs_router)
     app.include_router(rules_router)
     app.include_router(reports_router)
+    app.include_router(notifications_router)
+    app.include_router(push_router)
 
     @app.middleware("http")
     async def api_response_headers(request: Request, call_next):

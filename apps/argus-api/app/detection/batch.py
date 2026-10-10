@@ -80,6 +80,7 @@ from app.models import (
     handler,
     source_system,
 )
+from app.notifications.events import due_at, on_detected, on_requested
 
 logger = logging.getLogger(__name__)
 
@@ -441,6 +442,7 @@ def _attach(
                 comment=_detected_comment(run_id, rule, logs, note),
             )
         )
+        on_detected(conn, detection_id, rule["severity"])  # 상이면 담당자 화면 알림 (F-1)
         if rule["auto_request"] and _can_receive_request(conn, source_system_id, actor):
             _auto_request(conn, run_id, rule, detection_id)
 
@@ -523,8 +525,10 @@ def _auto_request(conn: Connection, run_id: int, rule: Any, detection_id: int) -
             round=1,
             requested_by=None,
             request_message=f"자동 소명 요청 — {rule['name']}",
+            due_at=due_at(conn),  # 소명 기한 (F-3)
         )
     )
+    on_requested(conn, detection_id, rule["severity"], 1)  # 취급자 화면 알림 (F-1)
     conn.execute(
         insert(detection_status_history).values(
             detection_id=detection_id,
