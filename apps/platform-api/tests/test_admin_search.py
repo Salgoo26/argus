@@ -64,6 +64,15 @@ def test_member_search_by_name_email_phone_status_and_join_date(admin, engine):
     assert _search(admin, "members", status="WITHDRAWN")["items"] == []
 
 
+def test_member_search_total_counts_members_with_or_without_conditions(admin, engine):
+    """조건 없는 검색(목록 첫 진입)도 총 건수는 전체 회원 수 — 테이블 없는 count(*)는 늘 1이 된다"""
+    _add_members(engine, 30)
+
+    body = _search(admin, "members", size=10)
+    assert body["total"] == 30 and len(body["items"]) == 10
+    assert _search(admin, "members", name="김가상")["total"] == 15
+
+
 def test_member_search_records_every_shown_member_and_key_names_only(admin, engine):
     ids = _add_members(engine, 30)
 
