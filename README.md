@@ -9,12 +9,11 @@
   탐지룰 설정, 이상 행위에 대한 소명 제출, 접속기록 점검 및 보고까지 수행할 수 있는 <b>개인정보 접속기록 점검 시스템</b>
 </p>
 
-<p align="center">
-  <a href="#구현-화면"><b>▶ 실제 구현 화면</b></a>
-</p>
+## 요약
 
 | 항목 | 내용 |
 |---|---|
+| 구현 화면 | [▶ 실제 구현 화면 보기](#구현-화면) |
 | 기간 | 2026-09-07 ~ 2026-10-11 (v0.1) |
 | 인원 | 1명 — 문제 정의, 법령 분석, 설계, 구현 검수, 자체 점검. 코드 구현은 AI 코딩 도구(Claude Code) |
 | 근거 법령 | 개인정보 보호법, 개인정보의 안전성 확보조치 기준(2026.7.1 시행 고시)과 안내서(2025.11) |
@@ -611,7 +610,26 @@ docker compose up -d --build      # 플랫폼 http://localhost:3000 · Argus htt
 bash scripts/e2e.sh               # 전체 시나리오 자동 검증
 ```
 
-계정 준비, 시연 순서, DB 툴 접속 방법은 [실행 안내](docs/run.md)에 있습니다.
+### 로그인 계정
+
+비밀번호는 레포에 두지 않습니다. 플랫폼 관리자 계정은 `init-env.sh`가 `.env`에 무작위로 만든 값을 쓰고, ARGUS 계정은 처음 한 번 직접 설정합니다.
+
+| 화면 | 아이디 | 비밀번호 |
+|---|---|---|
+| 플랫폼 관리자<br>`localhost:3000/admin` | `ops_park`(운영) · `cs_kim`(CS) · `mkt_lee`(마케팅) · `admin_han`(관리자) 등 | `.env`의 `PLATFORM_SEED_OPERATOR_PASSWORD` 값 (모든 시드 관리자 공통) |
+| ARGUS 담당자<br>`localhost:3001` | `officer` | 아래 `create-officer` 실행 시 입력 |
+| ARGUS 취급자<br>`localhost:3001` | 플랫폼 관리자 아이디 (예: `ops_park`) | 아래 `set-password` 실행 시 입력 |
+| 쇼핑몰 고객<br>`localhost:3000` | 회원가입으로 생성 | 가입 시 입력 (시드 회원 500명은 로그인 불가) |
+
+```bash
+grep '^PLATFORM_SEED_OPERATOR_PASSWORD=' .env                                       # 플랫폼 관리자 비밀번호 확인
+winpty docker compose exec argus-api python -m app.scripts.users create-officer officer --reason "최초 담당자"   # ARGUS 담당자
+winpty docker compose exec argus-api python -m app.scripts.users set-password ops_park                         # ARGUS 취급자
+```
+
+ARGUS 비밀번호는 명령 실행 후 입력창에 입력합니다(12자 이상). `winpty`는 Windows Git Bash에서 입력창을 띄우기 위한 것으로, macOS·Linux에서는 빼고 실행합니다.
+
+시연 순서와 DB 툴 접속 방법은 [실행 안내](docs/run.md)에 있습니다.
 
 <br>
 
