@@ -15,11 +15,11 @@
 
 | # | 구분 | 내용 | 근거 |
 |---|---|---|---|
-| 1 | **신규 테이블** | `consent_item` / `member_consent` — 회원 동의 이력 | **PLT-01**. PIPA §22(동의를 받는 방법), §16①·§22③ **입증책임이 개인정보처리자에게 있음** → 동의 증적이 없으면 요구사항이 성립하지 않음 |
-| 2 | **신규 테이블** | `inspection_report` — 점검 보고서 이력 | **LOG-09**. §8② "사후조치절차 이행"의 증적 |
+| 1 | **신규 테이블** | `consent_item` / `member_consent` — 회원 동의 이력 | **PLT-01**. PIPA 제22조(동의를 받는 방법), 제16조제1항·제22조제3항 **입증책임이 개인정보처리자에게 있음** → 동의 증적이 없으면 요구사항이 성립하지 않음 |
+| 2 | **신규 테이블** | `inspection_report` — 점검 보고서 이력 | **LOG-09**. 제8조제2항 "사후조치절차 이행"의 증적 |
 | 3 | **신규 테이블** | `detection_rule_history` — 룰 변경 이력 | **LOG-13** |
 | 4 | **신규 테이블** | `notification` — 알림 발송·수신 이력 | **LOG-05·LOG-16**(이메일 발송 성공/실패 추적이 필요) |
-| 5 | **신규 테이블** | `retained_member_record` — 법정 보존 항목 분리보관 | **PIPA §21③**. v0.1에서 미결로 남겼던 항목 |
+| 5 | **신규 테이블** | `retained_member_record` — 법정 보존 항목 분리보관 | **PIPA 제21조제3항**. v0.1에서 미결로 남겼던 항목 |
 | 6 | **신규 테이블** | 플랫폼 `destruction_history` — v0.1은 글로만 언급하고 DDL 누락 | 정책정의서 5-3 |
 | 7 | 컬럼 추가 | `detection_rule.access_path` (APP/DB/ALL) | 정책정의서 1-2가 **"적용 접근 경로"를 룰 스펙의 독립 필드**로 규정. v0.1은 조건식(JSON) 안에만 있었음 |
 | 8 | 컬럼 추가 | `detection.log_summary` (jsonb) | 파기와의 충돌 해소 — 아래 #11 |
@@ -27,9 +27,9 @@
 | 10 | 컬럼 추가 | `operator.role` | **PLT-10**(관리자 메뉴 노출)·**PLT-14**(권한 차등) 구현 불가 상태였음 |
 | 11 | 설계 보완 | 파기 시 `access_log` 삭제 → `detection_log` CASCADE로 근거가 완전 소멸 → 탐지건이 공허해짐. **정책정의서 5-1 "탐지·소명 이력은 접속기록과 동일 이상 보관"과 모순** | 탐지건에 `log_summary` 스냅샷을 남겨 근거 요약이 파기 후에도 보존되게 함 (7절에서 동작 검증) |
 | 12 | 인덱스 추가 | `access_log.subject_ids` GIN, `(source_system_id, action, occurred_at)`, `detection_log(access_log_id)`, `detection_status_history(detection_id, created_at)`, `notification(recipient_id, …)` | **LOG-02**의 정보주체·수행업무 필터가 인덱스 없이 전체 스캔이었음 |
-| 13 | 제약 추가 | `LOGIN` 외 행위는 `subject_type` 필수 / 퇴직 시 `terminated_at` 필수 / 언마스킹 보고서는 사유 필수 | §2 3호(처리한 정보주체 필수 항목), §12① |
+| 13 | 제약 추가 | `LOGIN` 외 행위는 `subject_type` 필수 / 퇴직 시 `terminated_at` 필수 / 언마스킹 보고서는 사유 필수 | 제2조제3호(처리한 정보주체 필수 항목), 제12조제1항 |
 | 14 | 정책 보완 제안 | 보고서 export 시 **기본 마스킹**, 언마스킹 export는 사유 필수 | 액터별_플로우 8절 마스킹 정책이 화면만 다루고 **보고서 파일은 다루지 않아 우회 경로가 됨** |
-| 15 | v0.1 보강 | 수행업무 `LOGOUT`(0014) · `notification` 화면 알림 구조로 구현, `explanation.due_at`(0015) · `push_subscription`(0016) · `access_log` DELETE·TRUNCATE 트리거, 보고서 `integrity` 기준점(0017) · `detection_log.attached_at`, EVENT 탐지건 그룹 키에 `data_category`·`action_group`(0018) · 룰 필드 `client_ip`, 측정 `DISTINCT_IP`·`MAX_SUBJECT_REPEAT`, 기본 룰 3개(0019) · `argus_user_history`(0020) · 보호 대상 등록부 4개 테이블(0021) · 시드 룰 설명 정리(0022) · 플랫폼 `operator_permission_history`, `operator.must_change_password`(플랫폼 0009) · DB 직접 기록의 회원번호 추출과 `context.registry_version` | 고시 §5①③(권한 부여·변경·말소 기록), §8②(점검·사후조치), §8③(위·변조 방지), 안내서 61~62쪽(권한 부여·말소 내역), FAQ 147(로그아웃), 95쪽(비정상 행위 예시, 위·변조 확인 정보 별도 보관), 129쪽(이상행위 탐지 시 알림) |
+| 15 | v0.1 보강 | 수행업무 `LOGOUT`(0014) · `notification` 화면 알림 구조로 구현, `explanation.due_at`(0015) · `push_subscription`(0016) · `access_log` DELETE·TRUNCATE 트리거, 보고서 `integrity` 기준점(0017) · `detection_log.attached_at`, EVENT 탐지건 그룹 키에 `data_category`·`action_group`(0018) · 룰 필드 `client_ip`, 측정 `DISTINCT_IP`·`MAX_SUBJECT_REPEAT`, 기본 룰 3개(0019) · `argus_user_history`(0020) · 보호 대상 등록부 4개 테이블(0021) · 시드 룰 설명 정리(0022) · 플랫폼 `operator_permission_history`, `operator.must_change_password`(플랫폼 0009) · DB 직접 기록의 회원번호 추출과 `context.registry_version` | 고시 제5조제1항·제3항(권한 부여·변경·말소 기록), 제8조제2항(점검·사후조치), 제8조제3항(위·변조 방지), 안내서 61~62쪽(권한 부여·말소 내역), FAQ 147(로그아웃), 95쪽(비정상 행위 예시, 위·변조 확인 정보 별도 보관), 129쪽(이상행위 탐지 시 알림) |
 
 ---
 
@@ -41,8 +41,8 @@
 |---|---|---|---|
 | Argus | `source_system` | 접속기록을 보내는 시스템. `PLATFORM`, `ARGUS`(자체 기록) | LOG-17, 2단계 확장 |
 | Argus | `handler` | 플랫폼에서 동기화된 개인정보취급자 | API ② |
-| Argus | `argus_user` / `argus_user_history` | Argus 로그인 계정. 정보보호 담당자(A4) / 취급자(A5). 계정 이력(부여·변경·말소·재활성화·잠금 해제) | 액터별 플로우 1절, 고시 §5①③ |
-| Argus | **`access_log`** | 원장. append-only + 해시체인 | §2 3호, §8①③ |
+| Argus | `argus_user` / `argus_user_history` | Argus 로그인 계정. 정보보호 담당자(A4) / 취급자(A5). 계정 이력(부여·변경·말소·재활성화·잠금 해제) | 액터별 플로우 1절, 고시 제5조제1항·제3항 |
+| Argus | **`access_log`** | 원장. append-only + 해시체인 | 제2조제3호, 제8조제1항·제3항 |
 | Argus | `detection_rule` / `detection_rule_history` | EVENT / AGGREGATE 룰과 변경 이력 | 정책정의서 1절, LOG-04·13 |
 | Argus | **`detection`** | 그룹핑 단위의 탐지 결과, 상태 7종 | 정책정의서 2·3절 |
 | Argus | `detection_log` | 탐지건의 하위 근거 로그 (N:M) | 정책정의서 2-2 |
@@ -50,19 +50,19 @@
 | Argus | **`explanation`** / `explanation_attachment` | 차수별 소명과 근거자료 | LOG-06~08 |
 | Argus | `rule_exception` | 화이트리스트 (시스템 계정 포함) | LOG-12, 정책정의서 5-3 |
 | Argus | `notification` / `push_subscription` | 화면 알림(받는 사람별, 본문 없음)과 웹 푸시 구독. 이메일 알림은 v0.2 | LOG-05·16 |
-| Argus | `protected_column` / `protected_column_history` | 보호 대상 등록부 — 컬럼별 개인정보 항목·데이터 유형·회원 식별 열과 등록·변경·해제 이력 | 고시 §8①, 아키텍처 설계서 3-4 |
+| Argus | `protected_column` / `protected_column_history` | 보호 대상 등록부 — 컬럼별 개인정보 항목·데이터 유형·회원 식별 열과 등록·변경·해제 이력 | 고시 제8조제1항, 아키텍처 설계서 3-4 |
 | Argus | `db_schema_column` / `db_schema_receipt` | 게이트웨이가 보낸 DB 구조 목록(테이블·컬럼 이름과 자료형만)과 수신 기록 | 아키텍처 설계서 3-4 |
-| Argus | `inspection_report` | 점검 보고서 생성 이력 | LOG-09, §8② |
+| Argus | `inspection_report` | 점검 보고서 생성 이력 | LOG-09, 제8조제2항 |
 | Argus | `detection_batch_run` | 탐지 배치 실행 이력 + 커서 | F-04 |
 | Argus | `destruction_history` | 파기 증적 (개인정보 미포함) | 정책정의서 5-3 |
-| Argus | `setting` | 점검 주기 등 | §8② (설정값) |
-| 플랫폼 | `operator` / `operator_permission_history` | 관리자 UI 사용자, 동기화 원천, 권한 이력(부여·변경·말소) | PLT-10·14, 고시 §5①③ |
+| Argus | `setting` | 점검 주기 등 | 제8조제2항 (설정값) |
+| 플랫폼 | `operator` / `operator_permission_history` | 관리자 UI 사용자, 동기화 원천, 권한 이력(부여·변경·말소) | PLT-10·14, 고시 제5조제1항·제3항 |
 | 플랫폼 | `db_access_token` | DB 접속 토큰 발급 기록(감사용, 토큰 값 미저장) | 2단계(2티어), 아키텍처 3-4 |
 | 플랫폼 | `member` | 고객 = 정보주체 | PLT-01~03 |
 | 플랫폼 | `consent_item` / `member_consent` | 동의 항목 정의와 동의·철회 이력 | **PLT-01** |
 | 플랫폼 | `orders` / `payment` / `refund_account` / `product` / `inquiry` | 감시 대상 시스템의 업무 데이터 | PLT-04~06 |
 | 플랫폼 | **`outbox`** | Argus 전송 대기 버퍼 | 아키텍처 3-3 |
-| 플랫폼 | `retained_member_record` / `destruction_history` | 분리보관·파기 증적 | PIPA §21③, 정책정의서 5-3 |
+| 플랫폼 | `retained_member_record` / `destruction_history` | 분리보관·파기 증적 | PIPA 제21조제3항, 정책정의서 5-3 |
 
 구현된 테이블은 Argus 21개(마이그레이션 0022 기준), 플랫폼 15개(플랫폼 마이그레이션 0009 기준, `shipping_address` 포함)다. Argus의 `rule_exception`·`destruction_history`는 설계만 있고 화이트리스트·파기 배치와 함께 v0.2에 만든다.
 
@@ -163,7 +163,7 @@ CREATE TABLE argus_user (
     CHECK (role <> 'HANDLER' OR handler_id IS NOT NULL)
 );
 
--- Argus 계정 이력 (고시 §5①③, 마이그레이션 0020) — 플랫폼 operator_permission_history와 같은 방식
+-- Argus 계정 이력 (고시 제5조제1항·제3항, 마이그레이션 0020) — 플랫폼 operator_permission_history와 같은 방식
 CREATE TABLE argus_user_history (
     id              bigserial    PRIMARY KEY,
     user_id         bigint       NOT NULL,         -- FK 없음: 계정 행이 정리돼도 이력은 남아야 함
@@ -215,7 +215,7 @@ CREATE TABLE access_log (
     source_system_id  smallint     NOT NULL REFERENCES source_system(id),
     access_path       varchar(8)   NOT NULL CHECK (access_path IN ('APP','DB')),
 
-    -- §2 3호 필수 5항목
+    -- 제2조제3호 필수 5항목
     actor_login_id    varchar(64)  NOT NULL,                     -- 식별자
     occurred_at       timestamptz  NOT NULL,                     -- 접속일시
     client_ip         inet         NOT NULL,                     -- 접속지 정보
@@ -240,7 +240,7 @@ CREATE TABLE access_log (
 
     CHECK (action IN ('LOGIN','LOGOUT','READ','CREATE','UPDATE','DELETE','DOWNLOAD','EXPORT','UNMASK')),
     CHECK (data_category IN ('MEMBER_BASIC','PAYMENT','ORDER','INQUIRY','ACCESS_LOG','NONE')),
-    CHECK (action IN ('LOGIN','LOGOUT') OR subject_type IS NOT NULL)   -- §2 3호: 처리한 정보주체 정보 필수
+    CHECK (action IN ('LOGIN','LOGOUT') OR subject_type IS NOT NULL)   -- 제2조제3호: 처리한 정보주체 정보 필수
 );
 -- LOGOUT은 마이그레이션 0014에서 추가(위 CHECK 두 개만 바꿈 — 기존 행과 해시체인에는 영향 없음)
 
@@ -506,7 +506,7 @@ CREATE TABLE inspection_report (
     generated_by    bigint      NOT NULL REFERENCES argus_user(id),
     generated_at    timestamptz NOT NULL DEFAULT now(),
     CHECK (period_from < period_to),
-    CHECK (NOT unmasked OR unmask_reason IS NOT NULL)     -- §12① 용도 특정
+    CHECK (NOT unmasked OR unmask_reason IS NOT NULL)     -- 제12조제1항 용도 특정
 );
 CREATE INDEX ix_inspection_report_generated ON inspection_report (generated_at DESC);
 ```
@@ -535,7 +535,7 @@ CREATE INDEX ix_inspection_report_generated ON inspection_report (generated_at D
 | 항목 | 내용 |
 |---|---|
 | `period`·`scope` | 점검 기간(한국 날짜 기준 시작·끝), 경로 범위 |
-| `integrity` | §8③ 위·변조 점검. `ok`·`checked`·`broken_at`(해시체인 재계산 결과), `total`(원장 전체 건수), `last_id`·`last_hash`(원장 마지막 행의 id와 해시 64자 — 출력본이 DB 밖 기준점), `previous`(`status`·`report_id`·`last_id` — 직전 보고서가 남긴 마지막 행이 같은 해시로 남아 있으면 `MATCH`, 없거나 해시가 다르면 `MISMATCH`, 비교할 보고서가 없으면 `NONE`) |
+| `integrity` | 제8조제3항 위·변조 점검. `ok`·`checked`·`broken_at`(해시체인 재계산 결과), `total`(원장 전체 건수), `last_id`·`last_hash`(원장 마지막 행의 id와 해시 64자 — 출력본이 DB 밖 기준점), `previous`(`status`·`report_id`·`last_id` — 직전 보고서가 남긴 마지막 행이 같은 해시로 남아 있으면 `MATCH`, 없거나 해시가 다르면 `MISMATCH`, 비교할 보고서가 없으면 `NONE`) |
 | `patrol` | 기간 중 탐지 배치 실행 수·성공·실패, 마지막 성공 시각(점검 수행 증적) |
 | `paths.{APP,DB}.logs` | 기록 수, 취급자 수, 실패 수, 수행업무별·데이터 유형별 건수, `subject_unresolved`(정보주체 미특정 건수, DB 직접) |
 | `paths.{APP,DB}.detections` | 탐지건 수, 심각도별·상태별·룰별 건수, 에스컬레이션 수 |
@@ -570,7 +570,7 @@ CREATE TABLE destruction_history (
     target_type        varchar(32)  NOT NULL,     -- 'ACCESS_LOG' 등
     cutoff_at          timestamptz  NOT NULL,     -- 이 시각 이전 발생분 파기
     deleted_count      int          NOT NULL,
-    legal_basis        varchar(100) NOT NULL,     -- '안전성 확보조치 기준 §8① (1년)'
+    legal_basis        varchar(100) NOT NULL,     -- '안전성 확보조치 기준 제8조제1항 (1년)'
     chain_anchor_hash  char(64)                   -- 파기 후 남은 가장 오래된 레코드의 prev_hash
 );
 
@@ -606,13 +606,13 @@ GRANT SELECT, DELETE ON access_log TO argus_purge;  -- 파기 배치 전용 (지
 
 | key | 기본값 | 근거 |
 |---|---|---|
-| `inspection_cycle` | `"1mo"` | 정책정의서 5-2 (§8② 자율, 기본 월 1회) |
+| `inspection_cycle` | `"1mo"` | 정책정의서 5-2 (제8조제2항 자율, 기본 월 1회) |
 | `detection_interval_min` | `5` | LOG-03 준실시간 배치 |
-| `access_log_retention` | `"1y"` | §8① |
+| `access_log_retention` | `"1y"` | 제8조제1항 |
 | `subject_ids_limit` | `1000` | API ① 2-2 |
 | `explanation_due_days` | `7` | 소명 기한(요청 시각 + 7일, 0015) |
 
-**append-only 보장 (§8③)**
+**append-only 보장 (제8조제3항)**
 
 | 장치 | 내용 |
 |---|---|
@@ -736,7 +736,7 @@ GRANT SELECT, DELETE ON access_log TO argus_purge;  -- 파기 배치 전용 (지
 
 > **접속지·특정 정보주체 기본 룰 3개 (마이그레이션 0019)**: 안내서 95쪽이 비정상 행위 예시로 드는 "인가되지 않은 단말·지역(IP)에서 접속", "짧은 시간 여러 IP", "특정 정보주체 과도 조회"를 기본 룰로 둔다. 시드와 룰 변경 이력(`CREATE`, 변경자 NULL)을 함께 넣었다. 허용 범위의 기본값은 사설망 3대역과 루프백이다(사내망 가정). 운영에서는 담당자가 룰 빌더로 회사 대역으로 바꾼다. 특정 회원 반복 처리는 회원번호가 있는 기록만 세므로 `APP`에만 둔다(DB 직접 기록은 미특정일 수 있음).
 >
-> **시드 룰 설명 정리 (마이그레이션 0022)**: 룰 설명은 룰 목록·탐지건 상세에 그대로 보이므로, 시스템이 만든 룰 중 담당자가 한 번도 고치지 않은 룰만 설명 끝의 문서 번호 표기("(policy 1-3)", "(§2 3호 …)")를 지웠다. 룰 변경은 언제나 이력으로 남긴다는 원칙대로 `version` +1, `detection_rule_history`에 `UPDATE`(변경자 NULL)를 남겼다. 되돌리기는 하지 않는다(이전 문장은 이력에 있음).
+> **시드 룰 설명 정리 (마이그레이션 0022)**: 룰 설명은 룰 목록·탐지건 상세에 그대로 보이므로, 시스템이 만든 룰 중 담당자가 한 번도 고치지 않은 룰만 설명 끝의 문서 번호 표기("(policy 1-3)", "(제2조제3호 …)")를 지웠다. 룰 변경은 언제나 이력으로 남긴다는 원칙대로 `version` +1, `detection_rule_history`에 `UPDATE`(변경자 NULL)를 남겼다. 되돌리기는 하지 않는다(이전 문장은 이력에 있음).
 
 ### 3-7. 탐지 배치의 데이터 흐름 (F-04)
 
@@ -832,7 +832,7 @@ CREATE INDEX ix_db_schema_receipt_received ON db_schema_receipt (received_at DES
 - 등록부 버전은 등록 이력의 마지막 id(`r{id}`)다. 게이트웨이가 원장 `context.registry_version`에 남겨, 기록 당시 어떤 분류로 판정했는지 설명할 수 있다.
 - 구조 목록은 게이트웨이가 기동 시와 1시간마다 `pg_catalog`에서 읽은 `public` 스키마 실제 테이블의 컬럼 이름·자료형이다(API명세서 6절). 받을 때마다 그 DB의 목록을 통째로 바꾸고(앱 계정에 DELETE 허용) `db_schema_receipt`에 남긴다. 등록은 구조 목록에 있는 컬럼만 받는다(오타 방지). 등록했는데 구조 목록에 없는 컬럼은 "DB에 없음"으로 표시한다.
 - 게이트웨이는 5분마다 등록부를 받는다(실패하면 30초 뒤 재시도). 받지 못하면 마지막으로 받은 등록부(게이트웨이 볼륨에 저장)를, 한 번도 받지 못했으면 게이트웨이 코드의 고정 표를 쓴다(`registry_version = builtin`). 등록부가 없다고 판정을 멈추거나 모두 `NONE`으로 보내지 않는다.
-- 2년 보관 대상: `UNIQUE_ID`·`SENSITIVE` 항목이 활성으로 등록돼 있으면 현황에 "2년 보관 대상"으로 표시한다(고시 §8① — 고유식별정보·민감정보 처리 시 접속기록 2년). 실제 보관 기간 적용은 파기 배치(v0.2)와 함께다.
+- 2년 보관 대상: `UNIQUE_ID`·`SENSITIVE` 항목이 활성으로 등록돼 있으면 현황에 "2년 보관 대상"으로 표시한다(고시 제8조제1항 — 고유식별정보·민감정보 처리 시 접속기록 2년). 실제 보관 기간 적용은 파기 배치(v0.2)와 함께다.
 - 현황(`GET /api/protection`): 개인정보 테이블·컬럼 수, 미분류·DB에 없음 컬럼 수, 마지막 구조 목록 수신 시각, 2년 보관 대상 여부, 등록부 버전, 테이블별 최근 30일 DB 직접 접근 건수·마지막 접근 시각(원장 `context.tables` 집계).
 
 **초기 등록 (0021)**: 게이트웨이 고정 표를 컬럼 단위로 옮겼다. 아래 8개 테이블은 모든 컬럼을 분류했고(적지 않은 컬럼은 `NOT_PERSONAL`), 이력에 `REGISTER`(사유 "초기 등록 — 게이트웨이 고정 표 이관", 처리자 시스템)를 남겼다. 그 밖의 테이블(`operator`·`operator_permission_history`·`product`·`outbox`·`db_access_token` 등)은 미분류로 둔다. 데이터 유형은 정보주체(회원) 기준이라 직원 정보 테이블은 회원 개인정보 유형으로 분류하지 않는다.
@@ -890,12 +890,13 @@ CREATE TABLE member (
 CREATE TABLE consent_item (
     code            varchar(32)  PRIMARY KEY,   -- 'TOS','PRIVACY_REQUIRED','AGE_OVER_14'(필수),'MARKETING'
     name            varchar(100) NOT NULL,
-    required        boolean      NOT NULL,      -- 필수/선택 (PIPA §22①·⑤)
+    required        boolean      NOT NULL,      -- 필수/선택 (PIPA 제22조제1항·제5항)
     version         varchar(16)  NOT NULL,
-    purpose         text         NOT NULL,      -- 수집·이용 목적 (§15②1호)
-    items           text         NOT NULL,      -- 수집 항목 (§15②2호)
-    retention       text         NOT NULL,      -- 보유·이용 기간 (§15②3호)
-    effective_from  timestamptz  NOT NULL
+    purpose         text         NOT NULL,      -- 수집·이용 목적 (제15조제2항제1호)
+    items           text         NOT NULL,      -- 수집 항목 (제15조제2항제2호)
+    retention       text         NOT NULL,      -- 보유·이용 기간 (제15조제2항제3호)
+    effective_from  timestamptz  NOT NULL,
+    active          boolean      NOT NULL DEFAULT true  -- false면 가입·마이페이지에서 받지 않음. 행과 지난 동의 이력은 증적으로 남김(0010)
 );
 
 -- 동의·철회 이력 (append) — PLT-01
@@ -903,7 +904,7 @@ CREATE TABLE member_consent (
     id            bigserial   PRIMARY KEY,
     member_id     bigint      NOT NULL REFERENCES member(id),
     item_code     varchar(32) NOT NULL REFERENCES consent_item(code),
-    item_version  varchar(16) NOT NULL,          -- 동의 당시 약관 버전. 문안이 바뀌면 고쳐 쓰지 않고 버전을 올린다(예: 수집·이용 동의 v2 — 휴대폰·배송지 추가)
+    item_version  varchar(16) NOT NULL,          -- 동의 당시 약관 버전. 문안이 바뀌면 고쳐 쓰지 않고 버전을 올린다(예: 수집·이용 동의 v2 — 휴대폰·배송지 추가, v3 — 주문 정보·문의 내용 추가 / 이용약관 v2, 0010)
     agreed        boolean     NOT NULL,          -- true=동의, false=미동의/철회
     acted_at      timestamptz NOT NULL DEFAULT now(),
     client_ip     inet,                          -- 동의 증적의 신뢰성 확보용
@@ -928,7 +929,7 @@ CREATE INDEX ix_outbox_pending ON outbox (status, next_retry_at) WHERE status = 
 -- 결제수단: 실제 구현은 아래 설계안이 아니라 `payment` + `refund_account` 두 테이블(아래 표 참고)
 -- ① 카드: PG 목업. 플랫폼은 카드번호를 받지도 저장하지도 않음(끝 4자리도 미저장 — 카드 등록·간편결제 기능이 없어 쓸 목적이 없음, 최소수집)
 --    → 주문의 결제 정보로 PG 거래 정보만 저장: 결제수단 종류, 카드사, PG 거래번호, 승인 시각, 금액
--- ② 계좌: 고객이 마이페이지에서 등록하는 환불계좌만 직접 수집 — §7② 6호(계좌번호) 앱 레벨 암호화
+-- ② 계좌: 고객이 마이페이지에서 등록하는 환불계좌만 직접 수집 — 제7조제2항제6호(계좌번호) 앱 레벨 암호화
 CREATE TABLE refund_account (                -- (설계안) 기존 payment_method의 계좌 부분
     id                  bigserial   PRIMARY KEY,
     member_id           bigint      NOT NULL REFERENCES member(id),
@@ -994,7 +995,7 @@ CREATE TABLE inquiry (
     answered_at  timestamptz
 );
 
--- 권한 부여·변경·말소 이력 (고시 §5①③, 3년 — 플랫폼 0009)
+-- 권한 부여·변경·말소 이력 (고시 제5조제1항·제3항, 3년 — 플랫폼 0009)
 CREATE TABLE operator_permission_history (
     id              bigserial    PRIMARY KEY,
     operator_id     bigint       NOT NULL REFERENCES operator(id),
@@ -1028,12 +1029,12 @@ CREATE TABLE db_access_token (
 -- SQL 원문·매개변수는 이 DB가 아니라 게이트웨이 원문 저장소(gateway-data 볼륨)에 둔다 — 같은 이유(소유자 계정의 변조 가능성)
 CREATE INDEX ix_db_access_token_operator ON db_access_token (operator_id, issued_at);
 
--- 법정 보존 항목 분리보관 (PIPA §21③)
+-- 법정 보존 항목 분리보관 (PIPA 제21조제3항)
 CREATE TABLE retained_member_record (
     id                  bigserial    PRIMARY KEY,
     original_member_id  bigint       NOT NULL,          -- FK 아님 (원본 member 행은 파기됨)
     retain_reason       varchar(64)  NOT NULL,          -- 'PAYMENT_5Y','DISPUTE_3Y'
-    legal_basis         varchar(100) NOT NULL,          -- '전자상거래법 시행령 §6'
+    legal_basis         varchar(100) NOT NULL,          -- '전자상거래법 시행령 제6조'
     data                jsonb        NOT NULL,          -- 보존 목적에 필요한 최소 항목만
     retain_until        timestamptz  NOT NULL,
     created_at          timestamptz  NOT NULL DEFAULT now()
@@ -1060,28 +1061,28 @@ CREATE TABLE destruction_history (
 
 ### 4-1. 회원 탈퇴 시 파기·분리보관 절차
 
-> **v0.1은 탈퇴 즉시 파기**: 파기 배치는 v0.2라, 아래 절차대로 "상태만 바꾸고 배치를 기다리면" v0.1 동안 탈퇴 회원 정보가 계속 남아 **PIPA §21(지체 없이 파기) 위반 상태**가 된다. 따라서 **탈퇴 처리 트랜잭션 안에서** 아래를 수행한다. 아래 번호 절차는 v0.2 파기 배치의 설계로 유지. **보안성 검토 때 재확인.**
+> **v0.1은 탈퇴 즉시 파기**: 파기 배치는 v0.2라, 아래 절차대로 "상태만 바꾸고 배치를 기다리면" v0.1 동안 탈퇴 회원 정보가 계속 남아 **PIPA 제21조(지체 없이 파기) 위반 상태**가 된다. 따라서 **탈퇴 처리 트랜잭션 안에서** 아래를 수행한다. 아래 번호 절차는 v0.2 파기 배치의 설계로 유지. **보안성 검토 때 재확인.**
 >
 > | 순서 | v0.1 탈퇴 처리 (비밀번호 재확인 후, 한 트랜잭션) |
 > |---|---|
-> | 1 | 주문이 있으면 `retained_member_record`에 **PAYMENT_5Y**(전자상거래법 시행령 §6①3호, 5년) — 주문번호·상품·금액·일시·PG 거래번호·카드사 + **주문의 배송 정보 스냅샷**(재화 공급 기록) + 분쟁 시 본인 확인용 이름·이메일·전화. 비밀번호·배송지 목록·환불계좌는 담지 않음 |
-> | 2 | 문의가 있으면 **DISPUTE_3Y**(시행령 §6①4호, 3년) — 제목·본문·답변·시각 + 연락처를 **옮기고**, 운영 테이블 `inquiry`의 제목·본문·답변은 "(탈퇴 회원 문의 — 분리보관됨)"으로 지움(번호·상태·시각·답변자만 남음) |
+> | 1 | 주문이 있으면 `retained_member_record`에 **PAYMENT_5Y**(전자상거래법 시행령 제6조제1항제3호, 5년) — 주문번호·상품·금액·일시·PG 거래번호·카드사 + **주문의 배송 정보 스냅샷**(재화 공급 기록) + 분쟁 시 본인 확인용 이름·이메일·전화. 비밀번호·배송지 목록·환불계좌는 담지 않음 |
+> | 2 | 문의가 있으면 **DISPUTE_3Y**(시행령 제6조제1항제4호, 3년) — 제목·본문·답변·시각 + 연락처를 **옮기고**, 운영 테이블 `inquiry`의 제목·본문·답변은 "(탈퇴 회원 문의 — 분리보관됨)"으로 지움(번호·상태·시각·답변자만 남음) |
 > | 3 | 환불계좌·동의 이력·배송지·회원 행 **실제 삭제**(`orders.member_id`는 SET NULL). 주문의 배송 정보 스냅샷은 1번 PAYMENT_5Y에 옮긴 뒤 `orders`에서 지움 |
 > | 4 | `destruction_history`에 MEMBER 1건(개인정보 미기록) |
 >
-> - 문의 **내용을 옮기고 지우는** 이유: 아래 3번은 "member_id SET NULL로 끊겨 통계 데이터가 된다"였지만, 문의 본문에는 고객이 쓴 개인정보(주소·전화 등)가 있을 수 있어 **연결만 끊으면 사실상 보관 기간 없는 보관**. 기각: 그대로 둠(§21 위반 소지), 문의 행 삭제(CS 처리 통계·답변자 이력 소실)
+> - 문의 **내용을 옮기고 지우는** 이유: 아래 3번은 "member_id SET NULL로 끊겨 통계 데이터가 된다"였지만, 문의 본문에는 고객이 쓴 개인정보(주소·전화 등)가 있을 수 있어 **연결만 끊으면 사실상 보관 기간 없는 보관**. 기각: 그대로 둠(제21조 위반 소지), 문의 행 삭제(CS 처리 통계·답변자 이력 소실)
 > - **보안성 검토 이월**: 분리보관 데이터의 연락처 범위(최소수집 관점), **분리보관 테이블의 접근 권한 분리 미이행**(플랫폼 DB 계정 하나 — 아래 "분리보관의 의미"의 권한 분리가 실제로는 안 돼 있음)
 
 1. 탈퇴 요청 → `member.status='WITHDRAWN'`, `withdrawn_at` 기록
 2. 파기 배치가 탈퇴 회원을 집어 **법정 보존 대상 항목만** `retained_member_record`로 옮긴다
-   - 대금결제·재화공급 기록 5년, 소비자 불만·분쟁처리 기록 3년 (전자상거래법 시행령 §6)
+   - 대금결제·재화공급 기록 5년, 소비자 불만·분쟁처리 기록 3년 (전자상거래법 시행령 제6조)
    - `data`에는 보존 목적에 **필요한 최소 항목만** 담는다 (주문번호·금액·일시·연락처 등). 비밀번호·주소 전체는 담지 않는다
 3. `member` 행과 결제수단(환불계좌)을 **실제 삭제**(논리삭제 아님). `orders`·`inquiry`의 `member_id`는 `SET NULL`로 끊어져 개인과 연결되지 않는 통계 데이터가 된다
 4. `destruction_history`에 파기 이력 기록 (개인정보 자체는 미기록)
 5. `retain_until` 경과 시 `retained_member_record`도 파기
 
-> **분리보관의 의미**: 같은 DB의 별도 테이블로 옮기고 접근 권한을 달리 부여하는 것으로 §21③의 "다른 개인정보와 분리하여 저장·관리"를 이행한다. 물리적 DB 분리까지는 규모상 과도하다고 판단했다.
-> **동의 이력**: `member_consent`는 회원 파기 시 같이 삭제한다. 동의 증적의 보관 필요성과 §21① 파기 의무가 충돌하는데, 정보주체가 탈퇴하면 동의 자체가 실효되므로 파기를 우선한다. (동의 기록의 법정 보관기간을 정한 규정은 확인하지 못했다 — 실무에서는 분쟁 대응 목적으로 일정 기간 남기는 경우가 있어, 운영 정책 판단 사항으로 남긴다.)
+> **분리보관의 의미**: 같은 DB의 별도 테이블로 옮기고 접근 권한을 달리 부여하는 것으로 제21조제3항의 "다른 개인정보와 분리하여 저장·관리"를 이행한다. 물리적 DB 분리까지는 규모상 과도하다고 판단했다.
+> **동의 이력**: `member_consent`는 회원 파기 시 같이 삭제한다. 동의 증적의 보관 필요성과 제21조제1항 파기 의무가 충돌하는데, 정보주체가 탈퇴하면 동의 자체가 실효되므로 파기를 우선한다. (동의 기록의 법정 보관기간을 정한 규정은 확인하지 못했다 — 실무에서는 분쟁 대응 목적으로 일정 기간 남기는 경우가 있어, 운영 정책 판단 사항으로 남긴다.)
 
 ---
 
@@ -1116,7 +1117,7 @@ CREATE TABLE destruction_history (
 | LOG-18 취급자 본인 접속기록 | `access_log` — 행위자를 연결된 `handler`로 고정(3-1 "A5의 조회 범위") |
 | LOG-19 Argus 계정 관리 | `argus_user`, **`argus_user_history`**(0020) |
 | LOG-20 보호 대상 등록부 | **`protected_column`·`protected_column_history`·`db_schema_column`·`db_schema_receipt`**(0021, 3-8) |
-| 원장 보호(§8③) | `access_log` UPDATE·DELETE·TRUNCATE 트리거(0002·0017), `inspection_report.summary.integrity` 기준점 |
+| 원장 보호(제8조제3항) | `access_log` UPDATE·DELETE·TRUNCATE 트리거(0002·0017), `inspection_report.summary.integrity` 기준점 |
 | 2단계 DB 직접 접근 | `access_path='DB'` + `context`에 **정규화 SQL·DB 계정·테이블·컬럼·건수·원문 참조·지문·정보주체 미특정·토큰 ID**(API명세서 2-3 — 원문 SQL은 Argus에 저장하지 않음). 실사용자는 `actor_login_id`(토큰 주인 = 플랫폼 아이디). 플랫폼 쪽은 **`db_access_token` 발급 기록**(4절). 탐지는 `detection.access_path`(0012)로 경로별, DB 기본 룰 3개(3-6 시드). 정보주체는 결과의 회원 식별 열에서 추출하고, 회원 열이 없는 조회·결과를 돌려주지 않는 변경은 미특정(3-2). 데이터 유형은 보호 대상 등록부(3-8) 기준이며 `context.registry_version`에 판정 버전이 남는다 |
 
 ---
@@ -1164,7 +1165,7 @@ v0.1 보강 마이그레이션(Argus 0014~0022, 플랫폼 0009)은 각 서비스
 - [x] Argus 비밀번호 해시 → argon2id
 - [x] 알림 테이블 필요 여부 → `notification`은 화면 알림(받는 사람별, 본문 없음, 0015), 웹 푸시는 `push_subscription`·`notification.push_pending`(0016). 이메일 발송 추적은 v0.2
 - [ ] 동의 기록의 탈퇴 후 보관 여부 — 4-1절 각주 (운영 정책 판단)
-- [ ] 필수 수집·이용 동의를 계약 이행 고지(§15①4, §22③)로 바꿀지 검토 — 바꾸면 기존 동의 이력은 증적으로 보존
+- [ ] 필수 수집·이용 동의를 계약 이행 고지(제15조제1항제4호, 제22조제3항)로 바꿀지 검토(v0.1은 필수 동의 유지, 다음 버전에서 검토) — 바꾸면 기존 동의 이력은 증적으로 보존
 - [ ] 파기 배치(v0.2)의 원장 삭제 경로 — 0017 트리거를 지나는 파기 전용 경로와 `destruction_history` 체인 앵커(3-5)
 - [ ] 계정·권한·등록 이력의 TRUNCATE 차단과 보관 기간 파기 (v0.2)
 - [ ] 보호 대상 컬럼 단위 판정, 여러 DB 등록 (v0.2, 3-8)
