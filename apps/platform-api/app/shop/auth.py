@@ -49,8 +49,11 @@ class LoginRequest(BaseModel):
 
 
 def _consent_items(conn) -> list[dict]:
+    """받는 동의 항목 — 받지 않기로 한 항목(active=false, 0010)은 가입 화면·검증에서 빠진다"""
     rows = conn.execute(
-        select(consent_item).order_by(consent_item.c.required.desc(), consent_item.c.code)
+        select(consent_item)
+        .where(consent_item.c.active)
+        .order_by(consent_item.c.required.desc(), consent_item.c.code)
     ).mappings()
     return [dict(r) for r in rows]
 

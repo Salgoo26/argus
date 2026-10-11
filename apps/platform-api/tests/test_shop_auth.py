@@ -7,7 +7,7 @@ import pytest
 from sqlalchemy import func, inspect, select, update
 
 from app.auth.tokens import ADMIN, CUSTOMER, issue_token
-from app.models import member, member_consent, shipping_address
+from app.models import consent_item, member, member_consent, shipping_address
 
 from conftest import (
     CUSTOMER_PASSWORD,
@@ -63,13 +63,13 @@ def test_signup_records_every_consent_with_version_time_and_ip(client, engine):
         "PRIVACY_REQUIRED": True,
         "TOS": True,
     }
-    # 동의 당시 버전 — 개인정보 수집·이용 동의는 가입 항목 변경으로 v2 (0006)
+    # 동의 당시 버전 — 개인정보 수집·이용 동의 v3·이용약관 v2 (0010)
     versions = {r["item_code"]: r["item_version"] for r in rows}
     assert versions == {
         "AGE_OVER_14": "v1",
         "MARKETING": "v1",
-        "PRIVACY_REQUIRED": "v2",
-        "TOS": "v1",
+        "PRIVACY_REQUIRED": "v3",
+        "TOS": "v2",
     }
     assert all(r["acted_at"] for r in rows)
     assert all(str(r["client_ip"]) == TEST_CLIENT_ADDR[0] for r in rows)
@@ -162,9 +162,32 @@ def test_privacy_consent_lists_phone(client):
     """§15②2호 — 동의받을 때 알리는 항목 = 실제 수집 항목. 문안이 바뀌면 버전도 바뀐다"""
     items = {i["code"]: i for i in client.get("/shop/consent-items").json()}
     privacy = items["PRIVACY_REQUIRED"]
-    assert privacy["version"] == "v2"
+    assert privacy["version"] == "v3"
     assert "휴대전화번호" in privacy["items"].split("/")[0]  # 가입 시 필수 항목 쪽
     assert "생년월일" not in privacy["items"] and "성별" not in privacy["items"]
+    # v3 — 처리방침 2절의 주문·문의 항목도 동의받을 때 알린다 (0010)
+    assert "주문 정보" in privacy["items"] and "문의 내용" in privacy["items"]
+
+
+def test_inactive_consent_item_is_not_offered_but_kept(client, engine):
+    """consent_item.active(0010) — 더는 받지 않는 항목은 가입 화면·검증·마이페이지에서 빠지고
+    행과 지난 동의 이력은 남는다. 지금 끈 항목은 없어 테스트에서 마케팅을 꺼 본다"""
+    assert signup(client, email="before@example.com").status_code == 201
+    marketing = consent_item.c.code == "MARKETING"
+    with engine.begin() as conn:
+        conn.execute(update(consent_item).where(marketing).values(active=False))
+    try:
+        assert "MARKETING" not in {i["code"] for i in client.get("/shop/consent-items").json()}
+        assert "MARKETING" not in {c["code"] for c in client.get("/shop/me").json()["consents"]}
+        assert client.put("/shop/me/consents/MARKETING", json={"agreed": True}).status_code == 404
+        res = signup(
+            client, email="after@example.com", consents={**REQUIRED_CONSENTS, "MARKETING": True}
+        )
+        assert res.status_code == 400  # 받지 않는 항목은 모르는 항목
+        assert any(r["item_code"] == "MARKETING" for r in _consents(engine))  # 지난 이력은 그대로
+    finally:  # 항목 정의는 마이그레이션 시드라 테스트 사이에 비워지지 않는다 — 되돌린다
+        with engine.begin() as conn:
+            conn.execute(update(consent_item).where(marketing).values(active=True))
 
 
 def test_phone_is_normalized(client, engine):
