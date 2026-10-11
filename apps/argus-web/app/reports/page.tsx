@@ -7,7 +7,7 @@ import { type FormEvent, useEffect, useState } from "react";
 import { AppHeader, useMe } from "@/components/app-header";
 import { api, type Report, type ReportItem, type ReportScope } from "@/lib/api";
 import { formatDateTime } from "@/lib/labels";
-import { SCOPE_LABELS, thisMonth, periodLabel } from "@/lib/reports";
+import { SCOPE_LABELS, lastMonth, periodLabel } from "@/lib/reports";
 
 // 점검 보고서 (기능 레이어 9) — 담당자 전용. 만들면 Argus 접속기록에 EXPORT로 남는다
 export default function ReportsPage() {
@@ -16,7 +16,7 @@ export default function ReportsPage() {
   const [items, setItems] = useState<ReportItem[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
-  const defaults = thisMonth();
+  const defaults = lastMonth();
 
   useEffect(() => {
     api<{ items: ReportItem[] }>("/reports")
