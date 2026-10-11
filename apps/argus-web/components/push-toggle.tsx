@@ -150,8 +150,7 @@ export function PushToggle() {
       {state === "on" && (
         <>
           <span>
-            웹 푸시 받는 중 — 급한 알림만(상 탐지건·상 소명 요청, 상·중 기한 임박·초과). 로그아웃하면
-            꺼집니다
+            웹 푸시 받는 중 — 급한 알림만 수신(심각도 &quot;상&quot;의 소명요청, 소명 제출 기한 임박 등)
           </span>
           <button className="link-button" onClick={disable} disabled={busy}>
             끄기
@@ -160,7 +159,7 @@ export function PushToggle() {
       )}
       {state === "off" && (
         <>
-          <span className="muted">Argus를 닫아도 급한 알림을 받으려면</span>
+          <span className="muted">Argus 종료 후에도 알림을 수신하려면</span>
           <button className="link-button" onClick={enable} disabled={busy}>
             알림 받기
           </button>

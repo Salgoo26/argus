@@ -89,7 +89,7 @@ export default function AccessLogsPage() {
     <>
       <AppHeader me={me} />
       <main className="container">
-        <h1 className="page-title">{me && !isOfficer ? "내 접속기록" : "접속기록"}</h1>
+        <h1 className="page-title">{me && !isOfficer ? "나의 접속기록" : "접속기록"}</h1>
 
         <section className="card">
           <form className="toolbar" onSubmit={onSearch} onReset={onReset}>

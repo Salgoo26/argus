@@ -91,8 +91,8 @@ export function formatDateTime(iso: string | null): string {
 export type AccessPath = "APP" | "DB";
 
 export const PATH_LABELS: Record<AccessPath, string> = {
-  APP: "화면 경유",
-  DB: "DB 직접",
+  APP: "업무시스템",
+  DB: "DB 직접접근",
 };
 
 export function pathBadgeClass(path: AccessPath): string {
@@ -103,8 +103,9 @@ export function pathBadgeClass(path: AccessPath): string {
 export const EXPLANATION_GUIDE: Record<AccessPath, { write: string[]; review: string[] }> = {
   APP: {
     write: [
-      "어떤 고객·업무를 처리하던 중이었는지",
-      "관련 1:1 문의 티켓이 있으면 티켓 번호(INQ-번호)",
+      "어떤 고객을 대상으로 어떤 업무를 처리했는지",
+      "관련 1:1 문의 티켓이 있으면 티켓 번호(INQ-번호) 작성",
+      "관련 업무 요청 메일, 결재 문서 등이 있다면 근거자료 첨부",
     ],
     review: ["업무 맥락(티켓)과 조회 대상·시점이 맞는가"],
   },

@@ -58,7 +58,6 @@ export function TicketInput({
               value={draft}
               onChange={(e) => setDraft(e.target.value)}
               onKeyDown={onKeyDown}
-              placeholder="INQ-12"
               maxLength={14}
             />
             <button type="button" className="btn btn-secondary btn-small" onClick={add}>
@@ -69,8 +68,7 @@ export function TicketInput({
       </div>
       {problem && <p className="field-error">{problem}</p>}
       <p className="muted hint">
-        이 행위의 근거가 된 플랫폼 1:1 문의 번호(최대 {MAX_TICKETS}개). 담당자가 번호로 플랫폼 문의를
-        열어 확인합니다. 제출하면 바꿀 수 없습니다.
+        처리 행위의 근거가 될 수 있는 플랫폼 1:1 문의 번호를 입력해주세요. (최대 {MAX_TICKETS}개)
       </p>
     </div>
   );

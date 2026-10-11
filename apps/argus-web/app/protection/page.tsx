@@ -314,7 +314,7 @@ export default function ProtectionPage() {
               </div>
             </dl>
             <p className="muted small" style={{ margin: "8px 0 0" }}>
-              화면 경유 접속기록은 각 화면에 지정된 데이터 유형으로 수집됩니다. 이 등록부는 DB 직접 접근 기록에
+              업무시스템 접속기록은 각 화면에 지정된 데이터 유형으로 수집됩니다. 이 등록부는 DB 직접접근 기록에
               쓰입니다.
             </p>
           </section>
@@ -356,7 +356,7 @@ export default function ProtectionPage() {
                   <span className="badge">개인정보 없음</span>
                 )}{" "}
                 <span className="muted small">
-                  최근 30일 DB 직접 접근 {t.db_access_30d}건
+                  최근 30일 DB 직접접근 {t.db_access_30d}건
                   {t.last_db_access_at && ` · 마지막 ${formatDateTime(t.last_db_access_at)}`}
                 </span>
               </h2>

@@ -2,18 +2,14 @@ import type { ReportScope } from "@/lib/api";
 
 export const SCOPE_LABELS: Record<ReportScope, string> = {
   ALL: "전체 (경로별 섹션)",
-  APP: "화면 경유만",
-  DB: "DB 직접만",
+  APP: "업무시스템만",
+  DB: "DB 직접접근만",
 };
 
-// 기본 기간 = 지난달 1일 ~ 말일 (한국 날짜) — 월 1회 이상 점검(§8②)
-export function lastMonth(): { from: string; to: string } {
-  const today = new Date(new Date().toLocaleString("en-US", { timeZone: "Asia/Seoul" }));
-  const first = new Date(today.getFullYear(), today.getMonth() - 1, 1);
-  const last = new Date(today.getFullYear(), today.getMonth(), 0);
-  const ymd = (d: Date) =>
-    `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
-  return { from: ymd(first), to: ymd(last) };
+// 기본 기간 = 이번 달 1일 ~ 오늘 (한국 날짜) — 행위 탐지 화면의 기본 기간과 같은 기준
+export function thisMonth(): { from: string; to: string } {
+  const today = new Date().toLocaleDateString("sv-SE", { timeZone: "Asia/Seoul" }); // YYYY-MM-DD
+  return { from: `${today.slice(0, 8)}01`, to: today };
 }
 
 // 저장은 [시작일 00:00, 종료일 다음날 00:00) — 화면에는 양 끝 포함 날짜로

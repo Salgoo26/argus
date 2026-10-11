@@ -221,8 +221,9 @@ export default function DetectionDetailPage() {
                 {showGuide && guide && (
                   <div className="guide">
                     <strong>
-                      {PATH_LABELS[detail.access_path]}{" "}
-                      {me?.role === "HANDLER" ? "소명에 적을 것" : "검토 기준"}
+                      {me?.role === "HANDLER"
+                        ? "소명 시 다음 내용을 위주로 작성해주세요"
+                        : `${PATH_LABELS[detail.access_path]} 검토 기준`}
                     </strong>
                     <ul>
                       {(me?.role === "HANDLER" ? guide.write : guide.review).map((line) => (
@@ -233,7 +234,7 @@ export default function DetectionDetailPage() {
                 )}
                 {me?.role === "HANDLER" && (
                   // 소명은 자유 입력이라 점검 보고서에 요지가 그대로 실린다 (v0.1 보강 B)
-                  <p className="privacy-note">고객 개인정보는 적지 말고 회원번호·주문번호로 적어 주세요.</p>
+                  <p className="privacy-note">특정 고객의 개인정보 작성은 지양하되, 필요한 경우 내부 회원번호나 주문번호를 작성해주세요.</p>
                 )}
                 <textarea
                   value={text}
