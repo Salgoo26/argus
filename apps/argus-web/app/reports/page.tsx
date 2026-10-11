@@ -49,7 +49,7 @@ export default function ReportsPage() {
     <>
       <AppHeader me={me} />
       <main className="container">
-        <h1 className="page-title">점검 보고서</h1>
+        <h1 className="page-title">보고서 관리</h1>
         {error && <div className="alert-error">{error}</div>}
 
         <section className="card">
@@ -74,7 +74,7 @@ export default function ReportsPage() {
               </select>
             </div>
             <button className="btn btn-primary" type="submit" disabled={pending}>
-              보고서 만들기
+              보고서 생성
             </button>
           </form>
         </section>

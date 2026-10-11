@@ -2,8 +2,8 @@ import type { ReportScope } from "@/lib/api";
 
 export const SCOPE_LABELS: Record<ReportScope, string> = {
   ALL: "전체 (경로별 섹션)",
-  APP: "화면 경유만",
-  DB: "DB 직접만",
+  APP: "업무시스템만",
+  DB: "DB 직접접근만",
 };
 
 // 기본 기간 = 지난달 1일 ~ 말일 (한국 날짜) — 월 1회 이상 점검(§8②)

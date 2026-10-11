@@ -124,6 +124,7 @@ export function AttachmentUploader({
 
   return (
     <div className="uploader">
+      <span className="uploader-label">근거자료 (선택)</span>
       <AttachmentList
         detectionId={detectionId}
         attachments={attachments}
@@ -131,8 +132,8 @@ export function AttachmentUploader({
         onError={onError}
       />
       {attachments.length < MAX_FILES && (
-        <label className="btn btn-secondary">
-          {busy ? "올리는 중…" : "근거자료 첨부"}
+        <label className="btn btn-secondary btn-small">
+          {busy ? "올리는 중…" : "첨부"}
           <input
             type="file"
             accept="image/png,image/jpeg,application/pdf,.png,.jpg,.jpeg,.pdf"
@@ -143,8 +144,8 @@ export function AttachmentUploader({
         </label>
       )}
       <p className="muted hint">
-        결재 문서 PDF, 업무 요청 메일·티켓 캡처 등 (PNG·JPG·PDF, 파일당 5MB, 최대 {MAX_FILES}개).
-        제출하면 바꿀 수 없습니다.
+        결재 문서 PDF, 업무 요청 메일·티켓 캡처 등 관련 자료를 첨부해주세요. (PNG·JPG·PDF, 파일당 5MB,
+        최대 {MAX_FILES}개)
       </p>
     </div>
   );

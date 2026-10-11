@@ -528,7 +528,8 @@ tr.clickable {
   margin-top: 10px;
 }
 
-.ticket-input label {
+.ticket-input label,
+.uploader-label {
   font-size: 12px;
   font-weight: 600;
   color: var(--muted);
@@ -828,4 +829,10 @@ tr.case-handling td {
 /* 소명 제출 뒤에 붙은 하위 기록 (v0.1 보강 J-1) */
 tr.after-submission td {
   background: var(--warn-soft);
+}
+
+/* 근거자료 첨부 — 관련 업무 티켓과 같은 구조(라벨 → 목록·첨부 버튼 → 안내) */
+.uploader-label {
+  display: block;
+  margin-bottom: 6px;
 }

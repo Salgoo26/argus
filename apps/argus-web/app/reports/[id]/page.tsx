@@ -274,7 +274,7 @@ export default function ReportPage() {
             {summary.integrity.previous?.status === "MISMATCH" && (
               <div className="alert-error">
                 직전 보고서 #{summary.integrity.previous.report_id}의 마지막 기록 #
-                {summary.integrity.previous.last_id}이(가) 원장에 없거나 바뀌었습니다. 접속기록 삭제·변조
+                {summary.integrity.previous.last_id}이(가) 접속기록에 없거나 바뀌었습니다. 접속기록 삭제·변조
                 여부를 확인하세요.
               </div>
             )}
@@ -298,26 +298,26 @@ export default function ReportPage() {
               </div>
             </dl>
             <p className="muted report-note">
-              정보주체는 마스킹 표시이며, 수치는 보고서를 만든 시점 기준입니다.
+              정보주체의 개인정보는 마스킹하여 표시합니다.
             </p>
 
             <section className="card">
               <h2 className="card-title">점검 수행 확인</h2>
               <dl className="summary-grid">
                 <div>
-                  <dt>접속기록 무결성 (해시체인)</dt>
+                  <dt>접속기록 무결성</dt>
                   <dd>
                     {summary.integrity.ok ? (
                       <span className="badge badge-accent">정상</span>
                     ) : (
                       <span className="badge badge-danger">이상 — 기록 #{summary.integrity.broken_at}</span>
                     )}{" "}
-                    <span className="muted">원장 {summary.integrity.checked}건 재계산</span>
+                    <span className="muted">기록 원본 {summary.integrity.checked}건 재점검</span>
                   </dd>
                 </div>
                 {summary.integrity.last_id !== undefined && (
                   <div>
-                    <dt>원장 기준점 (보고서 생성 시점)</dt>
+                    <dt>접속기록 기준점 (보고서 생성 시점)</dt>
                     <dd>
                       전체 {summary.integrity.total}건 · 마지막 기록 #{summary.integrity.last_id ?? "-"}
                       {summary.integrity.last_hash && (

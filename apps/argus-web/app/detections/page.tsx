@@ -97,7 +97,7 @@ export default function DetectionsPage() {
     <>
       <AppHeader me={me} />
       <main className="container">
-        <h1 className="page-title">{isOfficer ? "탐지 목록" : "내 소명 요청"}</h1>
+        <h1 className="page-title">{isOfficer ? "탐지 목록" : "나의 소명 관리"}</h1>
 
         {error && <div className="alert-error">{error}</div>}
 
@@ -128,7 +128,7 @@ export default function DetectionsPage() {
                   </div>
                   <div className="field">
                     <label htmlFor="actor">취급자(아이디)</label>
-                    <input id="actor" name="actor" placeholder="ops_park" maxLength={64} size={12} autoComplete="off" />
+                    <input id="actor" name="actor" maxLength={64} size={12} autoComplete="off" />
                   </div>
                 </>
               )}
@@ -162,7 +162,7 @@ export default function DetectionsPage() {
               </button>
             </form>
             <p className="muted" style={{ margin: "12px 0 0", fontSize: 12 }}>
-              기간은 탐지 날짜 기준입니다.{isOfficer ? " 기본은 이번 달입니다." : " 비우면 전체 기간입니다."}
+              기간은 탐지 날짜 기준입니다.{isOfficer ? "" : " 비우면 전체 기간입니다."}
             </p>
           </section>
         )}

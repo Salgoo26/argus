@@ -49,8 +49,8 @@ const MENUS = {
     // { href: "/users", label: "계정" },
   ],
   HANDLER: [
-    { href: "/detections", label: "내 소명 요청" },
-    { href: "/access-logs", label: "내 접속기록" },
+    { href: "/detections", label: "소명 관리" },
+    { href: "/access-logs", label: "접속기록" },
   ],
 } as const;
 
