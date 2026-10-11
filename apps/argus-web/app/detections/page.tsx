@@ -97,7 +97,7 @@ export default function DetectionsPage() {
     <>
       <AppHeader me={me} />
       <main className="container">
-        <h1 className="page-title">{isOfficer ? "탐지건" : "나의 소명 관리"}</h1>
+        <h1 className="page-title">{isOfficer ? "탐지 목록" : "나의 소명 관리"}</h1>
 
         {error && <div className="alert-error">{error}</div>}
 
