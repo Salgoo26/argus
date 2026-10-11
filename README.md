@@ -107,7 +107,10 @@ flowchart LR
 | DB 게이트웨이 | 개인정보취급자 | DB 툴 접속을 중계하며 공용 DB 계정 뒤의 실제 사용자 기준으로 접속기록을 남깁니다(② DB 직접접근 경로). 관리자 화면에서 발급한 1시간 접속 토큰으로만 접속합니다 |
 | ARGUS | 담당자·취급자 | 두 경로의 접속기록을 수집·보관하고, 이상 행위를 탐지해 취급자에게 소명을 요청하며, 점검 보고서를 만듭니다 |
 
-### 아키텍처
+### 시스템 아키텍처
+
+<details>
+<summary><b>시스템 아키텍처 이미지 보기</b></summary>
 
 ```mermaid
 flowchart TB
@@ -142,6 +145,8 @@ flowchart TB
     AA -.->|"보호 대상 등록부"| GW
 ```
 
+</details>
+
 | 구성요소 | 기술 | 역할 |
 |---|---|---|
 | platform-web | Next.js 16 · React 19 · TypeScript | 쇼핑몰(`/`)과 관리자 화면(`/admin`) |
@@ -159,6 +164,21 @@ flowchart TB
 ### 데이터 모델
 
 Argus의 핵심 테이블입니다. 이력 테이블(룰 변경·상태 변경·계정 변경)과 알림·설정 테이블은 생략했습니다.
+
+| 테이블 | 설명 |
+|---|---|
+| access_log | 두 경로의 접속기록 원본. 추가만 가능하고 해시체인으로 위·변조를 확인합니다. 정보주체는 회원번호로만 남깁니다 |
+| handler | 플랫폼에서 받은 개인정보취급자 명부(재직·퇴직) |
+| argus_user | ARGUS 로그인 계정. 담당자(OFFICER)와 취급자(HANDLER) |
+| detection_rule | 탐지 룰. 조건식·심각도·적용 경로 |
+| detection | 탐지건. 탐지 당시 룰의 스냅샷과 처리 상태 |
+| detection_log | 탐지건과 근거가 된 접속기록의 연결 |
+| explanation | 소명. 차수별 내용·관련 업무 티켓·검토 결과·기한 |
+| explanation_attachment | 소명 근거 첨부 파일(SHA-256으로 변조 확인) |
+| inspection_report | 점검 보고서. 생성 시점의 스냅샷 |
+
+<details>
+<summary><b>ARGUS DB ERD 보기</b></summary>
 
 ```mermaid
 erDiagram
@@ -242,12 +262,10 @@ erDiagram
     }
 ```
 
-- **access_log**는 추가만 가능합니다. UPDATE·DELETE·TRUNCATE를 트리거로 거부하고, 각 기록이 앞 기록의 해시를 이어받아 위·변조를 확인합니다. 정보주체는 회원번호로만 남기고 이름·연락처 같은 원본 개인정보는 넣지 않습니다
-- **detection**은 탐지 당시의 룰을 스냅샷으로 저장합니다. 룰을 나중에 고쳐도 그때 어떤 기준으로 탐지했는지 남습니다
-- **explanation**은 탐지건과 차수(round)로 구분합니다. 반려 뒤 재요청하면 새 차수로 쌓여 이전 소명이 덮이지 않습니다
+</details>
 
 <details>
-<summary><b>플랫폼 DB (감시 대상)</b></summary>
+<summary><b>플랫폼 DB(감시 대상) ERD 보기</b></summary>
 
 ```mermaid
 erDiagram
