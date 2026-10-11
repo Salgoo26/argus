@@ -76,9 +76,6 @@ export function AppHeader({ me }: { me: Me | null }) {
       <Link href="/detections" className="brand" style={{ color: "inherit", textDecoration: "none" }}>
         <Image src="/argus-icon-small.svg" alt="" width={22} height={22} />
         <Image src="/argus-wordmark.svg" alt="ARGUS" width={95} height={14} />
-        <span className="muted" style={{ fontWeight: 400 }}>
-          접속기록 점검
-        </span>
       </Link>
       {me && (
         <nav className="header-nav">
