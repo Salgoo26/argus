@@ -55,13 +55,6 @@ body {
   font-size: 15px;
 }
 
-.brand-mark {
-  width: 10px;
-  height: 10px;
-  border-radius: 50%;
-  background: var(--accent);
-}
-
 .header-nav {
   display: flex;
   gap: 4px;

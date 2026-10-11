@@ -1,5 +1,6 @@
 "use client";
 
+import Image from "next/image";
 import { useRouter } from "next/navigation";
 import { type FormEvent, useState } from "react";
 
@@ -33,8 +34,7 @@ export default function LoginPage() {
     <main className="login-page">
       <div className="card login-card">
         <div className="brand" style={{ marginBottom: 4 }}>
-          <span className="brand-mark" />
-          Argus
+          <Image src="/argus-logo.svg" alt="ARGUS" width={205} height={48} priority />
         </div>
         <p className="page-subtitle">개인정보 접속기록을 관리하기 위한 시스템입니다.</p>
         {error && <div className="alert-error">{error}</div>}
