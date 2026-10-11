@@ -74,8 +74,8 @@ export function AppHeader({ me }: { me: Me | null }) {
   return (
     <header className="app-header">
       <Link href="/detections" className="brand" style={{ color: "inherit", textDecoration: "none" }}>
-        <Image src="/argus-icon-small.svg" alt="" width={22} height={22} />
-        <Image src="/argus-wordmark.svg" alt="ARGUS" width={95} height={14} />
+        <Image src="/argus-icon.svg" alt="" width={32} height={32} />
+        <Image src="/argus-wordmark.svg" alt="ARGUS" width={116} height={17} />
       </Link>
       {me && (
         <nav className="header-nav">
