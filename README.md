@@ -85,7 +85,7 @@
 
 ### 왜 자동화했나
 
-「개인정보의 안전성 확보조치 기준」(2026.7.1 시행) §8②는 접속기록을 확인·점검하는 주기·방법·사후조치 절차를 내부 관리계획으로 정해 이행하도록 할 뿐, 점검 방식을 정하지 않습니다. 접속기록을 자동화된 방식으로 분석해 이상 행위를 탐지하고 소명을 요청하는 조치는 공공시스템 운영기관에만 의무입니다(§17). 민간 기업은 수기 점검만으로도 법적 의무를 다할 수 있습니다.
+「개인정보의 안전성 확보조치 기준」(2026.7.1 시행) 제8조제2항은 접속기록을 확인·점검하는 주기·방법·사후조치 절차를 내부 관리계획으로 정해 이행하도록 할 뿐, 점검 방식을 정하지 않습니다. 접속기록을 자동화된 방식으로 분석해 이상 행위를 탐지하고 소명을 요청하는 조치는 공공시스템 운영기관에만 의무입니다(제17조). 민간 기업은 수기 점검만으로도 법적 의무를 다할 수 있습니다.
 
 그럼에도 자동화를 적용한 것은, 위의 문제들이 법적 의무를 지키는 것만으로는 해결되지 않았기 때문입니다. 월 단위 수기 점검은 적법하지만 행위와 소명 사이에 몇 주의 시차가 생겨 소명의 정확도가 떨어지고, 점검자가 기준을 하나하나 대조하는 과정에서 누락이 생길 수 있습니다. 자동 탐지는 행위 직후 소명을 받아 취급자의 부담을 줄이고, 같은 기준을 빠짐없이 적용해 점검의 사각지대를 줄입니다. ARGUS의 자동화는 의무 이행 자체보다 점검이 실제로 효과를 내도록 하는 데 목적이 있습니다.
 
@@ -467,15 +467,15 @@ ARGUS의 주요 기능 목록입니다. 실제 시연 화면은 아래 [구현 �
 
 | 근거 | 요구 | 구현 | 확인 |
 |---|---|---|---|
-| 고시 §2 3호 | 접속기록 항목: 계정, 일시, 접속지, 처리한 정보주체, 수행업무 | 업무시스템·DB 직접접근 모두 다섯 항목 기록. DB 직접접근은 결과에서 회원번호를 읽는다 | [test_agent.py](apps/platform-api/tests/test_agent.py), [test_db_gateway.py](e2e/test_db_gateway.py) |
-| 고시 §8① | 1년 이상 보관, 5만 명 이상·고유식별·민감정보 처리 등은 2년 | 기록 원본은 삭제할 수 없게 막는다. 등록부에 고유식별·민감정보가 있으면 2년 보관 대상으로 판정 | [test_append_only.py](apps/argus-api/tests/test_append_only.py), [test_protection.py](apps/argus-api/tests/test_protection.py) |
-| 고시 §8② | 접속기록·다운로드 점검의 주기·방법·사후조치를 내부 관리계획으로 정하고 이행 | 5분 주기 자동 탐지, 다운로드 룰, 소명·판정, 점검 보고서 | [test_scenario.py](e2e/test_scenario.py), [test_report.py](e2e/test_report.py) |
-| 고시 §8③ | 위·변조·도난·분실 방지 | 추가만 가능한 기록 원본(UPDATE·DELETE·TRUNCATE 거부), 해시체인, 보고서에 기준점 저장 후 다음 보고서에서 대조, 기록하지 못하면 응답 차단 | [test_reports_api.py](apps/argus-api/tests/test_reports_api.py), [test_self_access_log.py](apps/argus-api/tests/test_self_access_log.py) |
-| 고시 §5③ | 권한 부여·변경·말소 내역 3년 보관 | 플랫폼·Argus 계정 이력(추가만 가능, 사유 필수) | [test_accounts.py](apps/platform-api/tests/test_accounts.py), [test_users_api.py](apps/argus-api/tests/test_users_api.py) |
-| 고시 §5①, §6① | 업무에 필요한 최소 권한, 비정상 접근 탐지 | 역할별 접근 범위(거부도 기록), 접속지 기반 룰 | [test_roles.py](apps/platform-api/tests/test_roles.py), [test_ip_subject_rules.py](apps/argus-api/tests/test_ip_subject_rules.py) |
+| 고시 제2조제3호 | 접속기록 항목: 계정, 일시, 접속지, 처리한 정보주체, 수행업무 | 업무시스템·DB 직접접근 모두 다섯 항목 기록. DB 직접접근은 결과에서 회원번호를 읽는다 | [test_agent.py](apps/platform-api/tests/test_agent.py), [test_db_gateway.py](e2e/test_db_gateway.py) |
+| 고시 제8조제1항 | 1년 이상 보관, 5만 명 이상·고유식별·민감정보 처리 등은 2년 | 기록 원본은 삭제할 수 없게 막는다. 등록부에 고유식별·민감정보가 있으면 2년 보관 대상으로 판정 | [test_append_only.py](apps/argus-api/tests/test_append_only.py), [test_protection.py](apps/argus-api/tests/test_protection.py) |
+| 고시 제8조제2항 | 접속기록·다운로드 점검의 주기·방법·사후조치를 내부 관리계획으로 정하고 이행 | 5분 주기 자동 탐지, 다운로드 룰, 소명·판정, 점검 보고서 | [test_scenario.py](e2e/test_scenario.py), [test_report.py](e2e/test_report.py) |
+| 고시 제8조제3항 | 위·변조·도난·분실 방지 | 추가만 가능한 기록 원본(UPDATE·DELETE·TRUNCATE 거부), 해시체인, 보고서에 기준점 저장 후 다음 보고서에서 대조, 기록하지 못하면 응답 차단 | [test_reports_api.py](apps/argus-api/tests/test_reports_api.py), [test_self_access_log.py](apps/argus-api/tests/test_self_access_log.py) |
+| 고시 제5조제3항 | 권한 부여·변경·말소 내역 3년 보관 | 플랫폼·Argus 계정 이력(추가만 가능, 사유 필수) | [test_accounts.py](apps/platform-api/tests/test_accounts.py), [test_users_api.py](apps/argus-api/tests/test_users_api.py) |
+| 고시 제5조제1항, 제6조제1항 | 업무에 필요한 최소 권한, 비정상 접근 탐지 | 역할별 접근 범위(거부도 기록), 접속지 기반 룰 | [test_roles.py](apps/platform-api/tests/test_roles.py), [test_ip_subject_rules.py](apps/argus-api/tests/test_ip_subject_rules.py) |
 | 안내서 FAQ 147 | 로그인·로그아웃·로그인 실패 기록 | 세 가지 모두 기록(존재하지 않는 아이디의 실패는 6절) | [test_v01_reinforcement.py](e2e/test_v01_reinforcement.py) |
 | 안내서 94쪽 | 점검의 객관성 | 담당자 본인이 행위자인 탐지건은 처리할 수 없다 | [test_self_review.py](apps/argus-api/tests/test_self_review.py) |
-| 고시 §17 (참고) | 공공시스템: 자동 분석·탐지, 사유 소명, 기능 추가 시 기록 누락 방지 | 자동 탐지·소명. 기록 표시가 없는 관리자 화면이 있으면 서버가 기동하지 않는다 | [test_agent.py](apps/platform-api/tests/test_agent.py) |
+| 고시 제17조 (참고) | 공공시스템: 자동 분석·탐지, 사유 소명, 기능 추가 시 기록 누락 방지 | 자동 탐지·소명. 기록 표시가 없는 관리자 화면이 있으면 서버가 기동하지 않는다 | [test_agent.py](apps/platform-api/tests/test_agent.py) |
 
 <br>
 
@@ -532,7 +532,7 @@ ARGUS의 주요 기능 목록입니다. 실제 시연 화면은 아래 [구현 �
 > [!WARNING]
 > **문제 상황**
 >
-> 접속기록은 점검의 근거입니다. 감시받는 쪽이나 관리자가 기록을 고치거나 지울 수 있다면, 기록이 남아 있어도 믿을 수 없습니다(고시 §8③).
+> 접속기록은 점검의 근거입니다. 감시받는 쪽이나 관리자가 기록을 고치거나 지울 수 있다면, 기록이 남아 있어도 믿을 수 없습니다(고시 제8조제3항).
 
 > [!TIP]
 > **해결 과정**
@@ -573,8 +573,8 @@ ARGUS의 주요 기능 목록입니다. 실제 시연 화면은 아래 [구현 �
 > [!TIP]
 > **해결 과정**
 >
-> - 기능 개발을 멈춘 뒤 고시 §8·§5와 안내서를 기준으로 근거 조항과 확인 방법을 적은 점검표를 먼저 만들고, 실제 동작을 측정해 판정했습니다.
-> - 판정 중 안내서 128~130쪽이 공공시스템(§17) 해설임을 확인해, 그 항목들은 의무가 아니라 "공공 기준 참고"로 다시 분류했습니다.
+> - 기능 개발을 멈춘 뒤 고시 제8조·제5조와 안내서를 기준으로 근거 조항과 확인 방법을 적은 점검표를 먼저 만들고, 실제 동작을 측정해 판정했습니다.
+> - 판정 중 안내서 128~130쪽이 공공시스템(제17조) 해설임을 확인해, 그 항목들은 의무가 아니라 "공공 기준 참고"로 다시 분류했습니다.
 > - 미충족 항목을 보완한 뒤, 조치를 반영한 빈 환경에서 실제 화면과 수집 API로 다시 재현해 측정했습니다.
 
 | 영역 | 첫 판정 | 조치 후 재측정 | 조치 |
