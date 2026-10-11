@@ -626,8 +626,3 @@ bash scripts/e2e.sh               # 전체 시나리오 자동 검증
 | 설계 | [API 명세서](docs/api-spec.md) | 시스템 간 API(수집·동기화·게이트웨이)와 화면 API |
 | 설계 | [DB 스키마](docs/db-schema.md) | 두 DB의 테이블, 룰 조건식, 탐지 배치 흐름 |
 | 개인정보 문서 | [개인정보 처리방침](apps/platform-web/app/%28shop%29/privacy/page.tsx) | 감시 대상 쇼핑몰의 처리방침(v3). 수집 항목·보유 기간·위탁을 실제 저장 구조와 일치시킴 |
-| 개인정보 문서 | [이용약관](apps/platform-web/app/%28shop%29/terms/page.tsx) | 감시 대상 쇼핑몰의 이용약관(v2) |
-| 구현·검증 | [구현 지침](CLAUDE.md) | 보안·개인정보 절대 규칙, 구현 단계와 완료 기준 |
-| 구현·검증 | [실행 안내](docs/run.md) | 로컬 실행, 시연 순서, DB 툴 접속, 해시체인 검증 |
-| 구현·검증 | [E2E 시나리오](e2e) | 탐지 → 소명 → 승인 전체 흐름 등 자동 검증 26개 |
-| 구현·검증 | [CI](.github/workflows/ci.yml) | PR마다 테스트·린트·E2E·보안 검사 |
