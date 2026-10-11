@@ -425,17 +425,9 @@ ARGUS의 주요 기능 목록입니다. 실제 시연 화면은 아래 [구현 �
 <details>
 <summary><b>DB 직접접근</b></summary>
 <br>
-<img src="docs/images/05-db-access.gif" alt="플랫폼 관리자 화면에서 DB 접속 토큰을 발급받아 DB 툴로 게이트웨이에 접속하고 회원 테이블을 조회" width="100%">
-<br><br>
 <p align="center">
-<img src="docs/images/06-db-access-log.png" alt="Argus 접속기록에서 DB 직접접근 기록이 검색값을 $1로 바꾼 SQL, 테이블, 마스킹된 정보주체, 처리 건수, 연결된 탐지건과 함께 업무시스템 기록 옆에 표시" width="100%">
-<br>
-<sub>
-플랫폼 백오피스에서 DB 직접 접근을 위한 토큰을 발급받은 후 DB에 접속하여 쿼리 실행을 통해 회원정보 조회
-</sub>
-<sub>
-DB에 직접 접근하여 처리한 업무 내역이 ARGUS에 기록됨. SQL의 파라미터 값은 <code>$1</code>로 바뀌어 저장되고, 정보주체에 대한 식별값은 쿼리 실행 결과에서 회원정보를 가져와 기록함.
-</sub>
+<img src="docs/images/05-db-access.gif" alt="플랫폼 관리자 화면에서 DB 접속 토큰을 발급받아 DB 툴로 게이트웨이에 접속해 회원 정보를 조회하고, ARGUS 접속기록에서 DB 직접접근 기록(검색값을 $1로 바꾼 SQL, 테이블, 처리 건수, 마스킹된 정보주체)을 확인" width="100%">
+<sub>플랫폼 백오피스에서 DB 직접 접근을 위한 토큰을 발급받은 후 DB에 접속하여 쿼리 실행을 통해 회원정보를 조회함. 이 처리 내역이 ARGUS 접속기록에 남으며, SQL의 파라미터 값은 <code>$1</code>로 바뀌어 저장되고 정보주체는 쿼리 실행 결과에서 읽은 회원번호로 기록됨</sub>
 </p>
 </details>
 
