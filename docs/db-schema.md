@@ -895,7 +895,8 @@ CREATE TABLE consent_item (
     purpose         text         NOT NULL,      -- 수집·이용 목적 (§15②1호)
     items           text         NOT NULL,      -- 수집 항목 (§15②2호)
     retention       text         NOT NULL,      -- 보유·이용 기간 (§15②3호)
-    effective_from  timestamptz  NOT NULL
+    effective_from  timestamptz  NOT NULL,
+    active          boolean      NOT NULL DEFAULT true  -- false면 가입·마이페이지에서 받지 않음. 행과 지난 동의 이력은 증적으로 남김(0010)
 );
 
 -- 동의·철회 이력 (append) — PLT-01
@@ -903,7 +904,7 @@ CREATE TABLE member_consent (
     id            bigserial   PRIMARY KEY,
     member_id     bigint      NOT NULL REFERENCES member(id),
     item_code     varchar(32) NOT NULL REFERENCES consent_item(code),
-    item_version  varchar(16) NOT NULL,          -- 동의 당시 약관 버전. 문안이 바뀌면 고쳐 쓰지 않고 버전을 올린다(예: 수집·이용 동의 v2 — 휴대폰·배송지 추가)
+    item_version  varchar(16) NOT NULL,          -- 동의 당시 약관 버전. 문안이 바뀌면 고쳐 쓰지 않고 버전을 올린다(예: 수집·이용 동의 v2 — 휴대폰·배송지 추가, v3 — 주문 정보·문의 내용 추가 / 이용약관 v2, 0010)
     agreed        boolean     NOT NULL,          -- true=동의, false=미동의/철회
     acted_at      timestamptz NOT NULL DEFAULT now(),
     client_ip     inet,                          -- 동의 증적의 신뢰성 확보용
@@ -1164,7 +1165,7 @@ v0.1 보강 마이그레이션(Argus 0014~0022, 플랫폼 0009)은 각 서비스
 - [x] Argus 비밀번호 해시 → argon2id
 - [x] 알림 테이블 필요 여부 → `notification`은 화면 알림(받는 사람별, 본문 없음, 0015), 웹 푸시는 `push_subscription`·`notification.push_pending`(0016). 이메일 발송 추적은 v0.2
 - [ ] 동의 기록의 탈퇴 후 보관 여부 — 4-1절 각주 (운영 정책 판단)
-- [ ] 필수 수집·이용 동의를 계약 이행 고지(§15①4, §22③)로 바꿀지 검토 — 바꾸면 기존 동의 이력은 증적으로 보존
+- [ ] 필수 수집·이용 동의를 계약 이행 고지(§15①4, §22③)로 바꿀지 검토(v0.1은 필수 동의 유지, 다음 버전에서 검토) — 바꾸면 기존 동의 이력은 증적으로 보존
 - [ ] 파기 배치(v0.2)의 원장 삭제 경로 — 0017 트리거를 지나는 파기 전용 경로와 `destruction_history` 체인 앵커(3-5)
 - [ ] 계정·권한·등록 이력의 TRUNCATE 차단과 보관 기간 파기 (v0.2)
 - [ ] 보호 대상 컬럼 단위 판정, 여러 DB 등록 (v0.2, 3-8)
