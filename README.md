@@ -372,31 +372,31 @@ ARGUS의 주요 기능 목록입니다. 실제 시연 화면은 아래 [구현 �
 
 ### 구현 화면
 
-<details>
+<details open>
 <summary><b>대량 다운로드 탐지 → 알림 → 탐지 상세</b> — 회원 목록 CSV 다운로드가 탐지되어 담당자에게 알림, 정보주체 마스킹·하위 접속기록·자동 소명 요청 확인</summary>
 <br>
 <img src="docs/images/01-detection.gif" alt="취급자가 회원 목록을 CSV로 내려받자 Argus가 대량 다운로드를 탐지하고 담당자에게 알림, 탐지 상세에서 마스킹된 정보주체와 하위 접속기록을 확인" width="100%">
 </details>
 
-<details>
+<details open>
 <summary><b>소명 작성 → 담당자 승인</b> — 취급자가 업무 티켓을 붙여 소명하고, 담당자가 확인 후 승인</summary>
 <br>
 <img src="docs/images/02-explanation.gif" alt="취급자가 소명 관리에서 소명 내용과 관련 1:1 문의 티켓을 입력해 제출하고, 담당자가 탐지 상세에서 사유를 확인해 승인" width="100%">
 </details>
 
-<details>
+<details open>
 <summary><b>점검 보고서</b> — 기간·경로별 보고서 생성, 무결성 점검 결과와 탐지건별 소명 요지</summary>
 <br>
 <img src="docs/images/03-report.gif" alt="보고서 관리에서 기간을 정해 보고서를 생성하고, 접속기록 무결성·기준점 대조·경로별 집계·탐지건별 소명과 검토 의견을 확인한 뒤 PDF로 저장" width="100%">
 </details>
 
-<details>
+<details open>
 <summary><b>탐지 룰 만들기</b> — 담당자가 화면에서 조건·임계치·심각도를 정해 새 룰 추가</summary>
 <br>
 <img src="docs/images/04-rules.gif" alt="룰 설정에서 DB 직접접근 야간 대량접근 룰을 만들고 수행업무·시간대·처리 건수 조건을 지정" width="100%">
 </details>
 
-<details>
+<details open>
 <summary><b>DB 직접접근</b> — 1시간 접속 토큰으로 DB 툴에 접속하고, 조회 내역이 Argus에 기록</summary>
 <br>
 <img src="docs/images/05-db-access.gif" alt="플랫폼 관리자 화면에서 DB 접속 토큰을 발급받아 DB 툴로 게이트웨이에 접속하고 회원 테이블을 조회" width="100%">
