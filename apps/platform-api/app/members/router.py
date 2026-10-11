@@ -102,7 +102,10 @@ def search_members(body: MemberSearch, request: Request, _operator: MembersOpera
         conditions.append(m.status == body.status)
 
     with request.app.state.engine.connect() as conn:
-        total = conn.execute(select(func.count()).where(*conditions)).scalar_one()
+        # FROM을 명시한다 — 조건이 없으면 테이블 없는 count(*)가 되어 늘 1이 나온다
+        total = conn.execute(
+            select(func.count()).select_from(member).where(*conditions)
+        ).scalar_one()
         rows = conn.execute(
             select(m.id, m.name, m.email, m.phone, m.status, m.created_at)
             .where(*conditions)
