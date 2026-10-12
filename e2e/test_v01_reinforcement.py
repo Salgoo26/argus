@@ -8,7 +8,9 @@ import re
 
 import psycopg
 
-from conftest import argus_login, platform_login, wait_until
+from test_scenario import download_members, wait_for_detection
+
+from conftest import argus_login, create_operator, platform_login, wait_until
 
 MASKED = re.compile(r"^member_\d{2}\*\*\*$")
 
@@ -148,7 +150,13 @@ def test_notifications_reach_officer_and_handler(officer, handler_password):
         assert not re.search(r'"1\d{4}"|member_1', response.text)
 
     # 탐지건 목록에 소명 기한이 보인다(제출 대기 건)
-    cases = handler.post("/api/detections/search", json={"status": "REQUESTED"}).json()["items"]
+    # ops_park의 대량 다운로드 건은 앞 시나리오에서 승인(종결)됐다. 남는 REQUESTED 건은
+    # 야간·주말 룰에 걸린 것뿐이라 평일 낮에는 없다 — 이 테스트만 쓰는 계정으로 새로 만든다
+    password = create_operator("ops_seo", "서가상", "OPS", "OPS")
+    download_members("ops_seo", 60, password)
+    wait_for_detection(argus_login(*officer), "ops_seo", 60)
+    waiting = argus_login("ops_seo", handler_password("ops_seo"))
+    cases = waiting.post("/api/detections/search", json={"status": "REQUESTED"}).json()["items"]
     assert cases and all(c["due_at"] for c in cases)
 
 
