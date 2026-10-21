@@ -49,6 +49,16 @@ class Settings(BaseSettings):
     argus_ingest_url: str = "http://argus-api:8000"
     argus_ingest_secret: SecretStr | None = None
 
+    # 가상 PG (커머스 확장 F6) — platform-api에만. 결제창 주소는 브라우저가 여는 주소(호스트 포트)
+    pg_api_url: str = "http://mock-pg:8000"
+    pg_checkout_url: str = "http://localhost:18090/checkout"
+    pg_client_key: str | None = None
+    pg_secret_key: SecretStr | None = None
+    # 가상 택배 — 접수·조회 API 키, 상태 통지 서명 검증 키 (택배 서비스와 같은 값)
+    courier_api_url: str = "http://mock-courier:8000"
+    courier_api_key: SecretStr | None = None
+    courier_webhook_secret: SecretStr | None = None
+
     def database_url(self) -> URL:
         return URL.create(
             "postgresql+psycopg",
@@ -97,3 +107,29 @@ class Settings(BaseSettings):
         if not secret:
             raise ValueError("PLATFORM_ARGUS_INGEST_SECRET is required")
         return self.argus_ingest_url.rstrip("/"), secret.encode()
+
+    def require_partners(self) -> dict:
+        """가상 PG·택배 연동 설정 — 없으면 기동 거부 (결제·배송이 조용히 실패하지 않게)"""
+        for name in ("pg_api_url", "pg_checkout_url", "courier_api_url"):
+            if not getattr(self, name).startswith(("http://", "https://")):
+                raise ValueError(f"PLATFORM_{name.upper()} must be an http(s) URL")
+        values = {
+            "pg_client_key": self.pg_client_key or "",
+            "pg_secret_key": self.pg_secret_key.get_secret_value() if self.pg_secret_key else "",
+            "courier_api_key": (
+                self.courier_api_key.get_secret_value() if self.courier_api_key else ""
+            ),
+            "courier_webhook_secret": (
+                self.courier_webhook_secret.get_secret_value()
+                if self.courier_webhook_secret
+                else ""
+            ),
+        }
+        for name, value in values.items():
+            if name != "pg_client_key" and len(value) < MIN_SECRET_LENGTH:
+                raise ValueError(
+                    f"PLATFORM_{name.upper()} must be at least {MIN_SECRET_LENGTH} chars"
+                )
+            if not value:
+                raise ValueError(f"PLATFORM_{name.upper()} is required")
+        return values

@@ -3,6 +3,8 @@
 목록에는 결제수단 정보가 카드사 이름뿐이다(카드번호는 저장하지 않음) → 데이터 유형 ORDER.
 상세에는 배송 정보(주문 시점 스냅샷)가 더해진다 — 역시 주문 조회 ORDER (db-schema 4절 플랫폼 보강).
 커머스 확장(0011): 상세에 배송 진행(가상 택배사·송장번호)·취소/반품 기록·상태 이력이 더해진다.
+가상 PG·택배 연동(0013): 상세에 PG 승인 결과(마스킹 카드번호·승인번호·할부·영수증 주소)·배송 메모·
+택배 접수 번호·택배사 상태·반품 회수 상태가 더해진다. 카드번호 전체는 플랫폼에 없다.
 처리한 정보주체 = 화면에 표시된 주문의 회원(탈퇴로 끊긴 주문은 정보주체 없음).
 """
 
@@ -73,7 +75,7 @@ def list_orders(
 class OrderSearch(SearchPage):
     order_id: Annotated[int, Field(ge=1)] | None = None
     member_id: Annotated[int, Field(ge=1)] | None = None
-    status: Literal[STATUSES] | None = None  # type: ignore[valid-type]  # 0011 배송·취소 상태
+    status: Literal[STATUSES] | None = None  # type: ignore[valid-type]  # 0011·0013 상태
     ordered_from: date | None = None  # 한국 날짜, 양 끝 포함
     ordered_to: date | None = None
 
@@ -139,8 +141,16 @@ def get_order(order_id: int, request: Request, _operator: OrdersOperator) -> dic
                     orders.c.tracking_no,
                     orders.c.shipped_at,
                     orders.c.delivered_at,
+                    orders.c.delivery_memo,
+                    orders.c.courier_shipment_id,
+                    orders.c.courier_status,
+                    orders.c.courier_synced_at,
                     payment.c.method,
                     payment.c.card_company,
+                    payment.c.card_number_masked,
+                    payment.c.installment_months,
+                    payment.c.approve_no,
+                    payment.c.receipt_url,
                     payment.c.pg_tid,
                     payment.c.approved_at,
                 )

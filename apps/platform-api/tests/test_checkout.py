@@ -1,6 +1,6 @@
 """결제·주문 보강 (기능 레이어 7-4 ③) — 배송지 선택·스냅샷, 카드번호 미수신, 관리자 주문 상세
 
-카드번호는 가상 PG 결제창(브라우저)에서 입력만 받고 platform-api로 보내지 않는다.
+카드번호는 가상 PG 결제창(별도 서비스, 작은 창)에서만 입력하고 platform-api로 오지 않는다(F6).
 화면이 잘못 보내더라도 서버의 응답·로그·DB·Argus 전송(outbox) 어디에도 남지 않아야 한다.
 """
 
@@ -41,10 +41,23 @@ def _add_address(client, **overrides) -> int:
 
 
 def _order(client, address_id: int | None, **extra):
-    body = {"product_id": 1, "card_company": "하늘카드", **extra}
+    """주문 생성(결제대기)까지"""
+    body = {"product_id": 1, **extra}
     if address_id is not None:
         body["shipping_address_id"] = address_id
     return client.post("/shop/orders", json=body)
+
+
+def _paid(client, address_id: int, **extra):
+    """주문 → PG 결제창(대역)에서 카드 입력 → 승인. extra는 두 요청 모두에 실어 본다"""
+    created = _order(client, address_id, **extra)
+    assert created.status_code == 201, created.text
+    fields = created.json()["payment_request"]["fields"]
+    key = client.app.state.partners.pg.approve(fields)
+    return client.post(
+        f"/shop/orders/{created.json()['order']['id']}/payment",
+        json={"payment_key": key, "amount": int(fields["amount"]), **extra},
+    )
 
 
 # ── 주문: 로그인·배송지 ─────────────────────────────────────
@@ -90,7 +103,7 @@ def test_incomplete_migrated_address_must_be_completed(client, engine):
 def test_order_keeps_a_snapshot_of_the_address(client):
     signup(client)
     address_id = _add_address(client)
-    order = _order(client, address_id).json()
+    order = _paid(client, address_id).json()
     assert (order["ship_recipient"], order["ship_zip_code"]) == ("받는사람", "90001")
 
     # 배송지를 고치고 지워도 주문의 배송 정보는 주문 시점 그대로
@@ -120,11 +133,11 @@ def test_card_number_is_never_stored_logged_or_sent(client, engine, password_has
     signup(client)
     address_id = _add_address(client)
     responses = [
-        _order(client, address_id, card_number=form, card_expiry="12/30", cvc="123")
+        _paid(client, address_id, card_number=form, card_expiry="12/30", cvc="123")
         for form in CARD_FORMS
     ]
     responses.append(client.get("/shop/orders"))
-    assert [r.status_code for r in responses[:-1]] == [201] * len(CARD_FORMS)
+    assert [r.status_code for r in responses[:-1]] == [200] * len(CARD_FORMS)
 
     # 관리자가 주문을 열람 → Argus로 갈 접속기록(outbox)이 생긴다
     client.cookies.clear()
@@ -145,7 +158,7 @@ def test_card_number_is_never_stored_logged_or_sent(client, engine, password_has
     for place, content in places.items():
         for form in CARD_FORMS:
             assert form not in content, f"카드번호가 {place}에 있다"
-    # 결제 기록에는 카드사·거래번호·승인 시각·금액만 (카드번호·끝 4자리 컬럼 없음)
+    # 결제 기록에는 PG 승인 결과만 — 카드번호는 PG가 마스킹한 값(앞 6·뒤 4자리)뿐 (F6 Q1)
     columns = {c["name"] for c in inspect(engine).get_columns("payment")}
     assert columns == {
         "id",
@@ -155,6 +168,10 @@ def test_card_number_is_never_stored_logged_or_sent(client, engine, password_has
         "pg_tid",
         "amount",
         "approved_at",
+        "card_number_masked",
+        "approve_no",
+        "installment_months",
+        "receipt_url",
     }
 
 
@@ -164,7 +181,7 @@ def test_card_number_is_never_stored_logged_or_sent(client, engine, password_has
 @pytest.fixture
 def admin_with_order(client, engine, password_hash):
     signup(client)
-    _order(client, _add_address(client))
+    _paid(client, _add_address(client))
     client.cookies.clear()
     add_operator(engine, password_hash)
     assert login(client).status_code == 200
@@ -177,7 +194,8 @@ def test_admin_order_detail_shows_shipping_and_is_logged(admin_with_order, engin
     assert res.status_code == 200
     body = res.json()
     assert body["ship_recipient"] == "받는사람" and body["ship_address"].endswith("가상로 1")
-    assert body["card_company"] == "하늘카드" and body["pg_tid"].startswith("MOCKPG-")
+    assert body["card_company"] == "하늘카드" and body["pg_tid"].startswith("pay_")
+    assert body["card_number_masked"] == "123456******3452"
     [event] = [p for p in outbox_payloads(engine) if p["action"] == "READ"]
     # 주문 조회 접속기록 — READ·ORDER, 정보주체는 그 주문의 회원 PK만 (CLAUDE.md 3절 #3)
     assert event["data_category"] == "ORDER" and event["result"] == "SUCCESS"
@@ -198,7 +216,7 @@ def test_admin_order_detail_requires_login(client):
 
 def test_withdrawn_members_order_has_no_shipping_info(client, engine, password_hash):
     signup(client)
-    _order(client, _add_address(client))
+    _paid(client, _add_address(client))
     finish_orders(engine)
     shop_login(client)
     assert client.post("/shop/me/withdraw", json={"password": CUSTOMER_PASSWORD}).status_code == 204

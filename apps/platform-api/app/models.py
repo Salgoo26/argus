@@ -14,6 +14,7 @@ from sqlalchemy import (
     ForeignKey,
     Integer,
     MetaData,
+    SmallInteger,
     String,
     Table,
     Text,
@@ -137,6 +138,11 @@ orders = Table(
     Column("tracking_no", String(30)),
     Column("shipped_at", DateTime(timezone=True)),
     Column("delivered_at", DateTime(timezone=True)),
+    # 가상 택배 연동 (0013) — 배송 메모, 택배 접수 번호·택배사가 알려 준 최근 상태
+    Column("delivery_memo", String(50)),
+    Column("courier_shipment_id", String(32)),
+    Column("courier_status", String(20)),
+    Column("courier_synced_at", DateTime(timezone=True)),
 )
 
 # 취소·반품(청약철회) 기록 (0011)
@@ -154,6 +160,10 @@ order_claim = Table(
     Column("completed_by", BigInteger, ForeignKey("operator.id")),
     Column("refund_amount", Integer),
     Column("refund_pg_tid", String(64)),
+    # 반품 회수 (0013) — 가상 택배 회수 접수 번호·상태·회수 송장번호
+    Column("pickup_shipment_id", String(32)),
+    Column("pickup_status", String(20)),
+    Column("pickup_tracking_no", String(30)),
 )
 
 order_status_history = Table(
@@ -187,6 +197,11 @@ payment = Table(
     Column("pg_tid", String(64), nullable=False),
     Column("amount", Integer, nullable=False),
     Column("approved_at", DateTime(timezone=True), nullable=False),
+    # 가상 PG 승인 응답 (0013) — 카드번호는 PG가 마스킹한 값(앞 6·뒤 4자리)만
+    Column("card_number_masked", String(20)),
+    Column("approve_no", String(12)),
+    Column("installment_months", SmallInteger),
+    Column("receipt_url", String(255)),
 )
 
 refund_account = Table(
