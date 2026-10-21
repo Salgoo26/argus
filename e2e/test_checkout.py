@@ -1,9 +1,12 @@
-"""결제·주문 E2E (기능 레이어 7-4 ③) — 로그인·배송지 필수, 카드번호 미수신, 관리자 주문 상세 기록
+"""결제·주문 E2E (기능 레이어 7-4 ③, 커머스 확장 F6) — 로그인·배송지 필수, 카드번호 미수신,
+가상 PG 결제창 승인, 가상 택배 접수, 관리자 주문 상세 기록
 
-고객: 비로그인 주문 거부 → 가입 → 배송지 없이 주문 거부 → 배송지 등록 → 주문.
-가상 결제창은 카드번호를 브라우저에서만 확인하고 보내지 않는다 — 여기서는 **잘못 만든 화면이
-카드번호를 실어 보낸 상황**을 흉내 내, 그래도 서버가 받지 않는지 본다.
-관리자(ops_park): 주문 상세(배송 정보) → READ·ORDER 접속기록이 Argus 원장에 도착.
+고객: 비로그인 주문 거부 → 가입 → 배송지 없이 주문 거부 → 배송지 등록 → 주문(결제대기) →
+가상 PG 결제창에서 카드 입력 → 쇼핑몰이 PG 승인 요청 → 결제완료.
+카드번호는 결제창(PG)에만 입력한다 — 여기서는 **잘못 만든 화면이 쇼핑몰에 카드번호를 실어 보낸
+상황**도 흉내 내, 그래도 서버가 받지 않는지 본다. 쇼핑몰에는 PG가 돌려준 마스킹 번호만 남는다.
+관리자(ops_park): 주문 상세(배송 정보) → READ·ORDER 접속기록이 Argus 원장에 도착 →
+상품준비 → 택배 접수(가상 택배 API).
 카드번호는 응답·Argus 원장 어디에도 없어야 한다.
 서버 로그는 scripts/e2e.sh가 컨테이너 로그를 훑어 확인한다.
 """
@@ -13,7 +16,7 @@ import secrets
 
 import psycopg
 
-from conftest import PLATFORM_URL, Browser, platform_login, shop_signup, wait_until
+from conftest import PLATFORM_URL, Browser, buy, platform_login, shop_signup, wait_until
 
 REQUIRED = {"TOS": True, "PRIVACY_REQUIRED": True, "AGE_OVER_14": True}
 PASSWORD = "e2e-buyer-pass-4"  # noqa: S105 — 테스트 전용 더미 값, 매번 새 가상 계정
@@ -37,7 +40,7 @@ def _ledger(query: str, params: tuple) -> list[tuple]:
 
 def test_checkout_requires_login_and_address_and_never_takes_card_number():
     shop = Browser(PLATFORM_URL, "customer_session")
-    order = {"product_id": 2, "card_company": "바다카드"}
+    order = {"product_id": 2}
 
     # 비로그인 주문은 거부 (화면은 로그인 화면으로 보낸 뒤 이 상품으로 돌아온다)
     assert (
@@ -62,8 +65,8 @@ def test_checkout_requires_login_and_address_and_never_takes_card_number():
     }
     address_id = shop.post("/api/shop/me/addresses", json=home).json()["items"][0]["id"]
 
-    # 잘못 만든 화면이 카드번호·유효기간을 실어 보낸 상황 — 서버는 칸이 없어 버린다
-    placed = shop.post(
+    # 잘못 만든 화면이 카드번호·유효기간을 쇼핑몰에 실어 보낸 상황 — 서버는 칸이 없어 버린다
+    leaked = shop.post(
         "/api/shop/orders",
         json={
             **order,
@@ -72,12 +75,23 @@ def test_checkout_requires_login_and_address_and_never_takes_card_number():
             "card_expiry": "12/30",
         },
     )
-    assert placed.status_code == 201, placed.text
-    body = placed.json()
+    assert leaked.status_code == 201, leaked.text
+    assert leaked.json()["order"]["status"] == "PENDING_PAYMENT"
+    assert not any(form in leaked.text for form in CARD_FORMS)
+
+    # 정상 흐름: 결제창(PG)에만 카드번호 입력 → PG 승인 → 결제완료
+    body = buy(shop, 2, address_id, card_number=CARD_FORMS[1], memo="문 앞에 놓아 주세요")
+    assert body["status"] == "PAID"
     assert body["ship_address"] == STREET and body["ship_recipient"] == "가상수령인"
-    assert body["card_company"] == "바다카드" and body["pg_tid"].startswith("MOCKPG-")
-    assert not any(form in placed.text for form in CARD_FORMS)
+    assert body["pg_tid"].startswith("pay_") and body["card_company"] == "하늘카드"
+    # PG가 돌려준 마스킹 번호(앞 6·뒤 4자리)만 남는다 (판단기록 F6 Q1)
+    assert body["card_number_masked"] == "123456******3452" and body["approve_no"]
+    assert not any(form in str(body) for form in CARD_FORMS)
     order_id = body["id"]
+
+    # 결제창을 닫아 승인되지 않은 주문(결제대기)은 고객 주문 목록에 보이지 않는다
+    listed = {o["id"] for o in shop.get("/api/shop/orders").json()["items"]}
+    assert order_id in listed and leaked.json()["order"]["id"] not in listed
 
     # 배송지를 고쳐도 주문의 배송 정보는 주문 시점 그대로
     shop.request("PUT", f"/api/shop/me/addresses/{address_id}", json={**home, "address": "바뀐"})
@@ -90,6 +104,14 @@ def test_checkout_requires_login_and_address_and_never_takes_card_number():
     assert detail.status_code == 200
     assert detail.json()["ship_address"] == STREET and detail.json()["member_id"] == member_id
     assert not any(form in detail.text for form in CARD_FORMS)
+    assert detail.json()["delivery_memo"] == "문 앞에 놓아 주세요"
+
+    # 상품준비 → 택배 접수 — 가상 택배 서비스가 접수 번호를 돌려준다(송장번호는 집하 때 발급)
+    assert admin.post(f"/api/admin/deliveries/{order_id}/advance").status_code == 200
+    dispatched = admin.post(f"/api/admin/deliveries/{order_id}/dispatch")
+    assert dispatched.status_code == 200, dispatched.text
+    shipped = admin.get(f"/api/admin/orders/{order_id}").json()
+    assert shipped["courier_shipment_id"] and shipped["courier_status"] == "RECEIVED"
 
     def arrived():
         rows = _ledger(

@@ -1,7 +1,7 @@
 # 의존성 취약점 알림 + 업데이트 PR 자동 생성 (architecture 8-1 [상시])
 # 앱이 추가되면 해당 생태계를 여기에 추가한다:
 #   - npm: apps/platform-web, apps/argus-web (M5)
-#   - docker: 앱 Dockerfile (argus-api M1, platform-api M2, platform-web·argus-web M5, db-gateway 기능 레이어 8)
+#   - docker: 앱 Dockerfile (argus-api M1, platform-api M2, platform-web·argus-web M5, db-gateway 기능 레이어 8, mock-pg·mock-courier 커머스 확장)
 version: 2
 updates:
   - package-ecosystem: github-actions
@@ -19,6 +19,8 @@ updates:
       - /apps/argus-api
       - /apps/platform-api
       - /apps/db-gateway
+      - /apps/mock-pg
+      - /apps/mock-courier
     schedule:
       interval: weekly
     groups:
@@ -51,6 +53,8 @@ updates:
       - /apps/argus-api
       - /apps/platform-api
       - /apps/db-gateway
+      - /apps/mock-pg
+      - /apps/mock-courier
       - /apps/platform-web
       - /apps/argus-web
     schedule:

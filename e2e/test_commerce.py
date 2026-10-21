@@ -1,4 +1,4 @@
-"""주문·결제(PG 목업)·환불계좌 E2E (기능 레이어 7 ①)
+"""주문·결제(가상 PG)·환불계좌 E2E (기능 레이어 7 ①)
 
 고객이 가상 PG로 구매하고 환불계좌를 등록 → 관리자(cs_kim, 상담 역할 — v0.1 보강 L-1)가
 회원 상세(끝 4자리)를 보고 "전체 보기"를 누름 → 데이터 유형 PAYMENT로 기록 → relay → Argus →
@@ -12,6 +12,7 @@ from conftest import (
     PLATFORM_URL,
     Browser,
     argus_login,
+    buy,
     platform_login,
     run_detection_batch,
     shop_signup,
@@ -40,11 +41,8 @@ def test_payment_full_view_is_detected(officer):
         "address": "가상시 가상구 가상로 3",
     }
     address_id = shop.post("/api/shop/me/addresses", json=home).json()["items"][0]["id"]
-    order = shop.post(
-        "/api/shop/orders",
-        json={"product_id": 1, "shipping_address_id": address_id, "card_company": "하늘카드"},
-    )
-    assert order.status_code == 201 and order.json()["pg_tid"].startswith("MOCKPG-")
+    order = buy(shop, 1, address_id)
+    assert order["status"] == "PAID" and order["pg_tid"].startswith("pay_")
     saved = shop.request(
         "PUT",
         "/api/shop/me/refund-account",
