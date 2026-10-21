@@ -31,7 +31,7 @@ function CustomerLogin() {
       // 성공하면 서버가 HttpOnly 고객 세션 쿠키(customer_session)를 심는다 — 관리자 쿠키와 별개
       await api("/shop/auth/login", {
         method: "POST",
-        body: JSON.stringify({ email: form.get("email"), password: form.get("password") }),
+        body: JSON.stringify({ login_id: form.get("login_id"), password: form.get("password") }),
       });
       router.replace(safeShopPath(next));
     } catch (e) {
@@ -55,14 +55,14 @@ function CustomerLogin() {
         {error && <div className="alert-error">{error}</div>}
         <form className="stack" onSubmit={onSubmit}>
           <div className="field">
-            <label htmlFor="email">이메일</label>
+            <label htmlFor="login_id">아이디</label>
             <input
-              id="email"
-              name="email"
-              type="email"
+              id="login_id"
+              name="login_id"
               autoComplete="username"
+              autoCapitalize="none"
               required
-              maxLength={255}
+              maxLength={40}
             />
           </div>
           <div className="field">

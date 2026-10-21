@@ -12,6 +12,7 @@ import {
   errorMessage,
   formatDate,
   formatDateTime,
+  GENDER,
   type Operator,
   type RefundAccountView,
   won,
@@ -19,8 +20,16 @@ import {
 
 type MemberDetail = {
   id: number;
+  login_id: string;
   name: string;
   email: string;
+  // 휴대폰 본인확인 결과 (커머스 확장) — CI·DI는 서버가 싣지 않는다
+  birth_date: string | null;
+  gender: "M" | "F" | null;
+  is_foreigner: boolean | null;
+  carrier: string | null;
+  identity_verified_at: string | null;
+  email_verified_at: string | null;
   phone: string | null;
   status: string;
   created_at: string;
@@ -87,10 +96,27 @@ export default function MemberDetailPage() {
             <section className="card">
               <h2 className="card-title">기본 정보</h2>
               <dl className="kv">
+                <dt>아이디</dt>
+                <dd>{member.login_id}</dd>
                 <dt>이름</dt>
                 <dd>{member.name}</dd>
                 <dt>이메일</dt>
-                <dd>{member.email}</dd>
+                <dd>
+                  {member.email}
+                  {member.email_verified_at ? " (인증)" : ""}
+                </dd>
+                <dt>생년월일·성별</dt>
+                <dd>
+                  {member.birth_date ?? "-"}
+                  {member.gender ? ` · ${GENDER[member.gender]}` : ""}
+                  {member.is_foreigner ? " · 외국인" : ""}
+                </dd>
+                <dt>본인확인</dt>
+                <dd>
+                  {member.identity_verified_at
+                    ? `${formatDateTime(member.identity_verified_at)} · ${member.carrier}`
+                    : "-"}
+                </dd>
                 <dt>연락처</dt>
                 <dd>{member.phone ?? "-"}</dd>
                 <dt>가입일</dt>

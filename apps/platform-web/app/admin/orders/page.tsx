@@ -13,6 +13,8 @@ import {
   formCriteria,
   formatDateTime,
   type Operator,
+  ORDER_STATUS,
+  type OrderStatus,
   type SearchBody,
   won,
 } from "@/lib/api";
@@ -23,7 +25,7 @@ type AdminOrder = {
   member_name: string | null;
   product_name: string;
   amount: number;
-  status: string;
+  status: OrderStatus;
   ordered_at: string;
   card_company: string | null;
   pg_tid: string | null;
@@ -91,7 +93,11 @@ export default function AdminOrdersPage() {
               <label htmlFor="s_status">주문 상태</label>
               <select id="s_status" name="status" defaultValue="">
                 <option value="">전체</option>
-                <option value="PAID">결제 완료</option>
+                {Object.entries(ORDER_STATUS).map(([code, label]) => (
+                  <option key={code} value={code}>
+                    {label}
+                  </option>
+                ))}
               </select>
             </div>
             <div className="field">
@@ -122,6 +128,7 @@ export default function AdminOrdersPage() {
                   <th>회원</th>
                   <th>상품</th>
                   <th className="num">금액</th>
+                  <th>상태</th>
                   <th>카드사</th>
                   <th>PG 거래번호</th>
                   <th>주문 일시</th>
@@ -144,6 +151,7 @@ export default function AdminOrdersPage() {
                     </td>
                     <td>{o.product_name}</td>
                     <td className="num">{won(o.amount)}</td>
+                    <td>{ORDER_STATUS[o.status] ?? o.status}</td>
                     <td>{o.card_company ?? "-"}</td>
                     <td className="mono">{o.pg_tid ?? "-"}</td>
                     <td>{formatDateTime(o.ordered_at)}</td>
