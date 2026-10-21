@@ -43,8 +43,11 @@ TABLE_CATEGORY = {
     "inquiry": "INQUIRY",
     "orders": "ORDER",
     "payment": "ORDER",  # PG 거래 정보
-    # 취소·반품(청약철회) 기록 (2026-10-21, 플랫폼 0011) — 사유 상세·환불 거래번호
-    "order_claim": "ORDER",
+    # 취소·반품(청약철회) 기록 (2026-10-21, 플랫폼 0011) — 사유 상세·환불 거래번호.
+    # 플랫폼 0014부터 이체 환불 계좌 사본(계좌번호 암호문)이 있어 결제수단
+    "order_claim": "PAYMENT",
+    # 무통장입금 (2026-10-21, 플랫폼 0014) — 입금자명
+    "bank_deposit": "ORDER",
 }
 SENSITIVITY = ["NONE", "ORDER", "INQUIRY", "MEMBER_BASIC", "PAYMENT"]
 

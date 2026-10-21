@@ -175,7 +175,8 @@ def test_initial_registry_matches_the_old_fixed_tables(app_engine):
         "inquiry": "INQUIRY",
         "orders": "ORDER",
         "payment": "ORDER",
-        "order_claim": "ORDER",  # 커머스 확장 등록 (0023)
+        "order_claim": "PAYMENT",  # 커머스 확장 등록 (0023), 이체 환불 계좌 (0025)
+        "bank_deposit": "ORDER",  # 무통장입금 (0025)
     }
     assert registry["member_columns"] == sorted(
         [
@@ -195,6 +196,7 @@ def test_initial_registry_matches_the_old_fixed_tables(app_engine):
         "초기 등록 — 게이트웨이 고정 표 이관",
         "커머스 확장(배송·취소/반품·본인확인) 신규 컬럼 등록",  # 0023
         "가상 PG·택배 연동 신규 컬럼 등록",  # 0024
+        "무통장입금·이체 환불 신규 컬럼 등록",  # 0025
     }
 
 
