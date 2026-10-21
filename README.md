@@ -113,11 +113,13 @@ flowchart LR
 
     GW["DB 게이트웨이"]
     ARGUS["ARGUS<br/>개인정보 접속기록 점검 시스템"]
+    PARTNER["가상 PG·택배<br/>외부 수탁사 · 감시 대상 아님"]
 
     HANDLER -->|"① 업무시스템"| ADMIN
     HANDLER -->|"② DB 직접접근 (DB 툴)"| GW
     GW --> PDB
 
+    PLATFORM <-->|"결제·배송 연동"| PARTNER
     ADMIN -.->|"접속기록"| ARGUS
     GW -.->|"접속기록"| ARGUS
 
@@ -127,10 +129,11 @@ flowchart LR
 
 | 구성 | 사용자 | 역할 |
 |---|---|---|
-| 쇼핑몰 | 고객 | 회원가입·주문·결제·1:1 문의. 감시 대상 개인정보가 여기서 생깁니다(모두 가상 데이터) |
-| 관리자 화면(백오피스) | 개인정보취급자 | 회원 조회·다운로드, 주문·문의 처리. 쇼핑몰과 같은 플랫폼의 관리자 화면(`/admin`)이며, 화면 요청마다 서버가 접속기록을 남깁니다(① 업무시스템 경로) |
+| 쇼핑몰 | 고객 | 회원가입(휴대폰 본인확인)·주문·결제(카드·무통장입금)·배송 조회·취소·청약철회·1:1 문의. 감시 대상 개인정보가 여기서 생깁니다(모두 가상 데이터) |
+| 관리자 화면(백오피스) | 개인정보취급자 | 회원 조회·다운로드, 주문·배송·반품·환불·문의 처리. 쇼핑몰과 같은 플랫폼의 관리자 화면(`/admin`)이며, 화면 요청마다 서버가 접속기록을 남깁니다(① 업무시스템 경로) |
 | DB 게이트웨이 | 개인정보취급자 | DB 툴 접속을 중계하며 공용 DB 계정 뒤의 실제 사용자 기준으로 접속기록을 남깁니다(② DB 직접접근 경로). 관리자 화면에서 발급한 1시간 접속 토큰으로만 접속합니다 |
 | ARGUS | 담당자·취급자 | 두 경로의 접속기록을 수집·보관하고, 이상행위를 탐지해 취급자에게 소명을 요청하며, 점검 보고서를 만듭니다 |
+| 가상 PG·택배 | — | 쇼핑몰이 결제·배송을 맡기는 외부 수탁사를 흉내 낸 별도 서비스(각자 DB)입니다. 쇼핑몰 서버와 API로만 연결되고, ARGUS의 감시 대상이 아닙니다 |
 
 ### 시스템 아키텍처
 
@@ -162,12 +165,20 @@ flowchart TB
         AW["argus-worker<br/>탐지 배치 · 기한 순찰 · 알림"] --> ADB
     end
 
+    subgraph PARTNERNET["partner-net · 외부 수탁사"]
+        direction LR
+        MPG["mock-pg<br/>가상 PG 결제창·승인·취소"] --- MPGDB[("mock-pg-db")]
+        MCO["mock-courier<br/>가상 택배 접수·회수·통지"] --- MCODB[("mock-courier-db")]
+    end
+
     TOOL -->|"TLS + 1시간 접속 토큰"| GW
     PDB -->|"전송 대기 기록"| PR
     GW -->|"쿼리 중계"| PDB
     PR -->|"HMAC 서명"| AA
     GW -->|"HMAC 서명"| AA
     AA -.->|"보호 대상 등록부"| GW
+    PA <-->|"결제 승인·취소, 택배 접수·상태 통지"| MPG
+    PA <--> MCO
 ```
 
 </details>
@@ -181,6 +192,7 @@ flowchart TB
 | argus-api | Python 3.12 · FastAPI · SQLAlchemy 2.1 · Alembic | 수집 API(서명 검증), 담당자·취급자 화면 API |
 | argus-worker | Python (argus-api와 같은 이미지) | 5분 주기 탐지 배치, 소명 기한 순찰, 화면 알림·웹 푸시 |
 | argus-web | Next.js 16 · React 19 · TypeScript | 담당자(행위 탐지·접속기록·룰 설정·점검 보고서)·취급자(소명 관리·접속기록) 화면 |
+| mock-pg · mock-courier | Python 3.12 · FastAPI | 가상 PG(작은 창 결제창, 승인·취소 API)와 가상 택배(접수·반품 회수 API, 설정한 시간마다 상태를 넘기고 쇼핑몰에 서명 통지). 각자 DB를 두며 platform-api와만 연결됩니다 |
 | platform-db · argus-db | PostgreSQL 16 | 두 DB는 서로 다른 네트워크에 둡니다. platform-relay와 db-gateway만 두 네트워크에 함께 연결됩니다 |
 
 - 보안: HMAC-SHA256 요청 서명(플랫폼과 ARGUS만 공유하는 비밀키로 서명해, 서명이 맞지 않는 접속기록은 받지 않음), TLS(게이트웨이), AES-256-GCM(환불계좌), 웹 푸시 암호화(RFC 8291·8292)
@@ -297,8 +309,11 @@ erDiagram
     member ||--o{ member_consent : "동의 이력"
     consent_item ||--o{ member_consent : "동의 항목·버전"
     member ||--o{ orders : ""
-    orders ||--|| payment : ""
-    member ||--o| refund_account : ""
+    orders ||--o| payment : ""
+    orders ||--o{ order_claim : "취소·반품"
+    orders ||--o| bank_deposit : "무통장입금"
+    orders ||--o{ order_status_history : "상태 이력"
+    member ||--o{ refund_account : ""
     member ||--o{ shipping_address : ""
     member ||--o{ inquiry : ""
     operator ||--o{ inquiry : "답변"
@@ -307,6 +322,7 @@ erDiagram
 
     member {
         bigint id PK "접속기록에는 이 값만 전송"
+        varchar login_id
         varchar email
         varchar name
         varchar phone
@@ -349,11 +365,26 @@ erDiagram
     orders {
         bigint id PK
         bigint member_id FK
+        varchar status "결제대기·입금대기·결제완료·배송중·취소·반품 등"
+        varchar tracking_no "송장번호"
     }
     payment {
         bigint id PK
         bigint order_id FK
-        varchar card_company
+        varchar method "CARD / BANK_TRANSFER"
+        varchar card_number_masked "PG가 돌려준 마스킹 번호"
+    }
+    order_claim {
+        bigint id PK
+        bigint order_id FK
+        varchar claim_type "CANCEL / RETURN"
+        varchar refund_status "이체 환불 대기·완료"
+        bytea refund_account_enc "AES-256-GCM"
+    }
+    bank_deposit {
+        bigint order_id PK
+        varchar depositor_name
+        timestamptz due_at "주문 후 3일"
     }
     shipping_address {
         bigint id PK
@@ -366,7 +397,7 @@ erDiagram
     }
 ```
 
-이 밖에 상품, 전송 대기 기록(outbox), 탈퇴 회원 파기·분리보관 테이블이 있습니다.
+이 밖에 상품, 주문 상태 이력, 전송 대기 기록(outbox), 탈퇴 회원 파기·분리보관 테이블이 있습니다.
 
 </details>
 
@@ -591,7 +622,7 @@ ARGUS의 주요 기능 목록입니다. 실제 시연 화면은 아래 [구현 �
 
 ```bash
 git clone https://github.com/Salgoo26/argus.git && cd argus
-bash scripts/init-env.sh          # .env 생성(무작위 비밀값)
+bash scripts/init-env.sh          # .env 생성(무작위 비밀값). 이미 있으면 --add-missing으로 새 항목만 채움
 docker compose up -d --build      # 플랫폼 http://localhost:3000 · ARGUS http://localhost:3001
 bash scripts/e2e.sh               # 전체 시나리오 자동 검증
 ```
@@ -629,5 +660,5 @@ ARGUS 비밀번호는 명령 실행 후 입력창에 입력합니다(12자 이�
 | 설계 | [아키텍처 설계서](docs/architecture.md) | 시스템 구성, 접속기록 수집 구조(업무시스템·DB 직접접근), 보안 설계, 한계 |
 | 설계 | [API 명세서](docs/api-spec.md) | 시스템 간 API(수집·동기화·게이트웨이)와 화면 API |
 | 설계 | [DB 스키마](docs/db-schema.md) | 두 DB의 테이블, 룰 조건식, 탐지 배치 흐름 |
-| 개인정보 문서 | [개인정보 처리방침](apps/platform-web/app/%28shop%29/privacy/page.tsx) | 감시 대상 쇼핑몰의 처리방침(v3). 수집 항목·보유 기간·위탁을 실제 저장 구조와 일치시킴 |
+| 개인정보 문서 | [개인정보 처리방침](apps/platform-web/app/%28shop%29/privacy/page.tsx) | 감시 대상 쇼핑몰의 처리방침(v3) |
 | 점검 | [자체 점검 결과](docs/inspection.md) | 고시·안내서 기준 37개 항목의 첫 판정, 보완 내용, 재측정 결과 |

@@ -1,6 +1,6 @@
 # API 명세서 — 시스템 간 (플랫폼 ↔ Argus)
 
-> 작성 2026-09-23 · 최종 개정 2026-10-10 (문서 버전 v0.6)
+> 작성 2026-09-23 · 최종 개정 2026-10-21 (문서 버전 v0.7)
 > 관련 문서: [아키텍처_설계서](architecture.md), [DB스키마](db-schema.md), [요구사항정의서](requirements.md), [정책정의서](policy.md), [액터별_플로우](actor-flows.md)
 > 범위: 두 시스템의 **경계 계약**을 다룬다. 화면용 내부 API(argus-web ↔ argus-api 등)의 세부 형식은 코드로 정의하고 FastAPI OpenAPI(Swagger)로 자동 문서화한다. 다만 접속기록을 어떻게 남기는지, 누가 쓸 수 있는지, 어떤 오류 코드로 거부하는지가 점검 근거가 되는 화면 API는 7절에 요약한다.
 
@@ -14,7 +14,7 @@
 
 > 상용 솔루션으로 치면 **Agent ↔ 수집 서버 프로토콜**에 해당한다. Argus는 이 계약만 지키면 어떤 출처 시스템(2단계의 DB 접근 게이트웨이 포함)이든 받아들인다.
 
-> 목차: 개정 내역 · 1 공통 규약 · 2 ① 접속기록 수집 · 3 ② 취급자 동기화 · 4 발신 측(플랫폼) 구현 규약 · 5 ③ 헬스체크 · 6 ④ DB 구조 수신 · ⑤ 보호 대상 등록부 제공 · 7 화면 API 요약 · 8 버전 관리 · 9 미결
+> 목차: 개정 내역 · 1 공통 규약 · 2 ① 접속기록 수집 · 3 ② 취급자 동기화 · 4 발신 측(플랫폼) 구현 규약 · 5 ③ 헬스체크 · 6 ④ DB 구조 수신 · ⑤ 보호 대상 등록부 제공 · 7 화면 API 요약 · 8 버전 관리 · 9 미결 · 10 외부 연동 API 요약
 
 ### v0.2 개정 내역
 
@@ -63,6 +63,14 @@
 | 6 | **DB 접속 토큰 발급 미기록** (2-4절) | 개인정보 처리가 아님 — 발급 추적은 `db_access_token` + `LOGIN`의 `token_id` |
 | 7 | **달러 인용 거부** (2-2절) | `sql_normalized`에 `$$…$$`·`$tag$…$tag$`가 있으면 원문 유입으로 보고 거부 |
 | 8 | **기록 제외 범위** (2-2절) | 사용자 테이블을 참조하지 않는 문장은 미전송(원문 저장소엔 남김), 단 사용자 함수·`DO`·`CALL`은 전송 |
+
+### v0.7 개정 내역 (커머스 확장, 2026-10-21)
+
+| # | 수정 | 사유 |
+|---|---|---|
+| 1 | 플랫폼 관리자 행위 예시 추가 (2-4절) — 배송·반품, 무통장입금 입금 확인, 이체 환불, 회원 상세의 계좌별 전체 보기 | 커머스 확장으로 생긴 관리자 업무. **수집 API 계약(필드·코드값)은 변경 없음** |
+| 2 | 플랫폼 화면 API 요약 갱신 (7-2절) — 배송·반품 API, 입금 확인·환불 계좌·환불 완료, 환불계좌 전체 보기 경로 변경, 회원 검색 `login_id` | 같음 |
+| 3 | 외부 연동 API 요약 신설 (10절) — 플랫폼 ↔ 가상 PG·가상 택배 | Argus와 무관한 플랫폼 밖 계약이지만, 위탁하는 데이터 항목을 한곳에 남기기 위해. 기존 절 번호는 바꾸지 않고 끝에 붙임 |
 
 ### v0.6 개정 내역 (v0.1 보강)
 
@@ -317,7 +325,12 @@ POST /ingest/v1/access-logs
 | 문의 상세 확인 (F-02 #3) | `READ` | `INQUIRY` | ids 1개 + `context.ticket_id` |
 | 주문 목록 조회 | `READ` | `ORDER` | 표시된 주문의 회원(중복 제거) |
 | 회원 상세 조회 — 환불계좌 끝 4자리 포함 | `READ` | `MEMBER_BASIC` | ids 1개, count 1 |
-| **환불계좌 전체 보기** (요구사항의 "주문·결제 조회") | `READ` | `PAYMENT` | ids 1개, count 1 — 결제수단 조회 룰(HIGH)로 항상 탐지 |
+| **환불계좌 전체 보기** — 회원 상세의 계좌별(요구사항의 "주문·결제 조회") | `READ` | `PAYMENT` | ids 1개, count 1 — 결제수단 조회 룰(HIGH)로 항상 탐지 |
+| 배송·반품 목록·검색 (v0.7) | `READ` | `ORDER` | 표시된 주문의 회원(중복 제거). 검색은 `request.query_keys`에 키 이름만 |
+| 상품 준비·택배 접수·택배 상태 새로고침·반품 완료 (v0.7) | `UPDATE` | `ORDER` | ids 1개 |
+| 무통장입금 입금 확인 (v0.7) | `UPDATE` | `ORDER` | ids 1개 |
+| **이체 환불 계좌 전체 보기** (v0.7) | `READ` | `PAYMENT` | ids 1개 — 결제수단 조회 룰(HIGH). 환불 대기 건만 |
+| 이체 환불 완료 처리 (v0.7) | `UPDATE` | `ORDER` | ids 1개 |
 | 1:1 문의 목록 | `READ` | `INQUIRY` | 표시된 작성자(중복 제거), 본문 제외 |
 | 1:1 문의 답변 | `UPDATE` | `INQUIRY` | ids 1개 + `context.ticket_id` (한 번만 — 이미 답변이면 409, 실패도 기록) |
 | 회원 목록 다운로드 120건 (F-03 #5) | `DOWNLOAD` | `MEMBER_BASIC` | ids 120개, count 120 |
@@ -613,9 +626,9 @@ GET  /ingest/v1/protection-registry    Argus → 게이트웨이: 판정 표 (�
 | 기능 | 허용 역할 |
 |---|---|
 | 회원 조회·검색 | ADMIN · OPS · CS · MARKETING (마케팅의 회원 상세에는 주문 없음) |
-| 주문 조회·검색, 1:1 문의 | ADMIN · OPS · CS |
+| 주문 조회·검색(배송·반품·입금 확인 포함), 1:1 문의 | ADMIN · OPS · CS |
 | 회원 목록 다운로드 | ADMIN · OPS |
-| 환불계좌 전체 보기 | ADMIN · OPS · CS |
+| 환불계좌 전체 보기, 이체 환불 완료 | ADMIN · OPS · CS |
 | DB 접속 토큰 발급 | ADMIN · OPS |
 | 계정·권한 관리 | ADMIN |
 
@@ -624,8 +637,13 @@ GET  /ingest/v1/protection-registry    Argus → 게이트웨이: 판정 표 (�
 | `POST /admin/auth/logout` | 204 | `LOGOUT` (인증된 경우만) | — |
 | `GET /admin/auth/me` | `login_id`·`name`·`team`·`role`·`permissions`(위 기능 코드 `MEMBERS`·`ORDERS`·`INQUIRIES`·`MEMBER_EXPORT`·`REFUND_FULL_VIEW`·`DB_TOKEN`·`ACCOUNTS` 중 허용된 것)·`must_change_password`. 화면은 `permissions`로 메뉴·버튼을 숨기기만 하고, 허용 여부는 각 라우트가 다시 판단 | 제외 | `401 UNAUTHENTICATED` |
 | `POST /admin/auth/password` | 204. 본문 `current_password`·`new_password`(고객 비밀번호와 같은 규칙). 성공하면 `must_change_password = false` | 제외 | `400 SAME_PASSWORD`·`WRONG_PASSWORD` |
-| `POST /admin/members/search` | 본문 `name`·`email`·`phone`(부분 일치, 연락처는 숫자끼리 비교)·`status`·`joined_from`·`joined_to`·`page`·`size` | `READ` `MEMBER_BASIC`, 결과로 보인 회원 전부 + 키 이름 | `400 BAD_REQUEST`, `403 FORBIDDEN` |
+| `POST /admin/members/search` | 본문 `login_id`·`name`·`email`·`phone`(부분 일치, 연락처는 숫자끼리 비교)·`status`·`joined_from`·`joined_to`·`page`·`size` | `READ` `MEMBER_BASIC`, 결과로 보인 회원 전부 + 키 이름 | `400 BAD_REQUEST`, `403 FORBIDDEN` |
 | `POST /admin/orders/search` | 본문 `order_id`·`member_id`·`status`·`ordered_from`·`ordered_to`·`page`·`size` | `READ` `ORDER`, 같음 | 같음 |
+| `GET /admin/members/{id}/refund-accounts/{account_id}` (v0.7) | 그 회원의 환불계좌 1개 전체 번호(복호화). 이전 `…/refund-account`(회원당 1개)를 대신함 | `READ` `PAYMENT` | `403`, `404 NOT_FOUND` |
+| `GET /admin/deliveries`, `POST /admin/deliveries/search` (v0.7) | 배송·반품 목록(받는 사람·연락처 마스킹, 주소 앞 두 단어). 검색 본문 `order_id`·`member_id`·`recipient`·`tracking_no`·`status`·`ordered_from`·`ordered_to`·`page`·`size` | `READ` `ORDER` | `400`, `403` |
+| `POST /admin/deliveries/{order_id}/advance`·`/dispatch`·`/sync`·`/return-complete` (v0.7) | 상품 준비 / 택배 접수 / 택배 상태 새로고침 / 반품 완료(회수 도착 뒤, 카드면 PG 취소) | `UPDATE` `ORDER` | `403`, `404`, `409`(상태가 맞지 않음), `502`(택배·PG 응답 없음) |
+| `POST /admin/orders/{id}/deposit-confirm` (v0.7) | 무통장입금 입금 확인 → 결제완료 | `UPDATE` `ORDER` | `403`, `404`, `409 DEPOSIT_EXPIRED` 등 |
+| `GET /admin/orders/{id}/refund-account`, `POST /admin/orders/{id}/refund-complete` (v0.7) | 이체 환불 대기 건의 계좌 전체 번호 / 이체 완료 처리 | `READ` `PAYMENT` / `UPDATE` `ORDER` | `403`, `404`(환불 대기 아님), `409 NO_PENDING_REFUND` |
 | `POST /admin/inquiries/search` | 본문 `status`·`member_id`·`created_from`·`created_to`·`title`(부분 일치)·`page`·`size` | `READ` `INQUIRY`, 같음 | 같음 |
 | `GET /admin/accounts`, `POST /admin/accounts`, `POST /admin/accounts/{id}/change`, `POST /admin/accounts/{id}/terminate`, `POST /admin/accounts/history/search` | 계정 목록, 부여(본문 `login_id`·`name`·`team`·`role`·`reason` — 응답에 `temporary_password`를 이 한 번만), 변경(`role`·`team`·`reason`), 말소(`reason`), 권한 이력 검색(대상 아이디는 본문) | 제외(권한 이력 `operator_permission_history`, DB스키마 4절) | `403 FORBIDDEN`(ADMIN 외), `403 SELF_CHANGE_FORBIDDEN`, `404 NOT_FOUND`, `409 LOGIN_ID_TAKEN`·`ACCOUNT_TERMINATED`·`NO_CHANGE` |
 
@@ -654,3 +672,29 @@ GET  /ingest/v1/protection-registry    Argus → 게이트웨이: 판정 표 (�
 - [ ] (v0.2) 보호 대상 컬럼 단위 판정, 여러 DB 등록, 화면 경유 수집 지점(플랫폼 Agent의 데이터 유형 표시)과 등록부의 대조 — 지금은 화면 경유의 데이터 유형을 코드가 정하고 등록부와 따로 관리한다
 - [ ] (v0.2) 계정 말소의 DB 접속 토큰 즉시 반영 — 말소 직전 발급된 토큰(최대 1시간)은 게이트웨이가 재직을 다시 확인하지 않아 만료까지 유효
 - [ ] (v0.2) 이메일 알림(LOG-16)
+
+---
+
+## 10. 외부 연동 API 요약 (플랫폼 ↔ 가상 PG·가상 택배, v0.7)
+
+플랫폼과 외부 수탁사 사이의 계약이다. **Argus와는 무관하고**, 수탁사와 그 DB는 Argus 감시 대상이 아니다(아키텍처 설계서 2-5). 요청·응답 세부는 각 서비스 코드(`apps/mock-pg`, `apps/mock-courier`)가 정의한다.
+
+**가상 PG (데모페이)** — 실제 PG(결제창 + 승인 API)의 흐름을 단순화했다.
+
+| 호출 | 경로 | 인증 | 요점 |
+|---|---|---|---|
+| 브라우저 → PG | `POST /checkout` | 클라이언트 키 | 결제창 열기(폼 POST — 구매자 정보가 주소창에 남지 않게). 주문번호·주문명·금액·구매자 이름·이메일·휴대폰·성공/실패 주소(등록된 쇼핑몰 주소만) |
+| 브라우저 → PG | `POST /checkout/{paymentKey}/approve`, `…/abort` | — | 카드사·카드번호·할부 입력 / 결제 취소. 성공 주소로 `paymentKey`·`orderId`·`amount` |
+| 플랫폼 → PG | `POST /v1/payments/confirm` | Basic(비밀 키) | 승인. 금액·주문번호 대조. 응답에 거래 정보(카드사·마스킹 카드번호·할부·승인번호·영수증 주소) |
+| 플랫폼 → PG | `GET /v1/payments/{paymentKey}`, `GET /v1/payments/orders/{orderId}` | Basic | 조회 |
+| 플랫폼 → PG | `POST /v1/payments/{paymentKey}/cancel` | Basic | 전액 취소(고객 취소·반품 완료) |
+
+**가상 택배 (데모택배)**
+
+| 호출 | 경로 | 인증 | 요점 |
+|---|---|---|---|
+| 플랫폼 → 택배 | `POST /v1/shipments` | Bearer(API 키) | 배송 접수 — 받는 사람 이름·연락처·주소·배송 메모, 상품명·수량, 주문번호, 보내는 곳 |
+| 플랫폼 → 택배 | `POST /v1/returns` | Bearer | 반품 회수 접수 — 회수지(고객), 돌려보낼 곳(쇼핑몰), 상품 |
+| 플랫폼 → 택배 | `GET /v1/shipments/{id}` | Bearer | 배송·회수 조회(이력 포함) |
+| 플랫폼 → 택배 | `POST /v1/shipments/{id}/cancel` | Bearer | 접수 취소 — 집하 전만 |
+| 택배 → 플랫폼 | `POST /partners/courier/events` | HMAC(`X-Courier-Signature` = `v1=` + HMAC-SHA256(키, `"{timestamp}.{본문}"`), ±300초, 상수 시간 비교) | 상태가 바뀔 때마다 접수 건의 현재 상태 전체(스냅샷). 같은 통지가 두 번 와도 결과가 같고, 이전 상태로 되돌리는 늦은 통지는 무시. 시스템 간 통신이라 접속기록 대상 아님 |
