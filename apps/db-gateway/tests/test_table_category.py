@@ -19,6 +19,7 @@ PLATFORM_PERSONAL_TABLES = {
     "inquiry": "INQUIRY",
     "orders": "ORDER",
     "payment": "ORDER",
+    "order_claim": "ORDER",  # 0011 취소·반품 기록 (2026-10-21)
 }
 
 
@@ -48,7 +49,8 @@ def test_shipping_address_is_member_basic(sql, category):
 
 
 def test_every_personal_table_with_a_member_reference_is_in_member_columns():
-    # 2티어 회원번호 추출(v0.1 보강 G-1)이 읽는 열 — 결제(payment)는 주문을 거쳐서만 회원과 이어진다
+    # 2티어 회원번호 추출(v0.1 보강 G-1)이 읽는 열 — 결제(payment)·취소/반품(order_claim)은
+    # 주문을 거쳐서만 회원과 이어진다
     tables = {table for table, _ in MEMBER_COLUMNS}
-    assert tables == set(PLATFORM_PERSONAL_TABLES) - {"payment"}
+    assert tables == set(PLATFORM_PERSONAL_TABLES) - {"payment", "order_claim"}
     assert ("member", "id") in MEMBER_COLUMNS
