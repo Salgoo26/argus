@@ -1,6 +1,6 @@
 # DB 스키마 (Argus / 플랫폼)
 
-> 작성 2026-09-23 · 최종 개정 2026-10-10
+> 작성 2026-09-23 · 최종 개정 2026-10-21
 > 관련 문서: [아키텍처_설계서](architecture.md), [API명세서_시스템간](api-spec.md), [정책정의서](policy.md), [액터별_플로우](actor-flows.md), [요구사항정의서](requirements.md)
 > DBMS: PostgreSQL 16 (플랫폼 DB / Argus DB 별도 인스턴스)
 > 표기: **[S]** = Walking Skeleton에 필요한 테이블. 컬럼은 전체를 정의하되 Skeleton에서는 [S] 테이블만 생성한다.
@@ -11,7 +11,7 @@
 
 ## 0. 개정 내역
 
-#1~14는 v0.2 개정이다. 요구사항정의서(PLT-01~17 / LOG-01~17)·정책정의서·액터별 플로우를 v0.1과 전수 대조해 보완했다. #15는 v0.1 보강(Argus 마이그레이션 0014~0022, 플랫폼 마이그레이션 0009)이다.
+#1~14는 v0.2 개정이다. 요구사항정의서(PLT-01~17 / LOG-01~17)·정책정의서·액터별 플로우를 v0.1과 전수 대조해 보완했다. #15는 v0.1 보강(Argus 마이그레이션 0014~0022, 플랫폼 마이그레이션 0009), #16은 커머스 확장(플랫폼 0011~0014, Argus 0023~0025)이다.
 
 | # | 구분 | 내용 | 근거 |
 |---|---|---|---|
@@ -30,6 +30,7 @@
 | 13 | 제약 추가 | `LOGIN` 외 행위는 `subject_type` 필수 / 퇴직 시 `terminated_at` 필수 / 언마스킹 보고서는 사유 필수 | 제2조제3호(처리한 정보주체 필수 항목), 제12조제1항 |
 | 14 | 정책 보완 제안 | 보고서 export 시 **기본 마스킹**, 언마스킹 export는 사유 필수 | 액터별_플로우 8절 마스킹 정책이 화면만 다루고 **보고서 파일은 다루지 않아 우회 경로가 됨** |
 | 15 | v0.1 보강 | 수행업무 `LOGOUT`(0014) · `notification` 화면 알림 구조로 구현, `explanation.due_at`(0015) · `push_subscription`(0016) · `access_log` DELETE·TRUNCATE 트리거, 보고서 `integrity` 기준점(0017) · `detection_log.attached_at`, EVENT 탐지건 그룹 키에 `data_category`·`action_group`(0018) · 룰 필드 `client_ip`, 측정 `DISTINCT_IP`·`MAX_SUBJECT_REPEAT`, 기본 룰 3개(0019) · `argus_user_history`(0020) · 보호 대상 등록부 4개 테이블(0021) · 시드 룰 설명 정리(0022) · 플랫폼 `operator_permission_history`, `operator.must_change_password`(플랫폼 0009) · DB 직접 기록의 회원번호 추출과 `context.registry_version` | 고시 제5조제1항·제3항(권한 부여·변경·말소 기록), 제8조제2항(점검·사후조치), 제8조제3항(위·변조 방지), 안내서 61~62쪽(권한 부여·말소 내역), FAQ 147(로그아웃), 95쪽(비정상 행위 예시, 위·변조 확인 정보 별도 보관), 129쪽(이상행위 탐지 시 알림) |
+| 16 | 커머스 확장 | 플랫폼 0011(배송·취소/반품 `order_claim`·`order_status_history`) · 0012(`member` 아이디·이메일 인증·본인확인 결과) · 0013(가상 PG·택배 연동 컬럼) · 0014(무통장입금 `bank_deposit`, 환불계좌 여러 개, 이체 환불) · Argus 0023~0025(보호 대상 등록부에 새 컬럼 분류) — 4절 "커머스 확장" | 전자상거래법 제17조(청약철회)·시행령 제6조(계약·청약철회 기록), PIPA 제24조의2(주민번호 처리 제한), 고시 제7조제2항제6호(계좌번호 암호화) |
 
 ---
 
@@ -948,8 +949,8 @@ CREATE TABLE refund_account (                -- (설계안) 기존 payment_metho
 | 테이블 | 담는 것 | 담지 않는 것 / 규칙 |
 |---|---|---|
 | `payment` | PG 승인 결과 — 결제수단 종류, 카드사, **PG 거래번호**(서버 생성 `MOCKPG-…`), 승인 시각, 금액(서버가 상품 가격으로 결정) | **카드번호 컬럼 자체가 없음**(컬럼 집합을 테스트로 고정). 주문 API는 카드번호·금액을 보내도 무시 |
-| `refund_account` | 은행, 예금주, **계좌번호 암호문**, 끝 4자리(평문), 회원당 1개 | **AES-256-GCM**, 버전 1바이트 + nonce 12바이트, **AAD = `refund_account:{회원번호}`**(암호문을 다른 회원 행으로 옮기면 복호화 실패). 키 `PAYMENT_ENCRYPTION_KEY`(16진수 64자, 없거나 형식 오류면 기동 거부) — platform-api·seed에만 전달 |
-| `orders` | 상품 1개, 상태 `PAID`만 | 취소·환불 처리는 v0.2 |
+| `refund_account` | 은행, 예금주, **계좌번호 암호문**, 끝 4자리(평문), 회원당 1개(0014부터 여러 개 — 아래 "커머스 확장") | **AES-256-GCM**, 버전 1바이트 + nonce 12바이트, **AAD = `refund_account:{회원번호}`**(암호문을 다른 회원 행으로 옮기면 복호화 실패). 키 `PAYMENT_ENCRYPTION_KEY`(16진수 64자, 없거나 형식 오류면 기동 거부) — platform-api·seed에만 전달 |
+| `orders` | 상품 1개, 상태 `PAID`만 | 취소·환불 처리는 v0.2였다 → 커머스 확장(0011~0014)에서 상태·취소·환불 추가 |
 
 **플랫폼 보강 (플랫폼 마이그레이션 0006~0008)**
 
@@ -1059,15 +1060,38 @@ CREATE TABLE destruction_history (
 - 계정·권한 화면과 본인 비밀번호 변경은 회원 개인정보 처리가 아니라 접속기록(Agent) 대상이 아니다. 이 이력이 증적이다.
 - `TRUNCATE`는 막지 않는다(Argus 원장만 막음). 3년 보관 뒤 파기는 파기 배치(v0.2)와 함께 다룬다.
 
+**커머스 확장 (플랫폼 마이그레이션 0011~0014, 2026-10-21)** — 정확한 컬럼은 레포 마이그레이션 기준
+
+| 마이그레이션 | 테이블 | 바뀐 것 |
+|---|---|---|
+| 0011 배송·취소 | `product` | `ship_days`(배송 소요 일수 — 예상 도착일) |
+| | `orders` | 상태 CHECK 확장, `courier`·`tracking_no`(송장번호)·`shipped_at`·`delivered_at` |
+| | `order_claim` (신규) | 취소·반품(청약철회) 기록 — 유형 `CANCEL`/`RETURN`, 사유 코드·사유 상세, 상태, 요청·완료 시각, 처리자, 환불액, 환불 PG 거래번호 |
+| | `order_status_history` (신규) | 주문 상태 이력 — 이전·다음 상태, 처리자 유형(`CUSTOMER`·`OPERATOR`·`SYSTEM`), 관리자, 시각. 계약·청약철회 기록(전자상거래법 제6조) |
+| 0012 가입 본인확인 | `member` | `login_id`(유일, NOT NULL — 기존 시드 회원은 `userNNNN`, 나머지 `member{번호}`), `email_verified_at`, 본인확인 결과 `ci`(유일 — 1인 1계정)·`di`·`birth_date`·`gender`·`is_foreigner`·`carrier`·`identity_verified_at`. 이름·휴대폰은 기존 칸에 본인확인 결과로. **주민번호 칸은 없다**(본인확인 창 밖으로 보내지 않음, PIPA 제24조의2) |
+| 0013 PG·택배 연동 | `orders` | 상태 +`PENDING_PAYMENT`·`PAYMENT_EXPIRED`, `delivery_memo`(50자), `courier_shipment_id`(택배 접수번호, 유일)·`courier_status`·`courier_synced_at` |
+| | `order_claim` | 반품 회수 `pickup_shipment_id`·`pickup_status`·`pickup_tracking_no` |
+| | `payment` | PG가 돌려준 `card_number_masked`(앞 6·뒤 4자리)·`approve_no`·`installment_months`·`receipt_url`. 전체 카드번호 칸은 여전히 없음 |
+| 0014 무통장입금 | `orders` | 상태 +`AWAITING_DEPOSIT`·`DEPOSIT_EXPIRED` |
+| | `bank_deposit` (신규) | 주문 1건당 1행 — 주문 시점 쇼핑몰 입금 계좌 사본(은행·계좌번호·예금주), 입금자명, 입금 기한(3일), 입금 확인 시각·처리자 |
+| | `payment` | `method` ∈ {`CARD`, `BANK_TRANSFER`}. 카드사·PG 거래번호는 카드에만 필수(CHECK `payment_card_fields`). 무통장입금 결제는 입금 확인 때 1행 |
+| | `refund_account` | **회원당 1개 → 여러 개**(유니크 해제, 앱에서 최대 5개) |
+| | `order_claim` | `refund_method`(`PG_CANCEL`/`BANK_TRANSFER`)·`refund_status`(`PENDING`/`DONE`), 이체 환불 계좌 사본 `refund_bank_name`·`refund_account_holder`·`refund_account_enc`·`refund_account_last4`, `refunded_at`·`refunded_by`. 기존 기록은 PG 취소·완료로 채움 |
+
+- **이체 환불 계좌 사본**: 고객이 고른 환불계좌를 취소·반품 기록에 복사한다(배송 정보 스냅샷과 같은 이유 — 마이페이지에서 지우거나 고쳐도 진행 중인 환불이 바뀌지 않게). 계좌번호는 복호화 뒤 **AAD = `order_refund:{주문번호}`**로 다시 암호화한다(환불계좌의 AAD는 `refund_account:{회원번호}`).
+- 관리자 접속기록: 배송·반품 목록·검색 `READ`·`ORDER`, 상품 준비·택배 접수·반품 완료·입금 확인·환불 완료 `UPDATE`·`ORDER`, **이체 환불 계좌 전체 보기 `READ`·`PAYMENT`**(결제수단 조회 룰).
+- 보호 대상 등록부: Argus 0023·0024·0025로 새 컬럼을 분류했다(3-8). `order_claim`은 결제수단, `bank_deposit`은 주문 데이터 유형. 가상 PG·택배의 DB는 플랫폼 DB가 아니라 등록부 대상이 아니다.
+
 ### 4-1. 회원 탈퇴 시 파기·분리보관 절차
 
 > **v0.1은 탈퇴 즉시 파기**: 파기 배치는 v0.2라, 아래 절차대로 "상태만 바꾸고 배치를 기다리면" v0.1 동안 탈퇴 회원 정보가 계속 남아 **PIPA 제21조(지체 없이 파기) 위반 상태**가 된다. 따라서 **탈퇴 처리 트랜잭션 안에서** 아래를 수행한다. 아래 번호 절차는 v0.2 파기 배치의 설계로 유지. **보안성 검토 때 재확인.**
 >
 > | 순서 | v0.1 탈퇴 처리 (비밀번호 재확인 후, 한 트랜잭션) |
 > |---|---|
-> | 1 | 주문이 있으면 `retained_member_record`에 **PAYMENT_5Y**(전자상거래법 시행령 제6조제1항제3호, 5년) — 주문번호·상품·금액·일시·PG 거래번호·카드사 + **주문의 배송 정보 스냅샷**(재화 공급 기록) + 분쟁 시 본인 확인용 이름·이메일·전화. 비밀번호·배송지 목록·환불계좌는 담지 않음 |
+> | 0 | (커머스 확장) 배송·반품이 끝나지 않았거나 입금대기·이체 환불 대기 주문이 있으면 탈퇴 거부 |
+> | 1 | 주문이 있으면 `retained_member_record`에 **PAYMENT_5Y**(전자상거래법 시행령 제6조제1항제3호, 5년) — 주문번호·상품·금액·일시·PG 거래번호·카드사 + **주문의 배송 정보 스냅샷**(재화 공급 기록) + 분쟁 시 본인 확인용 이름·이메일·전화. 커머스 확장 후에는 주문 상태·송장번호·결제 수단·입금자명·입금 확인 시각과 취소·반품 기록(사유·환불 방식·환불 상태 — 계약·청약철회 기록, 같은 조 제1호)도 함께 옮긴다. 비밀번호·배송지 목록·환불계좌(이체 환불 계좌 사본 포함)는 담지 않음 |
 > | 2 | 문의가 있으면 **DISPUTE_3Y**(시행령 제6조제1항제4호, 3년) — 제목·본문·답변·시각 + 연락처를 **옮기고**, 운영 테이블 `inquiry`의 제목·본문·답변은 "(탈퇴 회원 문의 — 분리보관됨)"으로 지움(번호·상태·시각·답변자만 남음) |
-> | 3 | 환불계좌·동의 이력·배송지·회원 행 **실제 삭제**(`orders.member_id`는 SET NULL). 주문의 배송 정보 스냅샷은 1번 PAYMENT_5Y에 옮긴 뒤 `orders`에서 지움 |
+> | 3 | 환불계좌·동의 이력·배송지·회원 행 **실제 삭제**(`orders.member_id`는 SET NULL). 주문의 배송 정보 스냅샷은 1번 PAYMENT_5Y에 옮긴 뒤 `orders`에서 지움. 운영 테이블의 송장번호·취소 사유 상세·이체 환불 계좌 사본(예금주·암호문)도 비우고, `bank_deposit.depositor_name`은 "(분리보관)"으로 바꿈 |
 > | 4 | `destruction_history`에 MEMBER 1건(개인정보 미기록) |
 >
 > - 문의 **내용을 옮기고 지우는** 이유: 아래 3번은 "member_id SET NULL로 끊겨 통계 데이터가 된다"였지만, 문의 본문에는 고객이 쓴 개인정보(주소·전화 등)가 있을 수 있어 **연결만 끊으면 사실상 보관 기간 없는 보관**. 기각: 그대로 둠(제21조 위반 소지), 문의 행 삭제(CS 처리 통계·답변자 이력 소실)
@@ -1090,10 +1114,11 @@ CREATE TABLE destruction_history (
 
 | 요구사항 | 대응 |
 |---|---|
-| PLT-01 회원가입·동의 | `member`, **`consent_item`·`member_consent`** |
+| PLT-01 회원가입·동의 | `member`(아이디·본인확인 결과 — 0012), **`consent_item`·`member_consent`** |
 | PLT-02 로그인 | `member`, `operator.failed_login_count` |
 | PLT-03 마이페이지·탈퇴 | `member.status/withdrawn_at`, 4-1절 절차 |
-| PLT-04·05 주문·결제 | `orders`, `payment`, `product`, `refund_account`(계좌번호 암호화 컬럼) |
+| PLT-04·05 주문·결제·취소·환불 | `orders`, `payment`, `product`, `refund_account`(계좌번호 암호화 컬럼, 여러 개), `bank_deposit`, `order_claim`, `order_status_history` |
+| PLT-18 배송·반품 관리 | `orders`(택배 접수·송장), `order_claim`(회수), `order_status_history` |
 | PLT-06·17 1:1 문의 | `inquiry` |
 | PLT-10 관리자 진입 | **`operator.role`** |
 | PLT-11·13·16 조회·다운로드 | 로깅 대상 (스키마 아님) |

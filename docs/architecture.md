@@ -1,6 +1,6 @@
 # 아키텍처 설계서 (Argus)
 
-> 작성 2026-09-23 · 최종 개정 2026-10-10
+> 작성 2026-09-23 · 최종 개정 2026-10-21
 > 상세 스펙: [API명세서_시스템간](api-spec.md), [DB스키마](db-schema.md)
 > 관련 문서: [요구사항정의서](requirements.md), [정책정의서](policy.md), [액터별_플로우](actor-flows.md)
 
@@ -28,6 +28,7 @@
 | 리버스 프록시 | **Caddy** | HTTPS 자동 발급·갱신, 설정 간결. rate limit 부재는 앱 레벨 로그인 실패 제한으로 대체 |
 | CI/CD | **GitHub Actions + GHCR**, 보안 스캔은 **report-only로 시작** | 8절 |
 | 관리자 인증 | **JWT(HS256) `HttpOnly`·`SameSite=Strict` 쿠키, 30분 미사용 시 만료**(요청마다 재발급), 매 요청 계정 상태(퇴직·잠금) 재확인. 로그인 5회 연속 실패 시 잠금 | 안전조치기준 제5조제6항(인증 실패 시 접근 제한)·제6조제4항(일정 시간 미사용 시 접속 차단). 서버 세션은 [S] 스키마에 세션 테이블이 없어 기각. 정책정의서 4-3 |
+| 외부 연동 (커머스 확장) | **가상 PG·가상 택배를 각자 컨테이너·DB를 둔 별도 서비스로** — 플랫폼 서버와 API로만 연결, Argus 감시 대상 아님 | 2-5절. 플랫폼 안에 흉내 모듈로 두는 안은 데이터가 플랫폼 DB 밖으로 나가지 않아 위탁 경계를 보여 줄 수 없어 기각 |
 | 권한 관리 | 플랫폼은 **역할(ADMIN·OPS·CS·MARKETING) → 기능 표**를 서버가 검사(거부 403도 접속기록 `FAILURE`). 플랫폼·Argus 모두 계정 부여·변경·말소에 사유를 받고 권한 이력(append-only)을 남긴다(Argus 계정 관리 화면은 v0.2에서 노출) | 안전조치기준 제5조제1항(최소 권한)·제5조제3항(권한 부여·변경·말소 내역). 2-3절 |
 
 ---
@@ -61,6 +62,7 @@
 - ③ 보호 대상 등록부 동기화는 게이트웨이가 시작하는 요청만 있다(구조 목록 `POST /ingest/v1/db-schema`, 등록부 `GET /ingest/v1/protection-registry`, 둘 다 출처 `PLATFORM` HMAC). Argus가 플랫폼 쪽으로 먼저 연결하는 통로는 없다(3-4절).
 - `argus-worker`는 탐지 순찰마다 소명 기한 임박·초과를 판정하고 웹 푸시 대기분을 보낸다(2-1·2-2절). 보관기간 만료 파기 배치는 v0.2다.
 - `platform-relay`와 `argus-worker`는 각각 API와 **같은 이미지를 쓰되 실행 명령만 다른 별도 컨테이너**다. API 프로세스를 여러 개 띄워도 배치·전송이 중복 실행되지 않게 하기 위함이다.
+- 플랫폼은 결제·배송을 외부 수탁사(가상 PG·가상 택배)와 연동한다 — 2-5절. 이 연결은 플랫폼 ↔ 수탁사 사이의 것이고 Argus와는 무관하다.
 
 ### 2-1. 알림과 소명 기한
 
@@ -136,6 +138,31 @@ Argus 탭이 닫혀 있어도 브라우저가 켜져 있으면 받는 급한 알
 - 해시체인만으로는 끝부분 삭제를 잡지 못한다(남은 체인이 그대로 이어진다). 직전 보고서의 기준점과 대조하면 체인 검증은 통과해도 불일치로 드러난다.
 - **한계와 운영 전제**: 테이블 소유자·슈퍼유저는 트리거를 끌 수 있다(`ALTER TABLE … DISABLE TRIGGER`). 보고서도 같은 argus DB에 있으므로, 보고서를 출력해 결재문서(관리대장)에 붙이는 운영을 전제로 한다. 출력본에 남은 마지막 id와 해시(화면·인쇄에 64자 전체)가 DB 밖 기준점이다(안내서 95쪽 "위·변조 확인 정보를 별도 저장매체 또는 관리대장에"). 체인 머리를 WORM 저장소 등에 주기적으로 남기는 외부 앵커링은 v0.2(8-6).
 - 보관기간이 지난 기록의 파기 배치(v0.2)는 지금 트리거에 막힌다. 그때 파기 전용 경로(파기 롤만 통과 + 파기 이력에 체인 기준점 기록)로 다시 설계한다.
+
+### 2-5. 외부 연동 — 가상 PG·가상 택배 (커머스 확장, 2026-10-21)
+
+실제 쇼핑몰처럼 결제는 PG, 배송은 택배사에 맡긴다. 두 수탁사를 **각자 컨테이너·DB를 둔 별도 서비스**로 흉내 낸다 — 수탁자가 다르니 키·저장소도 따로 두고, 위탁하는 데이터가 실제로 플랫폼 DB 밖으로 나가게 하기 위해서다.
+
+```
+ 브라우저 ──(작은 창: 결제창 폼 POST)──▶ mock-pg ──(돌아갈 주소)──▶ platform-web /checkout/result
+                                         ▲  (mock-pg-net)  [mock-pg-db]
+ platform-api ──(승인·조회·취소, Basic)──┘
+      │  partner-net (플랫폼 서버만 연결)
+      ├──(접수·회수·조회·취소, Bearer)──▶ mock-courier (mock-courier-net) [mock-courier-db]
+      ◀──(상태 통지 POST /partners/courier/events, HMAC ±300초)──┘
+```
+
+| 항목 | 가상 PG (`apps/mock-pg`) | 가상 택배 (`apps/mock-courier`) |
+|---|---|---|
+| API | 결제창 열기·승인 입력·결제창 취소·영수증(브라우저) / 승인·조회·주문번호 조회·전액 취소(서버) | 배송 접수·반품 회수 접수·조회·접수 취소 |
+| 받는 정보 | 주문번호·주문명·금액·구매자 이름·이메일·휴대폰, 카드번호(결제창에서 직접) | 받는 사람 이름·연락처·주소·배송 메모·상품명·수량·주문번호·보내는 곳 |
+| 돌려주는 정보 | 거래번호·마스킹 카드번호(앞 6·뒤 4)·할부·승인번호·영수증 주소 | 접수번호·송장번호(집하 때)·상태 |
+| 상태 | 결제창 10분 | 설정값(`setting` 표, 초)에 따라 자동 진행하고 바뀔 때마다 쇼핑몰에 통지. DB에서 상태를 직접 바꿔도 트리거가 변경 출처(DB)를 남기고 통지된다 |
+| 인증 | 서버 호출은 비밀 키 Basic. 결제창은 등록된 쇼핑몰 주소로만 돌려보냄(열린 리다이렉트 방지) | 서버 호출은 API 키 Bearer, 통지는 HMAC 서명(수집 API와 같은 규칙) |
+
+- **Argus 감시 대상이 아니다.** PG·택배 서비스와 그 DB는 플랫폼 밖 시스템이고, 플랫폼 관리자가 쓰는 화면도 없다. Argus가 보는 것은 플랫폼 관리자의 택배 접수·반품 완료 같은 행위(UPDATE·ORDER)뿐이다.
+- 네트워크: 각 서비스와 DB는 자기 전용망에만, 서버 간 호출은 `partner-net`(platform-api와 두 서비스만). 결제창은 브라우저가 직접 연다. 로컬에서는 결제창 포트와 두 DB 포트를 `127.0.0.1`에만 연다(DB 툴로 상태를 바꿔 보는 시연용).
+- 운영 배포 때 결제창의 공개 주소(Caddy 라우팅)는 정하지 않았다 — 첫 배포 때 결정.
 
 ---
 
@@ -219,7 +246,7 @@ Argus 탭이 닫혀 있어도 브라우저가 켜져 있으면 받는 급한 알
 | 원문 저장 (D안) | SQL 원문·매개변수는 **게이트웨이 저장소(`gateway-data` 볼륨)에만** 둔다. Argus는 원문을 갖지 않는다(절대 규칙 #3 유지 — 매개변수에 이메일·이름이 실릴 수 있음). 지문 = SHA-256(원문 레코드)로, Argus 원장의 지문과 대조해 원문의 위·변조·유실을 확인한다. **조회 결과(행 데이터)는 저장하지 않는다** |
 | 정보주체 식별 (C안) | **결과 열에서 회원번호 추출 — SQL은 해석하지 않는다.** PostgreSQL 응답의 결과 열 설명(RowDescription)은 각 열이 어느 테이블의 몇 번째 열인지(**테이블 OID·열 번호**)를 알려 준다. 게이트웨이는 보호 대상 등록부의 회원 식별 열(기본값 7개 — `member.id`, `orders`·`member_consent`·`refund_account`·`inquiry`·`shipping_address`의 `member_id`, `retained_member_record.original_member_id`)의 (OID, 열 번호)를 카탈로그에서 한 번 받아 두고, 결과 행(DataRow)에서 **그 열의 값만** 읽는다. 조인·별칭이어도 열의 출처로 찾는다. 확장 쿼리는 Bind의 결과 형식 코드로 텍스트·바이너리(int2·int4·int8)를 가리고, 이름 있는 문장을 다시 실행하면 기억해 둔 열 설명을 쓴다. 찾으면 고유 회원번호를 `subject_ids`(1,000개 상한, 넘으면 `truncated`, `count`는 전체)로, `subject_unresolved = false`. 회원 열이 결과에 있는데 0행이면 "아무도 처리하지 않음"(빈 목록, 미특정 아님). **미특정으로 남는 경우**: 결과에 회원 열이 없는 조회(`SELECT name, email FROM member`), 식·함수·뷰 결과(OID 0), `public` 스키마의 실제 테이블이 아닌 것(사용자가 만든 복사 테이블 등), 결과를 돌려주지 않는 실행(RETURNING 없는 UPDATE·DELETE)·COPY, 값 해석에 하나라도 실패한 실행(일부만 적으면 "이 사람들만 봤다"로 오해되므로 실행 전체를 미특정), 카탈로그 조회 실패(질의는 막지 않는다). 이때는 건수 + 원문 참조로 남는다. 결과 값은 원장에도 원문 저장소에도 남기지 않고 회원번호만 원장으로 간다. 회원 열 OID 조회는 게이트웨이 자체 연결이라 기록하지 않는다 |
 | 수행업무 매핑 | `SELECT` → `READ` / `INSERT` → `CREATE` / `UPDATE`·`MERGE` → `UPDATE` / `DELETE`·`TRUNCATE` → `DELETE` / `COPY … TO` → `DOWNLOAD` / 연결 인증 → `LOGIN`(성공·실패. 존재하지 않는 아이디는 기록하지 않음 — API명세서 2-4 v0.4 규칙과 동일). **구현 세부**: `COPY … FROM` → `CREATE` / **안을 볼 수 없는 실행** — `SELECT 사용자함수()` → `READ`, `CALL`·`DO`·SQL `EXECUTE`(준비된 문장 실행) → `UPDATE`, 데이터 유형 `MEMBER_BASIC`, `subject_unresolved = true`(`NONE`이면 미특정 룰에도 안 걸리고 `PAYMENT`면 결제수단 룰 오탐) / `EXPLAIN`은 안의 문장 기준(`ANALYZE`는 실제 실행) / **파서가 못 읽은 문장**은 `READ`·`MEMBER_BASIC`·미특정으로 보수적으로 전송(대개 DB도 거부해 `FAILURE`) / fastpath 함수 호출은 기록할 수 없어 **연결 종료** / DB 연결 종료는 기록하지 않는다(로그아웃 `LOGOUT`은 화면 경유만) |
-| 데이터 유형 | 문장이 건드린 테이블로 정한다. 판정 표는 **Argus 보호 대상 등록부**에서 받는다(아래 "보호 대상 등록부 연동"): 테이블의 데이터 유형 = 그 테이블에 등록된 개인정보 컬럼 중 가장 민감한 것. 초기 등록(= 등록부를 받지 못할 때 쓰는 고정 표): `refund_account` → `PAYMENT`(계좌번호는 암호문이지만 결제수단 테이블 접근 자체가 점검 대상) / `member`·`member_consent`·`retained_member_record`·`shipping_address` → `MEMBER_BASIC` / `inquiry` → `INQUIRY` / `orders`·`payment`(PG 거래 정보) → `ORDER` / 그 외 → `NONE`. 여러 테이블이면 **가장 민감한 것**(PAYMENT > MEMBER_BASIC > INQUIRY > ORDER > NONE). v0.1 판정은 테이블 단위다 — 개인정보 컬럼을 건드리지 않은 조회도 그 테이블의 유형으로 기록한다(`SELECT *`·식·함수에서 누락되지 않게 넓게 본다). 직원 계정(`operator`)·권한 이력(`operator_permission_history`) 같은 직원 정보 테이블은 분류 대상이 아니다 — 분류 기준은 정보주체(회원)이고, 이런 테이블은 등록부에 미분류로 남아 담당자가 확인한다(접근은 `NONE`으로 기록) |
+| 데이터 유형 | 문장이 건드린 테이블로 정한다. 판정 표는 **Argus 보호 대상 등록부**에서 받는다(아래 "보호 대상 등록부 연동"): 테이블의 데이터 유형 = 그 테이블에 등록된 개인정보 컬럼 중 가장 민감한 것. 초기 등록(= 등록부를 받지 못할 때 쓰는 고정 표): `refund_account` → `PAYMENT`(계좌번호는 암호문이지만 결제수단 테이블 접근 자체가 점검 대상) / `member`·`member_consent`·`retained_member_record`·`shipping_address` → `MEMBER_BASIC` / `inquiry` → `INQUIRY` / `orders`·`payment`(PG 거래 정보)·`bank_deposit`(입금자명) → `ORDER` / `order_claim`(취소·반품 기록, 이체 환불 계좌 사본) → `PAYMENT` / 그 외 → `NONE`. 여러 테이블이면 **가장 민감한 것**(PAYMENT > MEMBER_BASIC > INQUIRY > ORDER > NONE). v0.1 판정은 테이블 단위다 — 개인정보 컬럼을 건드리지 않은 조회도 그 테이블의 유형으로 기록한다(`SELECT *`·식·함수에서 누락되지 않게 넓게 본다). 직원 계정(`operator`)·권한 이력(`operator_permission_history`) 같은 직원 정보 테이블은 분류 대상이 아니다 — 분류 기준은 정보주체(회원)이고, 이런 테이블은 등록부에 미분류로 남아 담당자가 확인한다(접근은 `NONE`으로 기록) |
 | 기록 제외 | **사용자 테이블을 하나도 참조하지 않는 문장** — 시스템 카탈로그(`pg_catalog`·`information_schema`)만 읽는 문장, 테이블 없는 `SELECT`(`SELECT version()`), 시스템 함수 FROM(`pg_get_keywords()`) 등 DB 툴의 메타데이터·상태 조회(Argus 전송만 제외하고 **원문 저장소에는 남긴다**). **단 제외하지 않는 것**: 사용자 스키마의 함수·프로시저 호출, `DO`·`CALL` — 테이블 이름 없이도 내부에서 개인정보 테이블을 읽거나 고칠 수 있음(게이트웨이가 내부를 볼 수 없으므로 `subject_unresolved`로 기록, 매핑은 아래 "수행업무 매핑" 구현 세부). 트랜잭션 제어·`SET`·`SHOW`도 제외. **DDL·DCL은 v0.1에서 게이트웨이 원문 저장소에만** 남기고 Argus 전송은 v0.2(명령어 통제와 함께 — 수행업무 코드에 해당 값이 없음) |
 | 보호 대상 등록부 연동 | **등록부 받기**: 기동 시 + 5분마다 `GET /ingest/v1/protection-registry`(빈 본문 HMAC 서명, 출처 `PLATFORM`)로 판정 표(테이블 → 데이터 유형, 회원 식별 열, 등록부 버전)를 받는다. 응답은 키를 정확히 검증해 값 칸이 섞이면 버린다. 받을 때마다 `gateway-data/registry.json`에 저장한다. **받지 못하면**(fail-closed — 기록이 `NONE`으로 빠져 탐지에서 누락되지 않게): 마지막으로 받은 등록부를 쓰고(재기동해도 파일에서 복원), 한 번도 받지 못했으면 고정 표(초기 등록과 같은 내용, 버전 `builtin`)를 쓴다. 실패하면 30초 뒤 다시 시도한다. **DB 구조 목록 보내기**: 기동 시 + 1시간마다 `POST /ingest/v1/db-schema`. `pg_catalog`만 읽어 `public` 스키마 테이블·컬럼의 **이름과 자료형만** 보낸다(데이터 값을 읽는 쿼리는 쓰지 않는다). Argus는 값·예시 칸이 있으면 400으로 거부한다. 등록은 이 목록에 있는 컬럼만 받고(오타 방지), 목록에 있는데 분류되지 않은 컬럼은 "미분류"로 드러난다(새 테이블·컬럼이 점검 대상에서 조용히 빠지지 않게). 등록부 API(`/api/protection*`)와 게이트웨이 판정 연동은 v0.1에 있고, 담당자 관리 화면(메뉴 "보호 대상")은 v0.2에서 노출한다. **버전 기록**: 원장 `context.registry_version`에 판정에 쓴 등록부 버전(`r{이력 id}` 또는 `builtin`)을 남긴다 — 그때 기준으로 왜 그렇게 분류됐는지 설명할 수 있게. DB 이름은 논리 이름 `platform`(실제 DB 이름이 원장·등록부에 퍼지지 않게). 두 요청 모두 게이트웨이 자체 연결·자체 요청이라 접속기록을 남기지 않는다 |
 | 기록 실패 시 | **기록할 수 없으면 내보내지 않는다**(3-2와 같은 원칙). 결과 행은 흘려보내되 문장 완료 신호(CommandComplete) 전에 원문 저장·접속기록 적재를 마치고, 실패하면 완료 신호 대신 오류를 보내고 연결을 끊는다 → DB 툴에서는 쿼리 실패가 된다 |
@@ -333,6 +360,8 @@ Argus 탭이 닫혀 있어도 브라우저가 켜져 있으면 받는 급한 알
 │   ├ platform-db    ├ db-gateway     └ gateway-data(볼륨, db-gateway만) │
 │   ├ argus-web      ├ argus-api      ├ argus-worker     │
 │   ├ argus-db       └ argus-attachments(볼륨, argus-api만) │
+│   ├ mock-pg·mock-pg-db, mock-courier·mock-courier-db    │
+│     (외부 수탁사 흉내 — 2-5, Argus 감시 대상 아님)          │
 │   └ backup (일 1회 pg_dump)                             │
 │     ※ DB·API는 내부 도커 네트워크에만 존재, 외부 비노출       │
 │     ※ platform-db 포트는 db-gateway·platform-api·relay      │
@@ -424,6 +453,7 @@ Argus 탭이 닫혀 있어도 브라우저가 켜져 있으면 받는 급한 알
 | VM 접속 SSH 키, 호스트 정보 | GitHub Actions Secrets |
 | DB 비밀번호, 플랫폼→Argus HMAC 키, 결제수단 암호화 키(제7조제2항) | **VM의 `.env` 파일**(레포에 없음, 권한 600). 암호화 키는 DB와 분리 보관(제7조제6항 취지) |
 | **2티어 시크릿** | 플랫폼 DB **공용 계정 비밀번호**(db-gateway·platform-api만, 사람에게 공유 안 함) / 플랫폼→Argus **HMAC 키(출처 PLATFORM)**를 db-gateway에도 전달 / **DB 접속 토큰 서명 키 `DB_GATEWAY_TOKEN_KEY`**(platform-api·db-gateway만, 관리자 JWT 키와 별개) / **게이트웨이 TLS 키·인증서**(db-gateway만). 모두 `.env` 또는 마운트 파일 — 컨테이너별 최소 시크릿 원칙(7-2) |
+| 가상 PG·택배 키 | PG 비밀 키·클라이언트 키(`MOCKPG_*` — mock-pg와 platform-api), 택배 API 키·통지 서명 키(`COURIER_*` — mock-courier와 platform-api), 각 DB 비밀번호(각 서비스만). `.env` |
 | 웹 푸시 VAPID 키 | `ARGUS_VAPID_PUBLIC_KEY`·`ARGUS_VAPID_PRIVATE_KEY`·`ARGUS_VAPID_SUBJECT` — `.env`, argus-api·argus-worker만(2-2) |
 | 관리자 허용 IP 목록 | VM의 Caddy 설정 |
 | 레포 규칙 | `.env`·키 파일 gitignore, 시드 데이터 100% 가상(Faker), README에 "모든 데이터는 가상" 명시 |
@@ -502,6 +532,8 @@ Argus 탭이 닫혀 있어도 브라우저가 켜져 있으면 받는 급한 알
   /platform-web    Next.js — 고객 UI + 관리자 UI
   /platform-api    FastAPI — 업무 API + 접속기록 Agent(미들웨어) + outbox relay(별도 컨테이너로 실행)
   /db-gateway      Python(asyncio) — DB 접근 게이트웨이(2티어): DB 툴 ↔ platform-db 중계, 원문 저장, 자체 버퍼 → Argus 수집 API
+  /mock-pg         FastAPI — 가상 PG(결제창·승인·취소), 자체 DB (외부 수탁사 흉내, 2-5)
+  /mock-courier    FastAPI — 가상 택배(접수·회수·상태 자동 진행·통지), 자체 DB (외부 수탁사 흉내, 2-5)
   /argus-web       Next.js — 정보보호 담당자 / 취급자 UI, 웹 푸시 서비스 워커(public/sw.js)
   /argus-api       FastAPI — 수집·동기화·보호 대상 등록부·탐지·소명·알림·보고 API + worker(탐지·소명 기한 순찰·웹 푸시 발송, 별도 컨테이너로 실행)
 /infra
@@ -512,7 +544,7 @@ Argus 탭이 닫혀 있어도 브라우저가 켜져 있으면 받는 급한 알
   /workflows                ci.yml (build.yml·deploy.yml은 첫 배포 때)
   dependabot.yml
 /e2e               E2E 시나리오 (Skeleton 시나리오 등, CI e2e job)
-/scripts           실행 보조 스크립트 (`e2e.sh`, `init-env.sh`)
+/scripts           실행 보조 스크립트 (`e2e.sh`, `init-env.sh` — `--add-missing`은 기존 `.env`에 빠진 칸만 채움)
 /docs              설계 문서
 CLAUDE.md          Claude Code 작업 지침
 ```
