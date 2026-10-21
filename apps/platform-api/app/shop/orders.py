@@ -10,6 +10,9 @@
 주문은 로그인 필수, 등록된 배송지 중 하나를 고른다(7-4 ③). 고른 배송지는 주문 행에 **복사**한다 —
 배송지를 고치거나 지워도 주문 기록은 그대로(db-schema 4절 "플랫폼 보강").
 고객 본인 행위라 접속기록 대상이 아니다 (CLAUDE.md 3절 #4).
+
+배송 조회·취소·청약철회(커머스 확장, app/fulfillment.py): 내 주문의 배송 상태·예상 도착일·
+가상 택배사·송장번호를 보여 주고, 상품준비중까지는 취소, 배송완료 후 7일 이내에는 청약철회를 받는다.
 """
 
 from typing import Annotated, Literal
@@ -20,7 +23,17 @@ from sqlalchemy import func, insert, select
 
 from app.commerce import CARD_COMPANIES, mock_pg_tid
 from app.errors import ApiError
-from app.models import orders, payment, product, shipping_address
+from app.fulfillment import (
+    CANCEL_REASONS,
+    RETURN_REASONS,
+    cancel_order,
+    claims_of,
+    expected_delivery,
+    lock_order,
+    request_return,
+    withdrawal_deadline,
+)
+from app.models import order_status_history, orders, payment, product, shipping_address
 from app.shop.deps import CurrentMember
 
 router = APIRouter(prefix="/shop")
@@ -33,14 +46,29 @@ class OrderRequest(BaseModel):
     card_company: Literal[CARD_COMPANIES]  # type: ignore[valid-type]
 
 
+class CancelRequest(BaseModel):
+    reason_code: Literal[CANCEL_REASONS]  # type: ignore[valid-type]
+    reason_detail: Annotated[str, Field(max_length=500)] | None = None
+
+
+class ReturnRequest(BaseModel):
+    reason_code: Literal[RETURN_REASONS]  # type: ignore[valid-type]
+    reason_detail: Annotated[str, Field(max_length=500)] | None = None
+
+
 def _order_rows(conn, member_id: int) -> list[dict]:
     rows = conn.execute(
         select(
             orders.c.id,
             product.c.name.label("product_name"),
+            product.c.ship_days,
             orders.c.amount,
             orders.c.status,
             orders.c.ordered_at,
+            orders.c.courier,
+            orders.c.tracking_no,
+            orders.c.shipped_at,
+            orders.c.delivered_at,
             orders.c.ship_recipient,
             orders.c.ship_phone,
             orders.c.ship_zip_code,
@@ -58,7 +86,27 @@ def _order_rows(conn, member_id: int) -> list[dict]:
         .where(orders.c.member_id == member_id)
         .order_by(orders.c.ordered_at.desc(), orders.c.id.desc())
     ).mappings()
-    return [dict(r) for r in rows]
+    items = [dict(r) for r in rows]
+    claims = claims_of(conn, [i["id"] for i in items])
+    for item in items:
+        item["expected_delivery_at"] = expected_delivery(item["ordered_at"], item.pop("ship_days"))
+        item["return_deadline"] = withdrawal_deadline(item["delivered_at"])
+        item["claims"] = [
+            {
+                k: c[k]
+                for k in (
+                    "claim_type",
+                    "reason_code",
+                    "reason_detail",
+                    "status",
+                    "requested_at",
+                    "completed_at",
+                    "refund_amount",
+                )
+            }
+            for c in claims.get(item["id"], [])
+        ]
+    return items
 
 
 @router.get("/products")
@@ -110,6 +158,11 @@ def create_order(body: OrderRequest, request: Request, me: CurrentMember) -> dic
             )
             .returning(orders.c.id)
         ).scalar_one()
+        conn.execute(
+            insert(order_status_history).values(
+                order_id=order_id, to_status="PAID", actor_type="CUSTOMER", changed_at=now
+            )
+        )
         # 가상 PG 승인 결과 — 금액은 서버가 상품 가격으로 정한다(화면이 보낸 금액을 믿지 않음)
         conn.execute(
             insert(payment).values(
@@ -121,7 +174,7 @@ def create_order(body: OrderRequest, request: Request, me: CurrentMember) -> dic
                 approved_at=now,
             )
         )
-        created = next(r for r in _order_rows(conn, me.id) if r["id"] == order_id)
+        created = _my_order(conn, me.id, order_id)
     return created
 
 
@@ -129,3 +182,27 @@ def create_order(body: OrderRequest, request: Request, me: CurrentMember) -> dic
 def my_orders(request: Request, me: CurrentMember) -> dict:
     with request.app.state.engine.connect() as conn:
         return {"items": _order_rows(conn, me.id)}
+
+
+def _my_order(conn, member_id: int, order_id: int) -> dict:
+    return next(r for r in _order_rows(conn, member_id) if r["id"] == order_id)
+
+
+@router.post("/orders/{order_id}/cancel")
+def cancel_my_order(order_id: int, body: CancelRequest, request: Request, me: CurrentMember):
+    """주문 취소 — 상품준비중까지, 즉시 카드 승인 취소 (판단기록 F3)"""
+    with request.app.state.engine.begin() as conn:
+        now = conn.execute(select(func.now())).scalar_one()
+        order = lock_order(conn, order_id, me.id)
+        cancel_order(conn, order, now, body.reason_code, body.reason_detail)
+        return _my_order(conn, me.id, order_id)
+
+
+@router.post("/orders/{order_id}/return")
+def return_my_order(order_id: int, body: ReturnRequest, request: Request, me: CurrentMember):
+    """청약철회(반품) 신청 — 배송완료 후 7일 이내 (전자상거래법 제17조제1항)"""
+    with request.app.state.engine.begin() as conn:
+        now = conn.execute(select(func.now())).scalar_one()
+        order = lock_order(conn, order_id, me.id)
+        request_return(conn, order, now, body.reason_code, body.reason_detail)
+        return _my_order(conn, me.id, order_id)

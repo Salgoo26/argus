@@ -6,7 +6,7 @@
 
 import secrets
 
-from conftest import PLATFORM_URL, Browser
+from conftest import PLATFORM_URL, Browser, shop_signup
 
 PASSWORD = "e2e-buyer-pass-1"  # noqa: S105 — 테스트 전용 더미 값, 매번 새 가상 계정
 REQUIRED = {"TOS": True, "PRIVACY_REQUIRED": True, "AGE_OVER_14": True}
@@ -19,24 +19,25 @@ def test_customer_signup_mypage_withdraw():
     items = shop.get("/api/shop/consent-items").json()
     assert {i["code"] for i in items} >= set(REQUIRED) | {"MARKETING"}
 
-    profile = {"email": email, "password": PASSWORD, "name": "가상고객", "phone": "01000000001"}
-
+    # 인증(이메일·휴대폰 본인확인) 없이 가입 API를 직접 부를 수 없다 (커머스 확장)
+    forged = {"login_id": "e2eforged", "password": PASSWORD, "consents": REQUIRED}
+    refused = shop.post(
+        "/api/shop/auth/signup", json={**forged, "email_token": "x", "identity_token": "x"}
+    )
+    assert refused.status_code == 400
     # 필수 동의가 빠지면 가입 불가
-    refused = shop.post("/api/shop/auth/signup", json={**profile, "consents": {}})
-    assert refused.status_code == 400
-    # 휴대폰은 가입 필수 (2026-10-07 플랫폼 보강)
-    no_phone = {k: v for k, v in profile.items() if k != "phone"}
-    refused = shop.post("/api/shop/auth/signup", json={**no_phone, "consents": REQUIRED})
+    refused, _ = shop_signup(shop, email, PASSWORD, "가상고객", "01000000001", {})
     assert refused.status_code == 400
 
-    joined = shop.post("/api/shop/auth/signup", json={**profile, "consents": REQUIRED})
+    joined, login_id = shop_signup(shop, email, PASSWORD, "가상고객", "01000000001", REQUIRED)
     assert joined.status_code == 201, joined.text
 
     me = shop.get("/api/shop/me").json()
     assert {c["code"]: c["agreed"] for c in me["consents"]}["MARKETING"] is False
     assert me["phone"] == "010-0000-0001"  # 하이픈 형식으로 저장
+    assert me["login_id"] == login_id and me["birth_date"]  # 본인확인 결과 저장 (판단기록 F1)
 
-    # 정정: 이름·휴대폰은 바뀌고, 이메일(로그인 아이디)은 보내도 바뀌지 않는다
+    # 정정: 이름·휴대폰은 바뀌고, 이메일은 보내도 바뀌지 않는다
     edited = shop.request(
         "PATCH",
         "/api/shop/me",
@@ -72,5 +73,5 @@ def test_customer_signup_mypage_withdraw():
     gone = shop.post("/api/shop/me/withdraw", json={"password": PASSWORD})
     assert gone.status_code == 204
     again = Browser(PLATFORM_URL, "customer_session")
-    login = again.post("/api/shop/auth/login", json={"email": email, "password": PASSWORD})
+    login = again.post("/api/shop/auth/login", json={"login_id": login_id, "password": PASSWORD})
     assert login.status_code == 401  # 계정 자체가 파기됨

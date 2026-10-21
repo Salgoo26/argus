@@ -9,6 +9,7 @@ from sqlalchemy import (
     BigInteger,
     Boolean,
     Column,
+    Date,
     DateTime,
     ForeignKey,
     Integer,
@@ -53,6 +54,16 @@ member = Table(
     Column("withdrawn_at", DateTime(timezone=True)),
     Column("failed_login_count", Integer, nullable=False),
     Column("locked_until", DateTime(timezone=True)),
+    # 커머스 확장 (0012) — 별도 아이디·이메일 인증·휴대폰 본인확인 결과
+    Column("login_id", String(20), nullable=False),
+    Column("email_verified_at", DateTime(timezone=True)),
+    Column("ci", String(88)),
+    Column("di", String(64)),
+    Column("birth_date", Date),
+    Column("gender", CHAR(1)),
+    Column("is_foreigner", Boolean),
+    Column("carrier", String(16)),
+    Column("identity_verified_at", DateTime(timezone=True)),
 )
 
 outbox = Table(
@@ -103,6 +114,7 @@ product = Table(
     Column("id", BigInteger, primary_key=True),
     Column("name", String(100), nullable=False),
     Column("price", Integer, nullable=False),
+    Column("ship_days", Integer, nullable=False),  # 상품별 고정 배송 소요 일수 (0011)
 )
 
 orders = Table(
@@ -120,6 +132,40 @@ orders = Table(
     Column("ship_zip_code", String(5)),
     Column("ship_address", String(255)),
     Column("ship_address_detail", String(100)),
+    # 배송 진행 (0011) — 가상 택배사·송장번호는 발송(SHIPPING) 때 정해진다
+    Column("courier", String(30)),
+    Column("tracking_no", String(30)),
+    Column("shipped_at", DateTime(timezone=True)),
+    Column("delivered_at", DateTime(timezone=True)),
+)
+
+# 취소·반품(청약철회) 기록 (0011)
+order_claim = Table(
+    "order_claim",
+    metadata,
+    Column("id", BigInteger, primary_key=True),
+    Column("order_id", BigInteger, ForeignKey("orders.id"), nullable=False),
+    Column("claim_type", String(16), nullable=False),  # CANCEL / RETURN
+    Column("reason_code", String(32), nullable=False),
+    Column("reason_detail", String(500)),
+    Column("status", String(16), nullable=False),  # REQUESTED / COMPLETED
+    Column("requested_at", DateTime(timezone=True), nullable=False),
+    Column("completed_at", DateTime(timezone=True)),
+    Column("completed_by", BigInteger, ForeignKey("operator.id")),
+    Column("refund_amount", Integer),
+    Column("refund_pg_tid", String(64)),
+)
+
+order_status_history = Table(
+    "order_status_history",
+    metadata,
+    Column("id", BigInteger, primary_key=True),
+    Column("order_id", BigInteger, ForeignKey("orders.id"), nullable=False),
+    Column("from_status", String(16)),
+    Column("to_status", String(16), nullable=False),
+    Column("actor_type", String(16), nullable=False),  # CUSTOMER / OPERATOR / SYSTEM
+    Column("operator_id", BigInteger, ForeignKey("operator.id")),
+    Column("changed_at", DateTime(timezone=True), nullable=False),
 )
 
 # 주문의 배송 정보 스냅샷 컬럼 (탈퇴 시 분리보관으로 옮기고 비운다)

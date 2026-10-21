@@ -40,7 +40,7 @@ export async function api<T>(path: string, init?: RequestInit): Promise<T> {
 
 // 서버 오류 코드 → 화면 문구. 없는 ID와 틀린 비밀번호는 서버가 같은 코드로 답한다(계정 열거 방지)
 const MESSAGES: Record<string, string> = {
-  INVALID_CREDENTIALS: "아이디(이메일) 또는 비밀번호가 올바르지 않습니다.",
+  INVALID_CREDENTIALS: "아이디 또는 비밀번호가 올바르지 않습니다.",
   ACCOUNT_LOCKED: "로그인 5회 실패로 계정이 잠겼습니다. 관리자에게 해제를 요청하세요.",
   ACCOUNT_DISABLED: "사용할 수 없는 계정입니다.",
   UNAUTHENTICATED: "로그인이 필요합니다.",
@@ -60,6 +60,14 @@ const MESSAGES: Record<string, string> = {
   LOGIN_ID_TAKEN: "이미 있는 아이디입니다.",
   NO_CHANGE: "바뀐 내용이 없습니다.",
   ACCOUNT_TERMINATED: "퇴직 처리된 계정입니다.",
+  // 커머스 확장 — 회원가입 인증·배송·취소·청약철회
+  VERIFICATION_REQUIRED: "이메일 인증과 휴대폰 본인확인을 먼저 마쳐 주세요.",
+  IDENTITY_CONSENT_REQUIRED: "본인확인 서비스 이용에 동의해야 인증할 수 있습니다.",
+  UNDER_14: "만 14세 미만은 가입할 수 없습니다.",
+  ALREADY_REGISTERED: "이미 가입한 회원입니다. 가입한 아이디로 로그인해 주세요.",
+  INVALID_ORDER_STATUS: "지금 주문 상태에서는 할 수 없는 처리입니다.",
+  WITHDRAWAL_PERIOD_EXPIRED: "배송완료 후 7일이 지나 청약철회(반품)를 신청할 수 없습니다.",
+  ORDERS_IN_PROGRESS: "배송 중이거나 반품 처리 중인 주문이 있어 탈퇴할 수 없습니다. 처리가 끝난 뒤 다시 시도하세요.",
   SHIPPING_ADDRESS_INCOMPLETE:
     "이 배송지는 연락처·우편번호가 비어 있습니다. 마이페이지에서 배송지를 보완해 주세요.",
 };
@@ -105,12 +113,21 @@ export type Consent = {
 
 export type Customer = {
   id: number;
+  login_id: string;
   email: string;
+  email_verified_at: string | null;
   name: string;
   phone: string | null;
+  // 휴대폰 본인확인 결과 (커머스 확장) — 예전에 가입한 회원은 비어 있다
+  birth_date: string | null;
+  gender: "M" | "F" | null;
+  carrier: string | null;
+  identity_verified_at: string | null;
   created_at: string;
   consents: Consent[];
 };
+
+export const GENDER: Record<string, string> = { M: "남", F: "여" };
 
 export type ConsentItem = {
   code: string;
@@ -169,7 +186,7 @@ export function fullAddress(a: Pick<ShippingAddress, "zip_code" | "address" | "a
 
 // ── 주문·결제(PG 목업)·환불계좌 ───────────────────────────
 
-export type Product = { id: number; name: string; price: number };
+export type Product = { id: number; name: string; price: number; ship_days?: number };
 
 // 주문의 배송 정보 — 주문할 때 고른 배송지를 복사해 둔 값 (7-4 ③). 이 기능 이전 주문·탈퇴 회원 주문은 비어 있다
 export type OrderShipping = {
@@ -189,16 +206,77 @@ export function orderAddress(o: OrderShipping): string | null {
   });
 }
 
-export type Order = OrderShipping & {
-  id: number;
-  product_name: string;
-  amount: number;
-  status: string;
-  ordered_at: string;
-  card_company: string | null;
-  pg_tid: string | null;
-  approved_at: string | null;
+// 배송·취소·청약철회 (커머스 확장)
+export type OrderStatus =
+  | "PAID"
+  | "PREPARING"
+  | "SHIPPING"
+  | "DELIVERED"
+  | "CANCELLED"
+  | "RETURN_REQUESTED"
+  | "RETURNED";
+
+export const ORDER_STATUS: Record<OrderStatus, string> = {
+  PAID: "결제완료",
+  PREPARING: "상품준비중",
+  SHIPPING: "배송중",
+  DELIVERED: "배송완료",
+  CANCELLED: "취소완료",
+  RETURN_REQUESTED: "반품접수",
+  RETURNED: "반품완료",
 };
+
+export const NEXT_DELIVERY_STEP: Partial<Record<OrderStatus, string>> = {
+  PAID: "상품준비중으로",
+  PREPARING: "발송 처리(배송중으로)",
+  SHIPPING: "배송완료로",
+};
+
+export const CANCEL_REASONS: Record<string, string> = {
+  CHANGE_OF_MIND: "단순 변심",
+  WRONG_ORDER: "주문 실수",
+  DELAY: "배송 지연",
+  OTHER: "기타",
+};
+
+export const RETURN_REASONS: Record<string, string> = {
+  CHANGE_OF_MIND: "단순 변심",
+  DEFECT: "상품 불량·파손",
+  WRONG_ITEM: "다른 상품 배송",
+  OTHER: "기타",
+};
+
+export type OrderClaim = {
+  claim_type: "CANCEL" | "RETURN";
+  reason_code: string;
+  reason_detail: string | null;
+  status: "REQUESTED" | "COMPLETED";
+  requested_at: string;
+  completed_at: string | null;
+  refund_amount: number | null;
+};
+
+export type OrderDelivery = {
+  courier: string | null;
+  tracking_no: string | null;
+  shipped_at: string | null;
+  delivered_at: string | null;
+  expected_delivery_at: string;
+};
+
+export type Order = OrderShipping &
+  OrderDelivery & {
+    id: number;
+    product_name: string;
+    amount: number;
+    status: OrderStatus;
+    ordered_at: string;
+    card_company: string | null;
+    pg_tid: string | null;
+    approved_at: string | null;
+    return_deadline: string | null;
+    claims: OrderClaim[];
+  };
 
 export type RefundAccountView = {
   bank_name: string;

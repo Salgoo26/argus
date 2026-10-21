@@ -14,6 +14,7 @@ from conftest import (
     argus_login,
     platform_login,
     run_detection_batch,
+    shop_signup,
     wait_until,
 )
 
@@ -27,16 +28,7 @@ def test_payment_full_view_is_detected(officer):
     shop = Browser(PLATFORM_URL, "customer_session")
     email = f"e2e-{secrets.token_hex(4)}@example.com"
     consents = {"TOS": True, "PRIVACY_REQUIRED": True, "AGE_OVER_14": True}
-    joined = shop.post(
-        "/api/shop/auth/signup",
-        json={
-            "email": email,
-            "password": PASSWORD,
-            "name": "가상구매자",
-            "phone": "010-0000-0003",  # 가상
-            "consents": consents,
-        },
-    )
+    joined, _ = shop_signup(shop, email, PASSWORD, "가상구매자", "010-0000-0003", consents)
     assert joined.status_code == 201, joined.text
     member_id = shop.get("/api/shop/me").json()["id"]
 

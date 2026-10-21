@@ -7,7 +7,7 @@ CS의 문의 처리 기록에 실린 티켓 번호(INQ-번호)가 relay → 수�
 
 import secrets
 
-from conftest import PLATFORM_URL, Browser, argus_login, platform_login, wait_until
+from conftest import PLATFORM_URL, Browser, argus_login, platform_login, shop_signup, wait_until
 
 PASSWORD = "e2e-buyer-pass-3"  # noqa: S105 — 테스트 전용 더미 값, 매번 새 가상 계정
 BODY = "배송이 언제 되나요? (E2E 가상 문의)"
@@ -17,19 +17,8 @@ def test_inquiry_ticket_reaches_argus(officer):
     shop = Browser(PLATFORM_URL, "customer_session")
     consents = {"TOS": True, "PRIVACY_REQUIRED": True, "AGE_OVER_14": True}
     email = f"e2e-{secrets.token_hex(4)}@example.com"
-    assert (
-        shop.post(
-            "/api/shop/auth/signup",
-            json={
-                "email": email,
-                "password": PASSWORD,
-                "name": "가상문의자",
-                "phone": "010-0000-0002",  # 가상
-                "consents": consents,
-            },
-        ).status_code
-        == 201
-    )
+    joined, _ = shop_signup(shop, email, PASSWORD, "가상문의자", "010-0000-0002", consents)  # 가상
+    assert joined.status_code == 201, joined.text
     asked = shop.post("/api/shop/inquiries", json={"title": "배송 문의", "body": BODY})
     assert asked.status_code == 201
     inquiry_id = asked.json()["id"]

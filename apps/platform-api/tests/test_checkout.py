@@ -14,6 +14,7 @@ from app.models import SHIP_COLUMNS, shipping_address
 from conftest import (
     CUSTOMER_PASSWORD,
     add_operator,
+    finish_orders,
     login,
     outbox_payloads,
     shop_login,
@@ -198,6 +199,7 @@ def test_admin_order_detail_requires_login(client):
 def test_withdrawn_members_order_has_no_shipping_info(client, engine, password_hash):
     signup(client)
     _order(client, _add_address(client))
+    finish_orders(engine)
     shop_login(client)
     assert client.post("/shop/me/withdraw", json={"password": CUSTOMER_PASSWORD}).status_code == 204
 

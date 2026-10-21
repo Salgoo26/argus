@@ -63,6 +63,8 @@ services:
       PLATFORM_SEED_OPERATOR_PASSWORD: ${PLATFORM_SEED_OPERATOR_PASSWORD:?set PLATFORM_SEED_OPERATOR_PASSWORD in .env}
       # 시드 환불계좌도 실제 저장 경로처럼 암호화해서 넣는다
       PLATFORM_PAYMENT_ENCRYPTION_KEY: ${PAYMENT_ENCRYPTION_KEY:?set PAYMENT_ENCRYPTION_KEY in .env}
+      # 시드 회원의 가상 본인확인 결과(CI·DI)를 가입과 같은 함수·키로 만든다 (1인 1계정 검사가 맞물리게)
+      PLATFORM_AUTH_SECRET: ${PLATFORM_AUTH_SECRET:?set PLATFORM_AUTH_SECRET in .env}
     depends_on:
       platform-migrate:
         condition: service_completed_successfully

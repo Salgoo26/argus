@@ -17,6 +17,7 @@ from app.auth.tokens import set_session_cookie
 from app.config import Settings
 from app.crypto import FieldCipher
 from app.dbtoken.router import router as db_token_router
+from app.deliveries.router import router as deliveries_router
 from app.errors import install_error_handlers
 from app.inquiries.router import router as inquiries_router
 from app.members.router import router as members_router
@@ -27,6 +28,7 @@ from app.shop.inquiries import router as shop_inquiries_router
 from app.shop.me import router as shop_me_router
 from app.shop.orders import router as shop_orders_router
 from app.shop.refund import router as shop_refund_router
+from app.shop.verification import router as shop_verification_router
 
 
 def create_app(settings: Settings | None = None) -> FastAPI:
@@ -47,10 +49,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(accounts_router)
     app.include_router(members_router)
     app.include_router(orders_router)
+    app.include_router(deliveries_router)
     app.include_router(inquiries_router)
     app.include_router(db_token_router)
     # 고객 화면 API — /admin이 아니라 Agent가 기록하지 않는다 (CLAUDE.md 3절 #4)
     app.include_router(shop_auth_router)
+    app.include_router(shop_verification_router)
     app.include_router(shop_me_router)
     app.include_router(shop_addresses_router)
     app.include_router(shop_orders_router)

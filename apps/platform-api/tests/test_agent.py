@@ -22,6 +22,7 @@ from conftest import TEST_CLIENT_ADDR, add_operator, login, outbox_payloads
 def _add_members(engine, count: int) -> None:
     rows = [
         {
+            "login_id": f"user{n:04d}",
             "email": f"user{n:04d}@example.com",
             "password_hash": "unusable",
             "name": f"회원{n}",  # 가상

@@ -9,6 +9,7 @@
 """
 
 import os
+import random
 import secrets
 import subprocess
 import sys
@@ -60,6 +61,45 @@ class Browser:
 
     def close(self) -> None:
         self.http.close()
+
+
+def shop_signup(
+    shop: Browser, email: str, password: str, name: str, phone: str, consents: dict[str, bool]
+) -> tuple[httpx2.Response, str]:
+    """고객 가입 (커머스 확장) — 이메일 인증 → 가상 휴대폰 본인확인 → 가입. (응답, 아이디)
+
+    주민번호 앞 7자리는 가상 본인확인 창(브라우저) 안에서만 쓰여 API에는 보내지 않는다.
+    생년월일은 매번 달리 — 같은 사람(CI)으로 겹쳐 1인 1계정 검사에 걸리지 않게.
+    """
+    login_id = "e2e" + secrets.token_hex(4)
+    verified = shop.post("/api/shop/verifications/email", json={"email": email})
+    assert verified.status_code == 200, verified.text
+    rnd = random.Random()  # noqa: S311 — 가상 생년월일, 보안 용도 아님
+    birth = f"{rnd.randint(1970, 2000)}-{rnd.randint(1, 12):02d}-{rnd.randint(1, 28):02d}"
+    identity = shop.post(
+        "/api/shop/verifications/identity",
+        json={
+            "carrier": "SKT",
+            "name": name,
+            "birth_date": birth,
+            "gender": "F",
+            "is_foreigner": False,
+            "phone": phone,
+            "agreed": True,
+        },
+    )
+    assert identity.status_code == 200, identity.text
+    joined = shop.post(
+        "/api/shop/auth/signup",
+        json={
+            "login_id": login_id,
+            "password": password,
+            "email_token": verified.json()["token"],
+            "identity_token": identity.json()["token"],
+            "consents": consents,
+        },
+    )
+    return joined, login_id
 
 
 def platform_login(login_id: str, password: str = OPERATOR_PASSWORD) -> Browser:

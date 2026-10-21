@@ -175,6 +175,7 @@ def test_initial_registry_matches_the_old_fixed_tables(app_engine):
         "inquiry": "INQUIRY",
         "orders": "ORDER",
         "payment": "ORDER",
+        "order_claim": "ORDER",  # 커머스 확장 등록 (0023)
     }
     assert registry["member_columns"] == sorted(
         [
@@ -190,7 +191,10 @@ def test_initial_registry_matches_the_old_fixed_tables(app_engine):
     assert registry["version"].startswith("r") and registry["database"] == "platform"
     with app_engine.connect() as conn:
         reasons = set(conn.execute(select(protected_column_history.c.reason)).scalars())
-    assert reasons == {"초기 등록 — 게이트웨이 고정 표 이관"}
+    assert reasons == {
+        "초기 등록 — 게이트웨이 고정 표 이관",
+        "커머스 확장(배송·취소/반품·본인확인) 신규 컬럼 등록",  # 0023
+    }
 
 
 # ── N-2 DB 구조 목록 수신 ──────────────────────────────────

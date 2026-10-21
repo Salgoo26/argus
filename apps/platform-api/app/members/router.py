@@ -49,6 +49,7 @@ def list_members(
         rows = conn.execute(
             select(
                 member.c.id,
+                member.c.login_id,
                 member.c.name,
                 member.c.email,
                 member.c.phone,
@@ -66,6 +67,7 @@ def list_members(
 
 
 class MemberSearch(SearchPage):
+    login_id: SearchText | None = None  # 커머스 확장 0012 — 아이디 부분 일치
     name: SearchText | None = None
     email: SearchText | None = None
     # 하이픈은 있어도 없어도 된다 — 숫자만 비교
@@ -91,6 +93,8 @@ def search_members(body: MemberSearch, request: Request, _operator: MembersOpera
     m = member.c
     conditions = kst_period(m.created_at, body.joined_from, body.joined_to)
     # 부분 일치 — 입력의 % _ 는 글자 그대로 (autoescape)
+    if body.login_id:
+        conditions.append(m.login_id.contains(body.login_id.lower(), autoescape=True))
     if body.name:
         conditions.append(m.name.contains(body.name, autoescape=True))
     if body.email:
@@ -107,7 +111,7 @@ def search_members(body: MemberSearch, request: Request, _operator: MembersOpera
             select(func.count()).select_from(member).where(*conditions)
         ).scalar_one()
         rows = conn.execute(
-            select(m.id, m.name, m.email, m.phone, m.status, m.created_at)
+            select(m.id, m.login_id, m.name, m.email, m.phone, m.status, m.created_at)
             .where(*conditions)
             .order_by(m.id)
             .limit(body.size)
@@ -171,11 +175,19 @@ def _member_or_404(conn, member_id: int):
         conn.execute(
             select(
                 member.c.id,
+                member.c.login_id,
                 member.c.name,
                 member.c.email,
                 member.c.phone,
                 member.c.status,
                 member.c.created_at,
+                # 본인확인 결과 (0012) — CI·DI는 화면에 싣지 않는다
+                member.c.birth_date,
+                member.c.gender,
+                member.c.is_foreigner,
+                member.c.carrier,
+                member.c.identity_verified_at,
+                member.c.email_verified_at,
             ).where(member.c.id == member_id)
         )
         .mappings()

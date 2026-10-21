@@ -12,6 +12,7 @@ import {
   customerErrorMessage,
   formatDate,
   formatDateTime,
+  GENDER,
   passwordProblem,
 } from "@/lib/api";
 
@@ -112,7 +113,7 @@ export default function MyPage() {
     <>
       <h1 className="page-title">마이페이지</h1>
       <p className="page-subtitle">
-        {me.email} · {formatDate(me.created_at)} 가입
+        {me.login_id} · {formatDate(me.created_at)} 가입
       </p>
       {error && <div className="alert-error">{error}</div>}
       {notice && <div className="alert-info">{notice}</div>}
@@ -120,11 +121,27 @@ export default function MyPage() {
       <section className="card">
         <h2 className="card-title">내 정보</h2>
         <form className="stack" onSubmit={saveProfile}>
-          {/* 이메일은 로그인 아이디라 정정 대상이 아니다 (이메일 인증이 없어 소유 확인 수단이 없음, policy 4-3) */}
+          {/* 아이디·이메일·본인확인 결과는 정정 대상이 아니다 (커머스 확장 — 바꿀 칸이 서버에 없다) */}
           <div className="field">
-            <label htmlFor="email">이메일 (로그인 아이디)</label>
+            <label htmlFor="login_id">아이디</label>
+            <input id="login_id" value={me.login_id} readOnly disabled />
+          </div>
+          <div className="field">
+            <label htmlFor="email">이메일{me.email_verified_at ? " (인증 완료)" : ""}</label>
             <input id="email" value={me.email} readOnly disabled />
           </div>
+          {me.identity_verified_at && (
+            <dl className="kv">
+              <dt>본인확인</dt>
+              <dd>
+                {formatDateTime(me.identity_verified_at)} · {me.carrier}
+              </dd>
+              <dt>생년월일·성별</dt>
+              <dd>
+                {me.birth_date} · {me.gender ? GENDER[me.gender] : "-"}
+              </dd>
+            </dl>
+          )}
           <div className="field">
             <label htmlFor="name">이름</label>
             <input id="name" name="name" defaultValue={me.name} required maxLength={50} />

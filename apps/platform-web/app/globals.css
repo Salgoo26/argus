@@ -634,3 +634,83 @@ textarea {
   padding: 12px 0;
   border-bottom: 1px solid var(--border);
 }
+
+/* ── 커머스 확장: 가입 인증·배송·취소 ─────────── */
+
+.field-label {
+  font-size: 12px;
+  color: var(--muted);
+  font-weight: 600;
+}
+
+.input-row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.input-row input {
+  flex: 1;
+  min-width: 0;
+}
+
+.input-row.rrn input:last-of-type {
+  flex: 0 0 44px;
+  text-align: center;
+}
+
+.hint-ok {
+  color: var(--accent-strong);
+}
+
+/* 가상 본인확인 창 — 쇼핑몰 화면 위에 뜨는 "외부 창" */
+.overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(17, 24, 39, 0.45);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+  z-index: 50;
+}
+
+.identity-window {
+  width: 100%;
+  max-width: 420px;
+  max-height: 100%;
+  overflow-y: auto;
+}
+
+.status-steps {
+  display: flex;
+  gap: 4px;
+  flex-wrap: wrap;
+  margin: 8px 0;
+  padding: 0;
+  list-style: none;
+}
+
+.status-steps li {
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: var(--bg);
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.status-steps li.done {
+  background: var(--accent-soft);
+  color: var(--accent-strong);
+  font-weight: 600;
+}
+
+.claim-form {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 8px;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}

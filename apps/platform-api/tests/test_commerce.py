@@ -23,6 +23,7 @@ from conftest import (
     CUSTOMER_PASSWORD,
     TEST_PAYMENT_KEY,
     add_operator,
+    finish_orders,
     login,
     outbox_payloads,
     signup,
@@ -293,6 +294,7 @@ def test_withdraw_retains_order_records_and_destroys_the_rest(client, engine):
     client.post("/shop/me/addresses", json=office)  # 주문에 안 쓴 배송지
     _buy(client)
     _register_account(client)
+    finish_orders(engine)
 
     assert client.post("/shop/me/withdraw", json={"password": CUSTOMER_PASSWORD}).status_code == 204
 
@@ -326,7 +328,10 @@ def test_withdraw_retains_order_records_and_destroys_the_rest(client, engine):
         "zip_code": "90001",
         "address": "서울특별시 가상구 가상로 1",
         "address_detail": None,
+        "courier": "데모택배(가상)",
+        "tracking_no": "DEMO0000000001",
     }
+    assert order["tracking_no"] is None  # 송장번호도 배송 정보 — 옮긴 뒤 비운다
     # 보존 목적에 필요 없는 것은 담지 않는다 — 배송지 목록(주문에 안 쓴 회사 주소)·계좌·비밀번호
     assert "회사로" not in str(data) and DIGITS not in str(data) and "argon2" not in str(data)
     assert destroyed["target_type"] == "MEMBER" and destroyed["deleted_count"] == 1
@@ -347,7 +352,11 @@ def test_seeded_style_refund_account_is_revealable(shop_with_customer, engine):
     with engine.begin() as conn:
         conn.execute(
             insert(member).values(
-                id=50, email="seed@example.com", password_hash="x", name="시드회원"
+                id=50,
+                login_id="seed",
+                email="seed@example.com",
+                password_hash="x",
+                name="시드회원",
             )
         )
         conn.execute(

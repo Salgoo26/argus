@@ -16,18 +16,26 @@ db-schema 4-1은 "상태 변경 → 파기 배치"였지만 파기 배치는 v0.
 2. 회원을 참조하는 개인정보 삭제(환불계좌·배송지·동의 이력) → 회원 행 삭제.
    orders·inquiry의 member_id는 FK ON DELETE SET NULL로 끊겨 개인과 연결되지 않는 기록이 된다
 3. destruction_history에 파기 이력 (개인정보 자체는 기록하지 않음)
+
+커머스 확장(0011): 배송·반품이 끝나지 않은 주문이 있으면 탈퇴를 받지 않는다(배송 정보를 지우면
+업무가 끊긴다 — 취소하거나 끝난 뒤 탈퇴). 주문 기록에는 상태·송장번호·취소/반품 기록
+(계약·청약철회 기록, 전자상거래법 시행령 제6조제1항제1호)을 함께 옮기고,
+운영 테이블의 송장번호·취소 사유 상세는 비운다.
 """
 
 from datetime import timedelta
 
 from sqlalchemy import Connection, case, delete, func, insert, select, update
 
+from app.errors import ApiError
+from app.fulfillment import IN_PROGRESS
 from app.models import (
     SHIP_COLUMNS,
     destruction_history,
     inquiry,
     member,
     member_consent,
+    order_claim,
     orders,
     payment,
     product,
@@ -51,7 +59,29 @@ def _shipping(r) -> dict | None:
         "zip_code": r.ship_zip_code,
         "address": r.ship_address,
         "address_detail": r.ship_address_detail,
+        "courier": r.courier,
+        "tracking_no": r.tracking_no,
     }
+
+
+def _claims(conn: Connection, order_ids: list[int]) -> dict[int, list[dict]]:
+    rows = conn.execute(
+        select(order_claim).where(order_claim.c.order_id.in_(order_ids)).order_by(order_claim.c.id)
+    ).mappings()
+    result: dict[int, list[dict]] = {}
+    for c in rows:
+        result.setdefault(c["order_id"], []).append(
+            {
+                "type": c["claim_type"],
+                "reason_code": c["reason_code"],
+                "reason_detail": c["reason_detail"],
+                "requested_at": c["requested_at"].isoformat(),
+                "completed_at": c["completed_at"].isoformat() if c["completed_at"] else None,
+                "refund_amount": c["refund_amount"],
+                "refund_pg_tid": c["refund_pg_tid"],
+            }
+        )
+    return result
 
 
 def _retain_orders(conn: Connection, profile, now) -> None:
@@ -61,7 +91,10 @@ def _retain_orders(conn: Connection, profile, now) -> None:
             product.c.name,
             orders.c.amount,
             orders.c.ordered_at,
+            orders.c.status,
             *(orders.c[c] for c in SHIP_COLUMNS),
+            orders.c.courier,
+            orders.c.tracking_no,
             payment.c.pg_tid,
             payment.c.card_company,
         )
@@ -75,6 +108,7 @@ def _retain_orders(conn: Connection, profile, now) -> None:
     ).all()
     if not rows:
         return
+    claims = _claims(conn, [r.id for r in rows])
     conn.execute(
         insert(retained_member_record).values(
             original_member_id=profile["id"],
@@ -94,7 +128,9 @@ def _retain_orders(conn: Connection, profile, now) -> None:
                         "ordered_at": r.ordered_at.isoformat(),
                         "pg_tid": r.pg_tid,
                         "card_company": r.card_company,
+                        "status": r.status,
                         "shipping": _shipping(r),
+                        "claims": claims.get(r.id, []),
                     }
                     for r in rows
                 ],
@@ -108,7 +144,12 @@ def _retain_orders(conn: Connection, profile, now) -> None:
     conn.execute(
         update(orders)
         .where(orders.c.member_id == profile["id"])
-        .values(**dict.fromkeys(SHIP_COLUMNS))
+        .values(**dict.fromkeys(SHIP_COLUMNS), tracking_no=None)
+    )
+    conn.execute(
+        update(order_claim)
+        .where(order_claim.c.order_id.in_([r.id for r in rows]))
+        .values(reason_detail=None)
     )
 
 
@@ -170,6 +211,13 @@ def _retain_inquiries(conn: Connection, profile, now) -> None:
 
 
 def destroy_member(conn: Connection, member_id: int) -> None:
+    in_progress = conn.execute(
+        select(func.count())
+        .select_from(orders)
+        .where(orders.c.member_id == member_id, orders.c.status.in_(IN_PROGRESS))
+    ).scalar_one()
+    if in_progress:
+        raise ApiError(409, "ORDERS_IN_PROGRESS", "orders in delivery or return must finish first")
     now = conn.execute(select(func.now())).scalar_one()
     profile = (
         conn.execute(

@@ -18,6 +18,7 @@ import {
 
 type Member = {
   id: number;
+  login_id: string;
   name: string;
   email: string;
   phone: string | null;
@@ -28,7 +29,7 @@ type MemberPage = { items: Member[]; page: number; size: number; total: number }
 
 const PAGE_SIZE = 20;
 const FIRST_PAGE: SearchBody = { page: 1, size: PAGE_SIZE };
-const SEARCH_KEYS = ["name", "email", "phone", "status", "joined_from", "joined_to"];
+const SEARCH_KEYS = ["login_id", "name", "email", "phone", "status", "joined_from", "joined_to"];
 
 function formatDate(iso: string): string {
   return new Date(iso).toLocaleDateString("ko-KR", { timeZone: "Asia/Seoul" });
@@ -137,6 +138,10 @@ export default function MembersPage() {
           <h2 className="card-title">회원 검색</h2>
           <form className="toolbar" onSubmit={onSearch} onReset={() => setCriteria(FIRST_PAGE)}>
             <div className="field">
+              <label htmlFor="s_login_id">아이디</label>
+              <input id="s_login_id" name="login_id" maxLength={100} size={10} autoComplete="off" />
+            </div>
+            <div className="field">
               <label htmlFor="s_name">이름</label>
               <input id="s_name" name="name" maxLength={100} size={10} autoComplete="off" />
             </div>
@@ -190,6 +195,7 @@ export default function MembersPage() {
               <thead>
                 <tr>
                   <th className="num">회원번호</th>
+                  <th>아이디</th>
                   <th>이름</th>
                   <th>이메일</th>
                   <th>연락처</th>
@@ -201,6 +207,7 @@ export default function MembersPage() {
                 {data?.items.map((m) => (
                   <tr key={m.id}>
                     <td className="num">{m.id}</td>
+                    <td>{m.login_id}</td>
                     <td>
                       <Link href={`/admin/members/${m.id}`}>{m.name}</Link>
                     </td>
