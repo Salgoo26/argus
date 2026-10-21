@@ -10,12 +10,14 @@
 
 import os
 import random
+import re
 import secrets
 import subprocess
 import sys
 import time
 from collections.abc import Callable
 from http.cookies import SimpleCookie
+from urllib.parse import parse_qs, urlsplit
 
 import httpx2
 import pytest
@@ -100,6 +102,54 @@ def shop_signup(
         },
     )
     return joined, login_id
+
+
+PG_KEY = re.compile(r'action="/checkout/(pay_[0-9a-f]+)/approve"')
+
+
+def buy(
+    shop: Browser,
+    product_id: int,
+    address_id: int,
+    *,
+    card_number: str = "1234567890123452",
+    memo: str | None = None,
+) -> dict:
+    """주문 → 가상 PG 결제창 → 승인 (커머스 확장 F6). 승인된 주문을 돌려준다.
+
+    브라우저가 하는 일을 그대로 한다: 주문(결제대기) → 결제창에 주문·구매자 정보 POST →
+    카드 입력(결제창, 즉 PG에만) → PG가 돌려보낸 주소의 paymentKey로 쇼핑몰에 승인 요청.
+    돌아갈 주소의 결과 페이지는 이 값을 주문 화면에 넘기기만 하므로 여기서는 열지 않는다.
+    """
+    created = shop.post(
+        "/api/shop/orders",
+        json={"product_id": product_id, "shipping_address_id": address_id, "delivery_memo": memo},
+    )
+    assert created.status_code == 201, created.text
+    order = created.json()["order"]
+    request = created.json()["payment_request"]
+    back = f"{PLATFORM_URL}/checkout/result?order={order['id']}"
+    with httpx2.Client(timeout=30) as pg:
+        page = pg.post(
+            request["checkout_url"],
+            data={**request["fields"], "successUrl": back, "failUrl": f"{back}&fail=1"},
+        )
+        assert page.status_code == 200, page.text
+        [payment_key] = PG_KEY.findall(page.text)
+        base = request["checkout_url"].rsplit("/checkout", 1)[0]
+        approved = pg.post(
+            f"{base}/checkout/{payment_key}/approve",
+            data={"card_company": "하늘카드", "card_number": card_number, "installment": "0"},
+        )
+    assert approved.status_code == 303, approved.text
+    result = {k: v[0] for k, v in parse_qs(urlsplit(approved.headers["location"]).query).items()}
+    assert result["paymentKey"] == payment_key and result["order"] == str(order["id"])
+    paid = shop.post(
+        f"/api/shop/orders/{order['id']}/payment",
+        json={"payment_key": payment_key, "amount": int(result["amount"])},
+    )
+    assert paid.status_code == 200, paid.text
+    return paid.json()
 
 
 def platform_login(login_id: str, password: str = OPERATOR_PASSWORD) -> Browser:

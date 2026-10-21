@@ -22,6 +22,10 @@ from app.errors import install_error_handlers
 from app.inquiries.router import router as inquiries_router
 from app.members.router import router as members_router
 from app.orders.router import router as orders_router
+from app.partners import Partners
+from app.partners.courier import CourierClient
+from app.partners.courier_events import router as courier_events_router
+from app.partners.pg import PgClient
 from app.shop.addresses import router as shop_addresses_router
 from app.shop.auth import router as shop_auth_router
 from app.shop.inquiries import router as shop_inquiries_router
@@ -43,6 +47,18 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.state.cipher = FieldCipher(settings.require_payment_key())
     # DB 접속 토큰(2티어) 서명 키 — 없거나 짧거나 관리자 로그인 키와 같으면 기동 거부
     app.state.db_gateway_token_key = settings.require_db_gateway_token_key()
+    # 가상 PG·택배 연동 (커머스 확장 F6) — 키가 없으면 기동 거부
+    keys = settings.require_partners()
+    app.state.partners = Partners(
+        pg=PgClient(
+            settings.pg_api_url,
+            settings.pg_checkout_url,
+            keys["pg_client_key"],
+            keys["pg_secret_key"],
+        ),
+        courier=CourierClient(settings.courier_api_url, keys["courier_api_key"]),
+    )
+    app.state.courier_webhook_secret = keys["courier_webhook_secret"].encode()
 
     install_error_handlers(app)
     app.include_router(auth_router)
@@ -60,6 +76,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(shop_orders_router)
     app.include_router(shop_refund_router)
     app.include_router(shop_inquiries_router)
+    # 외부 수탁자 → 쇼핑몰 통지 (서명 검증, 시스템 간 — 접속기록 대상 아님)
+    app.include_router(courier_events_router)
 
     @app.middleware("http")
     async def admin_response_headers(request: Request, call_next):

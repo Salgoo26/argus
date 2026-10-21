@@ -28,7 +28,7 @@ from datetime import timedelta
 from sqlalchemy import Connection, case, delete, func, insert, select, update
 
 from app.errors import ApiError
-from app.fulfillment import IN_PROGRESS
+from app.fulfillment import IN_PROGRESS, expire_stale_payments
 from app.models import (
     SHIP_COLUMNS,
     destruction_history,
@@ -61,6 +61,7 @@ def _shipping(r) -> dict | None:
         "address_detail": r.ship_address_detail,
         "courier": r.courier,
         "tracking_no": r.tracking_no,
+        "delivery_memo": r.delivery_memo,
     }
 
 
@@ -79,6 +80,7 @@ def _claims(conn: Connection, order_ids: list[int]) -> dict[int, list[dict]]:
                 "completed_at": c["completed_at"].isoformat() if c["completed_at"] else None,
                 "refund_amount": c["refund_amount"],
                 "refund_pg_tid": c["refund_pg_tid"],
+                "pickup_tracking_no": c["pickup_tracking_no"],
             }
         )
     return result
@@ -95,8 +97,11 @@ def _retain_orders(conn: Connection, profile, now) -> None:
             *(orders.c[c] for c in SHIP_COLUMNS),
             orders.c.courier,
             orders.c.tracking_no,
+            orders.c.delivery_memo,
             payment.c.pg_tid,
             payment.c.card_company,
+            payment.c.card_number_masked,
+            payment.c.approve_no,
         )
         .select_from(
             orders.join(product, product.c.id == orders.c.product_id).outerjoin(
@@ -128,6 +133,8 @@ def _retain_orders(conn: Connection, profile, now) -> None:
                         "ordered_at": r.ordered_at.isoformat(),
                         "pg_tid": r.pg_tid,
                         "card_company": r.card_company,
+                        "card_number_masked": r.card_number_masked,
+                        "approve_no": r.approve_no,
                         "status": r.status,
                         "shipping": _shipping(r),
                         "claims": claims.get(r.id, []),
@@ -144,12 +151,12 @@ def _retain_orders(conn: Connection, profile, now) -> None:
     conn.execute(
         update(orders)
         .where(orders.c.member_id == profile["id"])
-        .values(**dict.fromkeys(SHIP_COLUMNS), tracking_no=None)
+        .values(**dict.fromkeys(SHIP_COLUMNS), tracking_no=None, delivery_memo=None)
     )
     conn.execute(
         update(order_claim)
         .where(order_claim.c.order_id.in_([r.id for r in rows]))
-        .values(reason_detail=None)
+        .values(reason_detail=None, pickup_tracking_no=None)
     )
 
 
@@ -211,6 +218,9 @@ def _retain_inquiries(conn: Connection, profile, now) -> None:
 
 
 def destroy_member(conn: Connection, member_id: int) -> None:
+    now = conn.execute(select(func.now())).scalar_one()
+    # 결제하지 않은 결제대기 주문은 만료로 — 탈퇴 뒤 결제창에서 승인돼도 반영되지 않는다
+    expire_stale_payments(conn, now, member_id, all_pending=True)
     in_progress = conn.execute(
         select(func.count())
         .select_from(orders)
@@ -218,7 +228,6 @@ def destroy_member(conn: Connection, member_id: int) -> None:
     ).scalar_one()
     if in_progress:
         raise ApiError(409, "ORDERS_IN_PROGRESS", "orders in delivery or return must finish first")
-    now = conn.execute(select(func.now())).scalar_one()
     profile = (
         conn.execute(
             select(member.c.id, member.c.name, member.c.email, member.c.phone).where(

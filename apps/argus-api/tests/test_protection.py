@@ -194,6 +194,7 @@ def test_initial_registry_matches_the_old_fixed_tables(app_engine):
     assert reasons == {
         "초기 등록 — 게이트웨이 고정 표 이관",
         "커머스 확장(배송·취소/반품·본인확인) 신규 컬럼 등록",  # 0023
+        "가상 PG·택배 연동 신규 컬럼 등록",  # 0024
     }
 
 

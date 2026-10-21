@@ -3,10 +3,12 @@
 #
 # M0: DB 2개 / M1: argus-migrate, argus-api / M2: platform-migrate, platform-seed, platform-api, platform-relay
 # M3: argus-worker / M5: platform-web, argus-web
+# 커머스 확장 F6: mock-pg(가상 PG)·mock-courier(가상 택배) + 각자의 DB
 # Caddy·backup은 첫 배포 때 추가 (architecture 7-2).
 #
 # 테스트: docker compose run --rm argus-api-test      (profile "test" — up 할 때는 뜨지 않음)
 #         docker compose run --rm platform-api-test
+#         docker compose run --rm mock-pg-test / mock-courier-test
 # E2E:    bash scripts/e2e.sh   (별도 프로젝트 argus-e2e로 새로 띄워 시나리오 실행 — docker-compose.e2e.yml 덧붙임)
 
 name: argus
@@ -88,6 +90,15 @@ services:
       # platform-web(Next.js)은 신뢰하지 않는다: 원래 요청자 IP를 붙이지 않으면서 클라이언트가 보낸
       # X-Forwarded-For는 그대로 전달하므로, 믿으면 접속지 위조가 가능해진다 (CLAUDE.md 3절 #10)
       PLATFORM_TRUSTED_PROXIES: ${PLATFORM_TRUSTED_PROXIES:-}
+      # 가상 PG·택배 연동 (커머스 확장 F6) — 승인·취소·접수는 서버 간 호출(partner-net),
+      # 결제창 주소만 브라우저가 연다(호스트 포트). 키가 없거나 짧으면 기동 거부
+      PLATFORM_PG_API_URL: http://mock-pg:8000
+      PLATFORM_PG_CHECKOUT_URL: ${PLATFORM_PG_CHECKOUT_URL:-http://localhost:18090/checkout}
+      PLATFORM_PG_CLIENT_KEY: ${MOCKPG_CLIENT_KEY:?set MOCKPG_CLIENT_KEY in .env}
+      PLATFORM_PG_SECRET_KEY: ${MOCKPG_SECRET_KEY:?set MOCKPG_SECRET_KEY in .env}
+      PLATFORM_COURIER_API_URL: http://mock-courier:8000
+      PLATFORM_COURIER_API_KEY: ${COURIER_API_KEY:?set COURIER_API_KEY in .env}
+      PLATFORM_COURIER_WEBHOOK_SECRET: ${COURIER_WEBHOOK_SECRET:?set COURIER_WEBHOOK_SECRET in .env}
     depends_on:
       platform-seed:
         condition: service_completed_successfully
@@ -96,6 +107,7 @@ services:
       - "127.0.0.1:${PLATFORM_API_PORT:-18001}:8000"
     networks:
       - platform-net
+      - partner-net
 
   # ── 플랫폼 relay: outbox → Argus 수집·취급자 동기화 API (HMAC 서명) ──
   # 플랫폼 쪽에서 유일하게 두 네트워크에 붙는 컨테이너. platform-api 자체는 Argus에 닿지 않는다
@@ -225,6 +237,133 @@ services:
         condition: service_healthy
     networks:
       - platform-net
+
+  # ── 가상 PG(데모페이) — 쇼핑몰과 분리된 외부 결제 서비스 (커머스 확장 F6) ──
+  # 결제창(작은 창)·승인·조회·취소 API. 자기 DB만 쓰고 쇼핑몰 DB·Argus에는 닿지 않는다.
+  # 이 서비스와 DB는 Argus 감시 대상이 아니다(쇼핑몰의 개인정보처리시스템이 아닌 외부 수탁사 역할)
+  mock-pg-db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${MOCKPG_DB_NAME:?set MOCKPG_DB_NAME in .env}
+      POSTGRES_USER: ${MOCKPG_DB_USER:?set MOCKPG_DB_USER in .env}
+      POSTGRES_PASSWORD: ${MOCKPG_DB_PASSWORD:?set MOCKPG_DB_PASSWORD in .env}
+    volumes:
+      - mock-pg-db-data:/var/lib/postgresql/data
+    ports:
+      # 결제 상태를 DB 툴로 직접 확인·수정할 수 있게 (호스트 루프백에만)
+      - "127.0.0.1:${MOCKPG_DB_PORT:-15434}:5432"
+    networks:
+      - mock-pg-net
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  mock-pg:
+    build:
+      context: ../apps/mock-pg
+      target: runtime
+    image: mock-pg:local
+    restart: unless-stopped
+    environment:
+      MOCKPG_DB_HOST: mock-pg-db
+      MOCKPG_DB_NAME: ${MOCKPG_DB_NAME}
+      MOCKPG_DB_USER: ${MOCKPG_DB_USER}
+      MOCKPG_DB_PASSWORD: ${MOCKPG_DB_PASSWORD}
+      MOCKPG_CLIENT_KEY: ${MOCKPG_CLIENT_KEY}
+      MOCKPG_SECRET_KEY: ${MOCKPG_SECRET_KEY}
+      # 결제 후 돌아갈 수 있는 쇼핑몰 출처 — 그 밖의 주소로는 돌려보내지 않는다
+      MOCKPG_ALLOWED_RETURN_ORIGINS: ${MOCKPG_ALLOWED_RETURN_ORIGINS:-http://localhost:3000}
+      MOCKPG_PUBLIC_URL: ${MOCKPG_PUBLIC_URL:-http://localhost:18090}
+    depends_on:
+      mock-pg-db:
+        condition: service_healthy
+    ports:
+      # 결제창은 브라우저가 직접 연다
+      - "127.0.0.1:${MOCKPG_PORT:-18090}:8000"
+    networks:
+      - mock-pg-net
+      - partner-net
+
+  # ── 가상 택배(데모택배) — 접수·반품 회수·취소 API + 상태 자동 진행·통지 (커머스 확장 F6) ──
+  # 상태는 DB setting 표의 간격(초)대로 자동으로 넘어가고, DB에서 직접 바꿔도 쇼핑몰에 통지된다.
+  # 화면은 없다. 이 서비스와 DB도 Argus 감시 대상이 아니다
+  mock-courier-db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${COURIER_DB_NAME:?set COURIER_DB_NAME in .env}
+      POSTGRES_USER: ${COURIER_DB_USER:?set COURIER_DB_USER in .env}
+      POSTGRES_PASSWORD: ${COURIER_DB_PASSWORD:?set COURIER_DB_PASSWORD in .env}
+    volumes:
+      - mock-courier-db-data:/var/lib/postgresql/data
+    ports:
+      # 배송 상태·자동 진행 간격을 DB 툴로 직접 바꿀 수 있게 (호스트 루프백에만)
+      - "127.0.0.1:${COURIER_DB_PORT:-15435}:5432"
+    networks:
+      - mock-courier-net
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  mock-courier:
+    build:
+      context: ../apps/mock-courier
+      target: runtime
+    image: mock-courier:local
+    restart: unless-stopped
+    environment:
+      COURIER_DB_HOST: mock-courier-db
+      COURIER_DB_NAME: ${COURIER_DB_NAME}
+      COURIER_DB_USER: ${COURIER_DB_USER}
+      COURIER_DB_PASSWORD: ${COURIER_DB_PASSWORD}
+      COURIER_API_KEY: ${COURIER_API_KEY}
+      COURIER_WEBHOOK_SECRET: ${COURIER_WEBHOOK_SECRET}
+      # 상태 통지를 받는 쇼핑몰 주소 (서버 간, partner-net)
+      COURIER_WEBHOOK_URL: http://platform-api:8000/partners/courier/events
+    depends_on:
+      mock-courier-db:
+        condition: service_healthy
+    # 호스트 포트 없음 — 쇼핑몰 서버만 부른다
+    networks:
+      - mock-courier-net
+      - partner-net
+
+  mock-pg-test:
+    profiles: ["test"]
+    build:
+      context: ../apps/mock-pg
+      target: dev
+    image: mock-pg:dev
+    environment:
+      DATABASE_URL: postgresql://${MOCKPG_DB_USER}:${MOCKPG_DB_PASSWORD}@mock-pg-db:5432/${MOCKPG_DB_NAME}
+    volumes:
+      - ../apps/mock-pg:/app
+    depends_on:
+      mock-pg-db:
+        condition: service_healthy
+    networks:
+      - mock-pg-net
+
+  mock-courier-test:
+    profiles: ["test"]
+    build:
+      context: ../apps/mock-courier
+      target: dev
+    image: mock-courier:dev
+    environment:
+      DATABASE_URL: postgresql://${COURIER_DB_USER}:${COURIER_DB_PASSWORD}@mock-courier-db:5432/${COURIER_DB_NAME}
+    volumes:
+      - ../apps/mock-courier:/app
+    depends_on:
+      mock-courier-db:
+        condition: service_healthy
+    networks:
+      - mock-courier-net
 
   # ── Argus DB: 접속기록 원장 (§8③ append-only + 해시체인은 M1) ──
   argus-db:
@@ -371,9 +510,13 @@ services:
 # 두 시스템은 네트워크도 분리한다. 플랫폼 쪽 컨테이너는 argus-db에 닿을 수 없고,
 # 연결은 수집 API·취급자 동기화 API뿐이다 (architecture 2절).
 # platform-relay만 두 네트워크에 붙어 argus-api를 호출한다 (M2).
+# 가상 PG·택배는 쇼핑몰 서버(platform-api)와만 partner-net으로 만난다 — 각자의 DB는 각자의 내부망에만
 networks:
   platform-net:
   argus-net:
+  partner-net:
+  mock-pg-net:
+  mock-courier-net:
 
 volumes:
   platform-db-data:
@@ -381,3 +524,5 @@ volumes:
   argus-attachments:
   # 2티어 원문 저장소·전송 버퍼·로컬 TLS 키 — db-gateway만 마운트, 백업 대상 (architecture 7-3)
   gateway-data:
+  mock-pg-db-data:
+  mock-courier-db-data:

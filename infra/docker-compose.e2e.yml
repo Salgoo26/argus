@@ -6,12 +6,24 @@
 
 services:
   platform-db: { ports: !reset [] }
-  platform-api: { ports: !reset [] }
   platform-web: { ports: !reset [] }
   argus-db: { ports: !reset [] }
   argus-api: { ports: !reset [] }
   argus-web: { ports: !reset [] }
   db-gateway: { ports: !reset [] }
+  mock-pg-db: { ports: !reset [] }
+  mock-courier-db: { ports: !reset [] }
+  # 결제창도 내부망으로 — 시나리오 실행기가 브라우저 대신 결제창에 폼을 보낸다.
+  # 돌아갈 주소는 실행기가 쓰는 화면 서버 주소(platform-web:3000)
+  mock-pg:
+    ports: !reset []
+    environment:
+      MOCKPG_ALLOWED_RETURN_ORIGINS: http://platform-web:3000
+      MOCKPG_PUBLIC_URL: http://mock-pg:8000
+  platform-api:
+    ports: !reset []
+    environment:
+      PLATFORM_PG_CHECKOUT_URL: http://mock-pg:8000/checkout
 
   # ── 시나리오 실행기 ─────────────────────────────────────────
   # 사람이 하는 일(로그인·다운로드·소명)은 브라우저처럼 화면 서버(Next.js) 경유 HTTP로만 한다.
@@ -44,9 +56,14 @@ services:
         condition: service_healthy
       db-gateway:
         condition: service_healthy
+      mock-pg:
+        condition: service_healthy
+      mock-courier:
+        condition: service_healthy
       argus-web:
         condition: service_healthy
-    # 사람 역할(두 화면)과 운영자 역할(Argus DB)을 모두 하므로 두 네트워크에 붙는다 — 테스트 전용
+    # 사람 역할(두 화면·결제창)과 운영자 역할(Argus DB)을 모두 하므로 여러 네트워크에 붙는다 — 테스트 전용
     networks:
       - platform-net
       - argus-net
+      - partner-net

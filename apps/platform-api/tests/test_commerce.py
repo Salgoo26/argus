@@ -65,11 +65,21 @@ def _address_id(client) -> int:
     return items[0]["id"]
 
 
-def _buy(client, product_id: int = 1, card: str = "하늘카드"):
-    body = {"product_id": product_id, "card_company": card}
+def _buy(client, product_id: int = 1):
+    """주문 → PG 결제창(대역) → 승인. 실패하면 그 단계의 응답을 돌려준다"""
+    body = {"product_id": product_id}
     if client.get("/shop/me").status_code == 200:
         body["shipping_address_id"] = _address_id(client)
-    return client.post("/shop/orders", json=body)
+    res = client.post("/shop/orders", json=body)
+    if res.status_code != 201:
+        return res
+    created = res.json()
+    fields = created["payment_request"]["fields"]
+    key = client.app.state.partners.pg.approve(fields)
+    return client.post(
+        f"/shop/orders/{created['order']['id']}/payment",
+        json={"payment_key": key, "amount": int(fields["amount"])},
+    )
 
 
 # ── 암호화 (§7②6호) ──────────────────────────────────────
@@ -101,14 +111,14 @@ def test_api_refuses_to_start_without_valid_payment_key(settings: Settings, key)
 
 def test_products_are_public(client):
     body = client.get("/shop/products").json()
-    assert len(body["items"]) == 6 and "하늘카드" in body["card_companies"]
+    assert len(body["items"]) == 6
 
 
 def test_order_requires_login(client):
     assert _buy(client).status_code == 401
 
 
-def test_order_stores_pg_result_without_card_number(client, engine):
+def test_order_stores_pg_result_without_card_number(client, engine, partners):
     signup(client)
     res = client.post(
         "/shop/orders",
@@ -116,19 +126,25 @@ def test_order_stores_pg_result_without_card_number(client, engine):
         json={
             "product_id": 1,
             "shipping_address_id": _address_id(client),
-            "card_company": "하늘카드",
             "amount": 1,
             "card_number": "4111111111111111",
         },
     )
-
     assert res.status_code == 201
-    order = res.json()
-    assert order["amount"] == 12000 and order["status"] == "PAID"
-    assert order["pg_tid"].startswith("MOCKPG-") and order["card_company"] == "하늘카드"
+    created = res.json()
+    assert created["order"]["amount"] == 12000
+    assert created["payment_request"]["fields"]["amount"] == "12000"
+    key = partners.pg.approve(created["payment_request"]["fields"])
+    order = client.post(
+        f"/shop/orders/{created['order']['id']}/payment",
+        json={"payment_key": key, "amount": 12000, "card_number": "4111111111111111"},
+    ).json()
+    assert order["status"] == "PAID"
+    assert order["pg_tid"] == key and order["card_company"] == "하늘카드"
     with engine.connect() as conn:
         row = conn.execute(select(payment)).mappings().one()
     assert "4111111111111111" not in str(dict(row))
+    # 카드 정보는 PG가 마스킹한 번호·승인번호뿐 (F6 Q1)
     assert set(payment.c.keys()) == {
         "id",
         "order_id",
@@ -137,12 +153,16 @@ def test_order_stores_pg_result_without_card_number(client, engine):
         "pg_tid",
         "amount",
         "approved_at",
+        "card_number_masked",
+        "approve_no",
+        "installment_months",
+        "receipt_url",
     }
 
 
 @pytest.mark.parametrize(
     "body",
-    [{"product_id": 1, "card_company": "실존카드"}, {"product_id": 0, "card_company": "하늘카드"}],
+    [{"product_id": 1, "delivery_memo": "x" * 51}, {"product_id": 0}],
 )
 def test_invalid_order_is_rejected(client, body):
     signup(client)
@@ -315,7 +335,7 @@ def test_withdraw_retains_order_records_and_destroys_the_rest(client, engine):
     years = (retained["retain_until"] - retained["created_at"]).days / 365
     assert 4.99 < years < 5.01
     data = retained["data"]
-    assert data["orders"][0]["amount"] == 12000 and data["orders"][0]["pg_tid"].startswith("MOCKPG")
+    assert data["orders"][0]["amount"] == 12000 and data["orders"][0]["pg_tid"].startswith("pay_")
     assert data["contact"] == {
         "name": "구매자",
         "email": "buyer@example.com",
@@ -330,6 +350,7 @@ def test_withdraw_retains_order_records_and_destroys_the_rest(client, engine):
         "address_detail": None,
         "courier": "데모택배(가상)",
         "tracking_no": "DEMO0000000001",
+        "delivery_memo": None,
     }
     assert order["tracking_no"] is None  # 송장번호도 배송 정보 — 옮긴 뒤 비운다
     # 보존 목적에 필요 없는 것은 담지 않는다 — 배송지 목록(주문에 안 쓴 회사 주소)·계좌·비밀번호

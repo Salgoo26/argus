@@ -13,9 +13,11 @@ import {
   formCriteria,
   formatDate,
   formatDateTime,
-  NEXT_DELIVERY_STEP,
+  courierStatus,
+  deliveryActions,
   type Operator,
   ORDER_STATUS,
+  PAID_STATUSES,
   type OrderStatus,
   type SearchBody,
 } from "@/lib/api";
@@ -32,6 +34,8 @@ type Delivery = {
   ship_phone: string | null;
   ship_address: string | null;
   courier: string | null;
+  courier_shipment_id: string | null;
+  courier_status: string | null;
   tracking_no: string | null;
   shipped_at: string | null;
   delivered_at: string | null;
@@ -50,8 +54,9 @@ const SEARCH_KEYS = [
   "ordered_to",
 ];
 
-// 배송·반품 관리 (커머스 확장, 판단기록 F4) — 운영·CS·관리자. 목록은 받는 사람·연락처를 마스킹하고,
-// 조회·검색은 접속기록(READ, 주문), 배송 단계 변경·반품 회수 확인은 (UPDATE, 주문)으로 남는다
+// 배송·반품 관리 (커머스 확장, 판단기록 F4·F6) — 운영·CS·관리자. 목록은 받는 사람·연락처를 마스킹하고,
+// 조회·검색은 접속기록(READ, 주문), 상품 준비·택배 접수·배송 조회·반품 회수 확인은 (UPDATE, 주문)으로 남는다.
+// 택배 접수 뒤 배송중·배송완료는 가상 택배사의 통지로 바뀐다(관리자가 넘기지 않음)
 export default function AdminDeliveriesPage() {
   const router = useRouter();
   const [me, setMe] = useState<Operator | null>(null);
@@ -90,7 +95,7 @@ export default function AdminDeliveriesPage() {
     );
   }
 
-  async function act(orderId: number, path: "advance" | "return-complete") {
+  async function act(orderId: number, path: "advance" | "dispatch" | "sync" | "return-complete") {
     setError(null);
     try {
       await api(`/admin/deliveries/${orderId}/${path}`, { method: "POST" });
@@ -131,9 +136,9 @@ export default function AdminDeliveriesPage() {
               <label htmlFor="d_status">상태</label>
               <select id="d_status" name="status" defaultValue="">
                 <option value="">전체</option>
-                {Object.entries(ORDER_STATUS).map(([code, label]) => (
+                {PAID_STATUSES.map((code) => (
                   <option key={code} value={code}>
-                    {label}
+                    {ORDER_STATUS[code]}
                   </option>
                 ))}
               </select>
@@ -168,6 +173,7 @@ export default function AdminDeliveriesPage() {
                   <th>연락처</th>
                   <th>주소</th>
                   <th>상태</th>
+                  <th>택배 상태</th>
                   <th>예상 도착</th>
                   <th>송장번호</th>
                   <th>처리</th>
@@ -175,7 +181,6 @@ export default function AdminDeliveriesPage() {
               </thead>
               <tbody>
                 {data?.items.map((d) => {
-                  const next = NEXT_DELIVERY_STEP[d.status];
                   return (
                     <tr key={d.id}>
                       <td className="num">
@@ -186,6 +191,7 @@ export default function AdminDeliveriesPage() {
                       <td>{d.ship_phone ?? "-"}</td>
                       <td>{d.ship_address ?? "-"}</td>
                       <td>{ORDER_STATUS[d.status]}</td>
+                      <td>{courierStatus(d.courier_status) ?? "-"}</td>
                       <td>
                         {d.delivered_at
                           ? `${formatDateTime(d.delivered_at)} 도착`
@@ -195,11 +201,15 @@ export default function AdminDeliveriesPage() {
                       </td>
                       <td className="mono">{d.tracking_no ?? "-"}</td>
                       <td>
-                        {next && (
-                          <button className="btn btn-secondary" onClick={() => act(d.id, "advance")}>
-                            {next}
+                        {deliveryActions(d).map((a) => (
+                          <button
+                            key={a.path}
+                            className="btn btn-secondary"
+                            onClick={() => act(d.id, a.path)}
+                          >
+                            {a.label}
                           </button>
-                        )}
+                        ))}
                         {d.status === "RETURN_REQUESTED" && (
                           <button
                             className="btn btn-secondary"
