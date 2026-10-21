@@ -164,6 +164,16 @@ order_claim = Table(
     Column("pickup_shipment_id", String(32)),
     Column("pickup_status", String(20)),
     Column("pickup_tracking_no", String(30)),
+    # 환불 방식·처리 (0014) — 무통장입금 주문은 관리자가 고객 환불계좌로 이체한 뒤 완료 처리.
+    # 계좌는 고객이 고른 시점의 사본, 계좌번호는 AES-256-GCM 암호문 (§7②6호)
+    Column("refund_method", String(16)),
+    Column("refund_status", String(16)),
+    Column("refund_bank_name", String(50)),
+    Column("refund_account_holder", String(50)),
+    Column("refund_account_enc", BYTEA),
+    Column("refund_account_last4", CHAR(4)),
+    Column("refunded_at", DateTime(timezone=True)),
+    Column("refunded_by", BigInteger, ForeignKey("operator.id")),
 )
 
 order_status_history = Table(
@@ -192,9 +202,9 @@ payment = Table(
     metadata,
     Column("id", BigInteger, primary_key=True),
     Column("order_id", BigInteger, ForeignKey("orders.id"), nullable=False),
-    Column("method", String(16), nullable=False),
-    Column("card_company", String(30), nullable=False),
-    Column("pg_tid", String(64), nullable=False),
+    Column("method", String(16), nullable=False),  # CARD / BANK_TRANSFER (0014)
+    Column("card_company", String(30)),  # 카드에만 (CHECK payment_card_fields)
+    Column("pg_tid", String(64)),
     Column("amount", Integer, nullable=False),
     Column("approved_at", DateTime(timezone=True), nullable=False),
     # 가상 PG 승인 응답 (0013) — 카드번호는 PG가 마스킹한 값(앞 6·뒤 4자리)만
@@ -202,6 +212,20 @@ payment = Table(
     Column("approve_no", String(12)),
     Column("installment_months", SmallInteger),
     Column("receipt_url", String(255)),
+)
+
+# 무통장입금 (0014) — 주문 시점의 쇼핑몰 입금 계좌·입금자명·기한, 관리자 입금 확인
+bank_deposit = Table(
+    "bank_deposit",
+    metadata,
+    Column("order_id", BigInteger, ForeignKey("orders.id"), primary_key=True),
+    Column("bank_name", String(50), nullable=False),
+    Column("account_number", String(30), nullable=False),
+    Column("account_holder", String(50), nullable=False),
+    Column("depositor_name", String(50), nullable=False),
+    Column("due_at", DateTime(timezone=True), nullable=False),
+    Column("confirmed_at", DateTime(timezone=True)),
+    Column("confirmed_by", BigInteger, ForeignKey("operator.id")),
 )
 
 refund_account = Table(

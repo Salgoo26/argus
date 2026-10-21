@@ -38,8 +38,8 @@ def _cipher() -> FieldCipher:
 
 
 def _register_account(client, number: str = ACCOUNT):
-    return client.put(
-        "/shop/me/refund-account",
+    return client.post(
+        "/shop/me/refund-accounts",
         json={"bank_name": "하늘은행", "account_holder": "구매자", "account_number": number},
     )
 
@@ -192,8 +192,8 @@ def test_refund_account_is_encrypted_and_masked(client, engine):
     signup(client)
     res = _register_account(client)
 
-    assert res.status_code == 200
-    view = res.json()["refund_account"]
+    assert res.status_code == 201
+    [view] = res.json()["items"]
     assert view["account_last4"] == "3456" and "account_number" not in view
     with engine.connect() as conn:
         row = conn.execute(select(refund_account)).mappings().one()
@@ -201,18 +201,43 @@ def test_refund_account_is_encrypted_and_masked(client, engine):
     assert _cipher().decrypt(row["account_number_enc"], refund_account_context(1)) == DIGITS
 
 
-def test_refund_account_replace_and_delete(client, engine):
+def test_refund_accounts_are_a_list_like_addresses(client, engine):
+    # 배송지처럼 여러 개 — 무통장입금 환불 때 이 목록에서 고른다 (F7-1)
     signup(client)
     _register_account(client)
-    assert (
-        _register_account(client, "220-0000-99998888").json()["refund_account"]["account_last4"]
-        == "8888"
-    )
-    with engine.connect() as conn:
-        assert conn.execute(select(func.count()).select_from(refund_account)).scalar_one() == 1
+    listed = _register_account(client, "220-0000-99998888").json()["items"]
+    assert [a["account_last4"] for a in listed] == ["3456", "8888"]
+    first, second = (a["id"] for a in listed)
 
-    assert client.delete("/shop/me/refund-account").status_code == 204
-    assert client.get("/shop/me/refund-account").json()["refund_account"] is None
+    changed = client.put(
+        f"/shop/me/refund-accounts/{first}",
+        json={"bank_name": "바다은행", "account_holder": "구매자", "account_number": "3330001111"},
+    )
+    assert changed.status_code == 200
+    assert [(a["bank_name"], a["account_last4"]) for a in changed.json()["items"]] == [
+        ("바다은행", "1111"),
+        ("하늘은행", "8888"),
+    ]
+    assert client.delete(f"/shop/me/refund-accounts/{second}").json()["items"][0]["id"] == first
+    assert len(client.get("/shop/me/refund-accounts").json()["items"]) == 1
+
+
+def test_refund_accounts_have_an_upper_limit(client):
+    signup(client)
+    for i in range(5):
+        assert _register_account(client, f"10000000{i:02d}").status_code == 201
+    res = _register_account(client, "1000000099")
+    assert res.status_code == 409 and res.json()["error"]["code"] == "TOO_MANY_REFUND_ACCOUNTS"
+
+
+def test_others_refund_account_is_not_found(client, engine):
+    signup(client)
+    account_id = _register_account(client).json()["items"][0]["id"]
+    client.cookies.clear()
+    signup(client, email="other@example.com")
+    body = {"bank_name": "하늘은행", "account_holder": "남", "account_number": "1234567890"}
+    assert client.put(f"/shop/me/refund-accounts/{account_id}", json=body).status_code == 404
+    assert client.delete(f"/shop/me/refund-accounts/{account_id}").status_code == 404
 
 
 @pytest.mark.parametrize("number", ["12345", "abcd-efgh-ijkl", "1" * 17])
@@ -226,7 +251,7 @@ def test_customer_commerce_is_not_access_logged(client, engine):
     _buy(client)
     client.get("/shop/orders")
     _register_account(client)
-    client.get("/shop/me/refund-account")
+    client.get("/shop/me/refund-accounts")
     assert outbox_payloads(engine) == []
 
 
@@ -265,7 +290,7 @@ def test_member_detail_masks_refund_account(shop_with_customer, engine):
 
     assert res.status_code == 200
     body = res.json()
-    assert body["refund_account"]["account_last4"] == "3456"
+    assert [a["account_last4"] for a in body["refund_accounts"]] == ["3456"]
     assert DIGITS not in res.text and "account_number_enc" not in res.text
     assert len(body["orders"]) == 2
     [event] = _events(engine, "MEMBER_BASIC")
@@ -275,7 +300,7 @@ def test_member_detail_masks_refund_account(shop_with_customer, engine):
 
 
 def test_reveal_refund_account_is_logged_as_payment_read(shop_with_customer, engine):
-    res = shop_with_customer.get("/admin/members/1/refund-account")
+    res = shop_with_customer.get("/admin/members/1/refund-accounts/1")
 
     assert res.status_code == 200 and res.json()["account_number"] == DIGITS
     [event] = _events(engine, "PAYMENT")
@@ -286,7 +311,7 @@ def test_reveal_refund_account_is_logged_as_payment_read(shop_with_customer, eng
 
 def test_failed_lookups_still_record_who_was_targeted(shop_with_customer, engine):
     assert shop_with_customer.get("/admin/members/777").status_code == 404
-    assert shop_with_customer.get("/admin/members/777/refund-account").status_code == 404
+    assert shop_with_customer.get("/admin/members/777/refund-accounts/1").status_code == 404
 
     for category in ("MEMBER_BASIC", "PAYMENT"):
         [event] = _events(engine, category)
@@ -294,7 +319,7 @@ def test_failed_lookups_still_record_who_was_targeted(shop_with_customer, engine
 
 
 def test_admin_commerce_routes_require_login(client):
-    for path in ("/admin/orders", "/admin/members/1", "/admin/members/1/refund-account"):
+    for path in ("/admin/orders", "/admin/members/1", "/admin/members/1/refund-accounts/1"):
         assert client.get(path).status_code == 401
 
 
@@ -380,14 +405,16 @@ def test_seeded_style_refund_account_is_revealable(shop_with_customer, engine):
                 name="시드회원",
             )
         )
-        conn.execute(
-            insert(refund_account).values(
+        account_id = conn.execute(
+            insert(refund_account)
+            .returning(refund_account.c.id)
+            .values(
                 member_id=50,
                 bank_name="숲은행",
                 account_holder="시드회원",
                 account_number_enc=_cipher().encrypt("000012345678", refund_account_context(50)),
                 account_last4="5678",
             )
-        )
-    res = shop_with_customer.get("/admin/members/50/refund-account")
+        ).scalar_one()
+    res = shop_with_customer.get(f"/admin/members/50/refund-accounts/{account_id}")
     assert res.json()["account_number"] == "000012345678"

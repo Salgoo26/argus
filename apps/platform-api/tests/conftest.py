@@ -302,7 +302,7 @@ def clean_tables(request):
         conn.execute(
             text(
                 "TRUNCATE operator, member, member_consent, outbox, orders, payment, order_claim,"
-                " order_status_history,"
+                " order_status_history, bank_deposit,"
                 " refund_account, shipping_address, inquiry, db_access_token,"
                 " retained_member_record, destruction_history, operator_permission_history"
                 " RESTART IDENTITY"

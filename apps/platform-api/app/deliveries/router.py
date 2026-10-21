@@ -22,7 +22,7 @@ from app.admin_search import SearchPage, SearchText, check_period, kst_period
 from app.agent import access_log, record_subjects
 from app.auth.deps import OrdersOperator
 from app.fulfillment import (
-    CUSTOMER_VISIBLE,
+    FULFILLMENT_STATUSES,
     complete_legacy_delivery,
     complete_return,
     dispatch_order,
@@ -92,7 +92,7 @@ def _masked(row) -> dict:
 
 
 def _page(conn, conditions: list, page: int, size: int) -> dict:
-    conditions = [orders.c.status.in_(CUSTOMER_VISIBLE), *conditions]
+    conditions = [orders.c.status.in_(FULFILLMENT_STATUSES), *conditions]
     total = conn.execute(select(func.count()).select_from(orders).where(*conditions)).scalar_one()
     rows = conn.execute(
         _list_query()
@@ -123,7 +123,7 @@ class DeliverySearch(SearchPage):
     member_id: Annotated[int, Field(ge=1)] | None = None
     recipient: SearchText | None = None  # 받는 사람 부분 일치
     tracking_no: SearchText | None = None
-    status: Literal[CUSTOMER_VISIBLE] | None = None  # type: ignore[valid-type]
+    status: Literal[FULFILLMENT_STATUSES] | None = None  # type: ignore[valid-type]
     ordered_from: date | None = None
     ordered_to: date | None = None
 

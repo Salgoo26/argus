@@ -31,6 +31,7 @@ from app.errors import ApiError
 from app.fulfillment import IN_PROGRESS, expire_stale_payments
 from app.models import (
     SHIP_COLUMNS,
+    bank_deposit,
     destruction_history,
     inquiry,
     member,
@@ -47,6 +48,8 @@ from app.models import (
 PAYMENT_RETENTION = timedelta(days=365 * 5)
 PAYMENT_LEGAL_BASIS = "전자상거래법 시행령 §6①3호"
 DESTRUCTION_LEGAL_BASIS = "개인정보 보호법 §21①"
+# 무통장입금 입금자명 — 분리보관으로 옮긴 뒤 운영 테이블에 남기는 표시 (NOT NULL 컬럼)
+MOVED_NAME = "(분리보관)"
 
 
 def _shipping(r) -> dict | None:
@@ -80,6 +83,11 @@ def _claims(conn: Connection, order_ids: list[int]) -> dict[int, list[dict]]:
                 "completed_at": c["completed_at"].isoformat() if c["completed_at"] else None,
                 "refund_amount": c["refund_amount"],
                 "refund_pg_tid": c["refund_pg_tid"],
+                "refund_method": c["refund_method"],
+                "refund_status": c["refund_status"],
+                "refund_bank_name": c["refund_bank_name"],
+                "refund_account_last4": c["refund_account_last4"],
+                "refunded_at": c["refunded_at"].isoformat() if c["refunded_at"] else None,
                 "pickup_tracking_no": c["pickup_tracking_no"],
             }
         )
@@ -98,15 +106,18 @@ def _retain_orders(conn: Connection, profile, now) -> None:
             orders.c.courier,
             orders.c.tracking_no,
             orders.c.delivery_memo,
+            payment.c.method,
             payment.c.pg_tid,
             payment.c.card_company,
             payment.c.card_number_masked,
             payment.c.approve_no,
+            bank_deposit.c.depositor_name,
+            bank_deposit.c.confirmed_at.label("deposit_confirmed_at"),
         )
         .select_from(
-            orders.join(product, product.c.id == orders.c.product_id).outerjoin(
-                payment, payment.c.order_id == orders.c.id
-            )
+            orders.join(product, product.c.id == orders.c.product_id)
+            .outerjoin(payment, payment.c.order_id == orders.c.id)
+            .outerjoin(bank_deposit, bank_deposit.c.order_id == orders.c.id)
         )
         .where(orders.c.member_id == profile["id"])
         .order_by(orders.c.id)
@@ -131,10 +142,15 @@ def _retain_orders(conn: Connection, profile, now) -> None:
                         "product": r.name,
                         "amount": r.amount,
                         "ordered_at": r.ordered_at.isoformat(),
+                        "payment_method": r.method,
                         "pg_tid": r.pg_tid,
                         "card_company": r.card_company,
                         "card_number_masked": r.card_number_masked,
                         "approve_no": r.approve_no,
+                        "depositor_name": r.depositor_name,
+                        "deposit_confirmed_at": (
+                            r.deposit_confirmed_at.isoformat() if r.deposit_confirmed_at else None
+                        ),
                         "status": r.status,
                         "shipping": _shipping(r),
                         "claims": claims.get(r.id, []),
@@ -156,7 +172,17 @@ def _retain_orders(conn: Connection, profile, now) -> None:
     conn.execute(
         update(order_claim)
         .where(order_claim.c.order_id.in_([r.id for r in rows]))
-        .values(reason_detail=None, pickup_tracking_no=None)
+        .values(
+            reason_detail=None,
+            pickup_tracking_no=None,
+            refund_account_holder=None,
+            refund_account_enc=None,
+        )
+    )
+    conn.execute(
+        update(bank_deposit)
+        .where(bank_deposit.c.order_id.in_([r.id for r in rows]))
+        .values(depositor_name=MOVED_NAME)
     )
 
 
@@ -228,6 +254,14 @@ def destroy_member(conn: Connection, member_id: int) -> None:
     ).scalar_one()
     if in_progress:
         raise ApiError(409, "ORDERS_IN_PROGRESS", "orders in delivery or return must finish first")
+    # 이체 환불을 기다리는 건이 있으면 — 환불받을 계좌 사본을 지우면 환불할 수 없다 (F7)
+    pending_refund = conn.execute(
+        select(func.count())
+        .select_from(order_claim.join(orders, orders.c.id == order_claim.c.order_id))
+        .where(orders.c.member_id == member_id, order_claim.c.refund_status == "PENDING")
+    ).scalar_one()
+    if pending_refund:
+        raise ApiError(409, "REFUND_IN_PROGRESS", "pending refunds must be completed first")
     profile = (
         conn.execute(
             select(member.c.id, member.c.name, member.c.email, member.c.phone).where(
