@@ -26,6 +26,7 @@ def test_skeleton_tables_created(engine):
         "operator_permission_history",  # 권한 이력 (0009, v0.1 보강 L-3)
         "order_claim",  # 취소·반품(청약철회) 기록 (0011)
         "order_status_history",  # 주문 상태 이력 (0011)
+        "bank_deposit",  # 무통장입금 (0014)
     }
 
 

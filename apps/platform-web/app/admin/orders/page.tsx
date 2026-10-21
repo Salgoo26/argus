@@ -27,9 +27,17 @@ type AdminOrder = {
   amount: number;
   status: OrderStatus;
   ordered_at: string;
+  payment_method: "CARD" | "BANK_TRANSFER" | null;
   card_company: string | null;
   pg_tid: string | null;
 };
+
+// 결제 수단 칸 — 카드는 카드사, 무통장입금은 입금 전·후 구분 (F7)
+function paymentLabel(o: AdminOrder): string {
+  if (o.payment_method === "BANK_TRANSFER") return "무통장입금";
+  if (o.status === "AWAITING_DEPOSIT" || o.status === "DEPOSIT_EXPIRED") return "무통장입금(입금 전)";
+  return o.card_company ?? "-";
+}
 type OrderPage = { items: AdminOrder[]; page: number; size: number; total: number };
 
 const PAGE_SIZE = 20;
@@ -129,7 +137,7 @@ export default function AdminOrdersPage() {
                   <th>상품</th>
                   <th className="num">금액</th>
                   <th>상태</th>
-                  <th>카드사</th>
+                  <th>결제 수단</th>
                   <th>PG 거래번호</th>
                   <th>주문 일시</th>
                 </tr>
@@ -152,7 +160,7 @@ export default function AdminOrdersPage() {
                     <td>{o.product_name}</td>
                     <td className="num">{won(o.amount)}</td>
                     <td>{ORDER_STATUS[o.status] ?? o.status}</td>
-                    <td>{o.card_company ?? "-"}</td>
+                    <td>{paymentLabel(o)}</td>
                     <td className="mono">{o.pg_tid ?? "-"}</td>
                     <td>{formatDateTime(o.ordered_at)}</td>
                   </tr>

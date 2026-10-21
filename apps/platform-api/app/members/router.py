@@ -18,7 +18,7 @@ from app.auth.deps import PERMISSIONS, ExportOperator, MembersOperator, RefundVi
 from app.crypto import refund_account_context
 from app.errors import ApiError
 from app.models import member, orders, payment, product, refund_account
-from app.shop.refund import masked_view
+from app.shop.refund import account_rows
 
 router = APIRouter(prefix="/admin/members")
 
@@ -201,7 +201,7 @@ def _member_or_404(conn, member_id: int):
 @router.get("/{member_id}")
 @access_log(action="READ", data_category="MEMBER_BASIC")
 def get_member(member_id: int, request: Request, operator_: MembersOperator) -> dict:
-    """회원 상세 (PLT-11) — 환불계좌는 끝 4자리만. 전체 번호는 아래 별도 조회(결제수단)
+    """회원 상세 (PLT-11) — 환불계좌(여러 개)는 끝 4자리만. 전체 번호는 아래 별도 조회(결제수단)
 
     배송지는 싣지 않는다 — 배송지 마스킹·전체 보기는 v0.2 (db-schema 4절 플랫폼 보강).
     배송 업무에 필요한 주소는 주문 상세(주문에 복사된 배송 정보)에서 본다
@@ -210,18 +210,14 @@ def get_member(member_id: int, request: Request, operator_: MembersOperator) -> 
     record_subjects([member_id])
     with request.app.state.engine.connect() as conn:
         profile = _member_or_404(conn, member_id)
-        account = (
-            conn.execute(select(refund_account).where(refund_account.c.member_id == member_id))
-            .mappings()
-            .first()
-        )
+        accounts = account_rows(conn, member_id)
         # 주문 권한이 없는 역할(마케팅)에게는 회원의 주문을 싣지 않는다 (v0.1 보강 L-1)
         recent_orders = (
             _recent_orders(conn, member_id) if operator_.role in PERMISSIONS["ORDERS"] else None
         )
     return {
         **dict(profile),
-        "refund_account": masked_view(account),
+        "refund_accounts": accounts,
         "orders": recent_orders,
     }
 
@@ -248,9 +244,11 @@ def _recent_orders(conn, member_id: int) -> list[dict]:
     return [dict(r) for r in rows]
 
 
-@router.get("/{member_id}/refund-account")
+@router.get("/{member_id}/refund-accounts/{account_id}")
 @access_log(action="READ", data_category="PAYMENT")
-def reveal_refund_account(member_id: int, request: Request, _operator: RefundViewOperator) -> dict:
+def reveal_refund_account(
+    member_id: int, account_id: int, request: Request, _operator: RefundViewOperator
+) -> dict:
     """환불계좌 전체 번호 — 데이터 유형 "결제수단"으로 기록 → Argus 결제수단 조회 룰(상)로 항상 탐지
 
     화면의 "전체 보기"를 눌렀을 때만 부른다(기능 레이어 7 결정 7). 복호화는 이 요청 안에서만 하고
@@ -259,7 +257,11 @@ def reveal_refund_account(member_id: int, request: Request, _operator: RefundVie
     record_subjects([member_id])
     with request.app.state.engine.connect() as conn:
         account = (
-            conn.execute(select(refund_account).where(refund_account.c.member_id == member_id))
+            conn.execute(
+                select(refund_account).where(
+                    refund_account.c.id == account_id, refund_account.c.member_id == member_id
+                )
+            )
             .mappings()
             .first()
         )

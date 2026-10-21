@@ -32,7 +32,7 @@ ROUTES = [
     (
         "환불계좌 전체",
         "GET",
-        "/admin/members/{member}/refund-account",
+        "/admin/members/{member}/refund-accounts/1",
         None,
         ("ADMIN", "OPS", "CS"),
     ),
@@ -93,7 +93,7 @@ def test_permission_table_matches_the_design():
 def test_refused_request_is_recorded_as_failure(engine, as_role, member_id):
     # 권한이 없어 거부된 시도도 접속기록에 남는다 — 누가 무엇을 하려 했는지 (Agent 미들웨어 유지)
     marketing = as_role("MARKETING")
-    assert marketing.get(f"/admin/members/{member_id}/refund-account").status_code == 403
+    assert marketing.get(f"/admin/members/{member_id}/refund-accounts/1").status_code == 403
     assert marketing.get("/admin/members/export").status_code == 403
 
     events = [e for e in outbox_payloads(engine) if e["actor"]["login_id"] == "user_marketing"]

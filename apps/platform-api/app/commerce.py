@@ -8,3 +8,10 @@ PG(결제대행사)도 가상이다(apps/mock-pg, 커머스 확장 F6). 카드�
 CARD_COMPANIES = ("하늘카드", "바다카드", "숲카드", "들판카드")
 BANKS = ("하늘은행", "바다은행", "숲은행", "들판은행")
 MOCK_PG_NAME = "데모페이(가상 PG)"
+
+# 무통장입금 (커머스 확장 F7) — 쇼핑몰 입금 계좌(가상). 은행 연동 없이 관리자가 입금을 확인한다
+SHOP_DEPOSIT_ACCOUNT = {
+    "bank_name": "하늘은행",
+    "account_number": "000-0000-0000-00",
+    "account_holder": "데모샵(가상)",
+}

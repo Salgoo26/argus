@@ -5,6 +5,9 @@
 커머스 확장(0011): 상세에 배송 진행(가상 택배사·송장번호)·취소/반품 기록·상태 이력이 더해진다.
 가상 PG·택배 연동(0013): 상세에 PG 승인 결과(마스킹 카드번호·승인번호·할부·영수증 주소)·배송 메모·
 택배 접수 번호·택배사 상태·반품 회수 상태가 더해진다. 카드번호 전체는 플랫폼에 없다.
+무통장입금(0014): 상세에 입금 계좌·입금자명·기한·입금 확인, 취소/반품의 환불 방식·이체 계좌
+(끝 4자리)가 더해진다. 입금 확인·환불 완료 처리는 UPDATE·ORDER,
+이체 계좌 전체 번호는 따로 — READ·결제수단(PAYMENT).
 처리한 정보주체 = 화면에 표시된 주문의 회원(탈퇴로 끊긴 주문은 정보주체 없음).
 """
 
@@ -17,16 +20,21 @@ from sqlalchemy import func, select
 
 from app.admin_search import SearchPage, check_period, kst_period
 from app.agent import access_log, record_subjects
-from app.auth.deps import OrdersOperator
+from app.auth.deps import OrdersOperator, RefundViewOperator
+from app.crypto import claim_refund_context
 from app.errors import ApiError
 from app.fulfillment import (
     STATUSES,
     claims_of,
+    complete_refund,
+    confirm_deposit,
     expected_delivery,
     history_of,
+    lock_order,
+    pending_refund_claim,
     withdrawal_deadline,
 )
-from app.models import SHIP_COLUMNS, member, orders, payment, product
+from app.models import SHIP_COLUMNS, bank_deposit, member, order_claim, orders, payment, product
 
 router = APIRouter(prefix="/admin/orders")
 
@@ -41,6 +49,7 @@ def _list_query():
         orders.c.amount,
         orders.c.status,
         orders.c.ordered_at,
+        payment.c.method.label("payment_method"),
         payment.c.card_company,
         payment.c.pg_tid,
     ).select_from(
@@ -153,11 +162,19 @@ def get_order(order_id: int, request: Request, _operator: OrdersOperator) -> dic
                     payment.c.receipt_url,
                     payment.c.pg_tid,
                     payment.c.approved_at,
+                    bank_deposit.c.bank_name.label("deposit_bank_name"),
+                    bank_deposit.c.account_number.label("deposit_account_number"),
+                    bank_deposit.c.account_holder.label("deposit_account_holder"),
+                    bank_deposit.c.depositor_name,
+                    bank_deposit.c.due_at.label("deposit_due_at"),
+                    bank_deposit.c.confirmed_at.label("deposit_confirmed_at"),
+                    bank_deposit.c.confirmed_by.label("deposit_confirmed_by"),
                 )
                 .select_from(
                     orders.join(product, product.c.id == orders.c.product_id)
                     .outerjoin(member, member.c.id == orders.c.member_id)
                     .outerjoin(payment, payment.c.order_id == orders.c.id)
+                    .outerjoin(bank_deposit, bank_deposit.c.order_id == orders.c.id)
                 )
                 .where(orders.c.id == order_id)
             )
@@ -178,3 +195,71 @@ def get_order(order_id: int, request: Request, _operator: OrdersOperator) -> dic
     detail["claims"] = claims
     detail["status_history"] = history
     return detail
+
+
+def _locked(conn, order_id: int):
+    order = lock_order(conn, order_id)
+    if order["member_id"] is not None:
+        record_subjects([order["member_id"]])
+    return order
+
+
+@router.post("/{order_id}/deposit-confirm")
+@access_log(action="UPDATE", data_category="ORDER")
+def deposit_confirm(order_id: int, request: Request, operator_: OrdersOperator) -> dict:
+    """무통장입금 입금 확인 → 결제완료 (은행 연동 없음 — 입금자명·금액을 보고 관리자가 확인, F7)"""
+    with request.app.state.engine.begin() as conn:
+        now = conn.execute(select(func.now())).scalar_one()
+        order = _locked(conn, order_id)
+        result = confirm_deposit(conn, order, now, operator_.id)
+    if result == "EXPIRED":
+        # 기한 경과 상태는 위 트랜잭션에서 커밋한 뒤 오류로 알린다
+        raise ApiError(409, "DEPOSIT_EXPIRED", "deposit due date has passed")
+    return {"id": order_id, "member_id": order["member_id"], "status": "PAID"}
+
+
+@router.get("/{order_id}/refund-account")
+@access_log(action="READ", data_category="PAYMENT")
+def reveal_claim_refund_account(
+    order_id: int, request: Request, _operator: RefundViewOperator
+) -> dict:
+    """이체 환불할 계좌 전체 번호 — 고객이 취소·반품할 때 고른 계좌의 사본 (F7-1)
+
+    회원 상세의 환불계좌 전체 보기와 같이 데이터 유형 "결제수단"으로 기록 → Argus 결제수단 조회 룰.
+    이체해야 하는 건(환불 대기)이 있을 때만 보여 준다 — 끝난 건의 계좌를 다시 열람할 이유가 없다.
+    """
+    with request.app.state.engine.connect() as conn:
+        member_id = conn.execute(select(orders.c.member_id).where(orders.c.id == order_id)).scalar()
+        if member_id is not None:
+            record_subjects([member_id])
+        claim = pending_refund_claim(conn, order_id)
+    if claim is None or claim["refund_account_enc"] is None:
+        raise ApiError(404, "NOT_FOUND", "no refund transfer is waiting")
+    number = request.app.state.cipher.decrypt(
+        claim["refund_account_enc"], claim_refund_context(order_id)
+    )
+    return {
+        "bank_name": claim["refund_bank_name"],
+        "account_holder": claim["refund_account_holder"],
+        "account_number": number,
+        "refund_amount": claim["refund_amount"],
+    }
+
+
+@router.post("/{order_id}/refund-complete")
+@access_log(action="UPDATE", data_category="ORDER")
+def refund_complete(order_id: int, request: Request, operator_: RefundViewOperator) -> dict:
+    """이체 환불 완료 처리 — 관리자가 고객 환불계좌로 이체한 뒤 (무통장입금, F7)
+
+    이체할 계좌를 볼 수 있는 역할(환불계좌 전체 보기 권한)만 처리한다.
+    """
+    with request.app.state.engine.begin() as conn:
+        now = conn.execute(select(func.now())).scalar_one()
+        order = _locked(conn, order_id)
+        complete_refund(conn, order, now, operator_.id)
+        claim = conn.execute(
+            select(order_claim.c.id, order_claim.c.refund_status)
+            .where(order_claim.c.order_id == order_id)
+            .order_by(order_claim.c.id.desc())
+        ).first()
+    return {"id": order_id, "claim_id": claim.id, "refund_status": claim.refund_status}

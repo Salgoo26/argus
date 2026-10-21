@@ -40,3 +40,8 @@ class FieldCipher:
 
 def refund_account_context(member_id: int) -> str:
     return f"refund_account:{member_id}"
+
+
+def claim_refund_context(order_id: int) -> str:
+    """취소·반품 기록에 복사한 환불계좌 — 주문에 묶는다(다른 주문 행으로 옮겨 붙이면 복호화 실패)"""
+    return f"order_refund:{order_id}"
