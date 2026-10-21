@@ -70,6 +70,18 @@ const MESSAGES: Record<string, string> = {
   ORDERS_IN_PROGRESS: "배송 중이거나 반품 처리 중인 주문이 있어 탈퇴할 수 없습니다. 처리가 끝난 뒤 다시 시도하세요.",
   SHIPPING_ADDRESS_INCOMPLETE:
     "이 배송지는 연락처·우편번호가 비어 있습니다. 마이페이지에서 배송지를 보완해 주세요.",
+  // 가상 PG·택배 연동
+  AMOUNT_MISMATCH: "결제 금액이 주문 금액과 다릅니다. 다시 주문해 주세요.",
+  PAYMENT_FAILED: "결제 승인에 실패했습니다. 다시 시도해 주세요.",
+  PAYMENT_EXPIRED: "결제 시간(30분)이 지났습니다. 다시 주문해 주세요.",
+  PG_UNAVAILABLE: "결제 서비스(PG)에 연결할 수 없습니다. 잠시 후 다시 시도해 주세요.",
+  PG_CANCEL_FAILED: "결제 취소에 실패했습니다. 잠시 후 다시 시도해 주세요.",
+  COURIER_UNAVAILABLE: "택배 서비스에 연결할 수 없습니다. 잠시 후 다시 시도해 주세요.",
+  COURIER_REJECTED: "택배 서비스가 요청을 거절했습니다.",
+  ALREADY_DISPATCHED: "이미 택배 접수한 주문입니다.",
+  ALREADY_SHIPPED: "택배사가 이미 상품을 가져갔습니다. 배송완료 후 반품을 신청해 주세요.",
+  NOT_DISPATCHED: "택배 접수 기록이 없는 주문입니다.",
+  RETURN_NOT_ARRIVED: "반품 상품이 아직 도착하지 않았습니다(택배 회수 진행 중).",
 };
 
 export function errorMessage(error: unknown): string {
@@ -184,7 +196,7 @@ export function fullAddress(a: Pick<ShippingAddress, "zip_code" | "address" | "a
   return `${zip}${a.address}${a.address_detail ? ` ${a.address_detail}` : ""}`;
 }
 
-// ── 주문·결제(PG 목업)·환불계좌 ───────────────────────────
+// ── 주문·결제(가상 PG)·환불계좌 ───────────────────────────
 
 export type Product = { id: number; name: string; price: number; ship_days?: number };
 
@@ -208,6 +220,8 @@ export function orderAddress(o: OrderShipping): string | null {
 
 // 배송·취소·청약철회 (커머스 확장)
 export type OrderStatus =
+  | "PENDING_PAYMENT"
+  | "PAYMENT_EXPIRED"
   | "PAID"
   | "PREPARING"
   | "SHIPPING"
@@ -216,7 +230,20 @@ export type OrderStatus =
   | "RETURN_REQUESTED"
   | "RETURNED";
 
+// 결제된 주문의 상태 — 배송 화면·고객 주문 내역에 쓰는 범위 (결제대기·결제 미완료 제외)
+export const PAID_STATUSES: OrderStatus[] = [
+  "PAID",
+  "PREPARING",
+  "SHIPPING",
+  "DELIVERED",
+  "CANCELLED",
+  "RETURN_REQUESTED",
+  "RETURNED",
+];
+
 export const ORDER_STATUS: Record<OrderStatus, string> = {
+  PENDING_PAYMENT: "결제대기",
+  PAYMENT_EXPIRED: "결제 미완료",
   PAID: "결제완료",
   PREPARING: "상품준비중",
   SHIPPING: "배송중",
@@ -226,11 +253,45 @@ export const ORDER_STATUS: Record<OrderStatus, string> = {
   RETURNED: "반품완료",
 };
 
-export const NEXT_DELIVERY_STEP: Partial<Record<OrderStatus, string>> = {
-  PAID: "상품준비중으로",
-  PREPARING: "발송 처리(배송중으로)",
-  SHIPPING: "배송완료로",
+// 택배사가 알려 주는 상태 (가상 택배 서비스)
+export const COURIER_STATUS: Record<string, string> = {
+  RECEIVED: "택배 접수(집하 대기)",
+  PICKED_UP: "집하",
+  IN_TRANSIT: "간선 이동",
+  OUT_FOR_DELIVERY: "배송 출발",
+  DELIVERED: "배송 완료",
+  CANCELED: "접수 취소",
+  RETURN_RECEIVED: "회수 접수",
+  RETURN_PICKED_UP: "회수 집하",
+  RETURN_IN_TRANSIT: "회수 이동",
+  RETURN_DELIVERED: "판매자 도착",
 };
+
+export function courierStatus(code: string | null | undefined): string | null {
+  return code ? (COURIER_STATUS[code] ?? code) : null;
+}
+
+// 관리자가 할 수 있는 배송 처리 — 배송중·배송완료는 택배사 통지로 바뀌므로 관리자가 넘기지 않는다.
+// 택배 접수 없이 배송중인 주문(연동 이전 데이터)만 배송완료로 넘길 수 있다
+export type DeliveryAction = { label: string; path: "advance" | "dispatch" | "sync" };
+
+export function deliveryActions(o: {
+  status: OrderStatus;
+  courier_shipment_id?: string | null;
+  claims?: { pickup_status?: string | null }[];
+}): DeliveryAction[] {
+  const tracked = !!o.courier_shipment_id;
+  if (o.status === "PAID") return [{ label: "상품 준비 시작", path: "advance" }];
+  if (o.status === "PREPARING" && !tracked) return [{ label: "택배 접수", path: "dispatch" }];
+  if (o.status === "SHIPPING" && !tracked)
+    return [{ label: "배송완료로 (택배 연동 이전 주문)", path: "advance" }];
+  // 반품접수는 택배 회수 상태를 다시 가져온다 (회수 접수 없는 연동 이전 반품은 서버가 안내)
+  const pickup =
+    o.status === "RETURN_REQUESTED" && (o.claims === undefined || o.claims.some((c) => c.pickup_status));
+  if (((o.status === "PREPARING" || o.status === "SHIPPING") && tracked) || pickup)
+    return [{ label: "배송 조회(택배사 상태 새로고침)", path: "sync" }];
+  return [];
+}
 
 export const CANCEL_REASONS: Record<string, string> = {
   CHANGE_OF_MIND: "단순 변심",
@@ -254,10 +315,15 @@ export type OrderClaim = {
   requested_at: string;
   completed_at: string | null;
   refund_amount: number | null;
+  pickup_status?: string | null;
+  pickup_tracking_no?: string | null;
 };
 
 export type OrderDelivery = {
   courier: string | null;
+  courier_status?: string | null;
+  courier_shipment_id?: string | null;
+  delivery_memo?: string | null;
   tracking_no: string | null;
   shipped_at: string | null;
   delivered_at: string | null;
@@ -272,6 +338,10 @@ export type Order = OrderShipping &
     status: OrderStatus;
     ordered_at: string;
     card_company: string | null;
+    card_number_masked?: string | null;
+    installment_months?: number | null;
+    approve_no?: string | null;
+    receipt_url?: string | null;
     pg_tid: string | null;
     approved_at: string | null;
     return_deadline: string | null;
@@ -348,4 +418,14 @@ export function safeAdminPath(raw: string | null): string {
 export function adminLoginPath(): string {
   const here = window.location.pathname + window.location.search;
   return `/admin/login?next=${encodeURIComponent(here)}`;
+}
+
+// PG 결제창에 POST할 값 (POST /shop/orders 응답) — 구매자 정보 포함, 카드번호 없음
+export type PaymentRequest = {
+  checkout_url: string;
+  fields: Record<string, string>;
+};
+
+export function installment(months: number | null | undefined): string {
+  return !months ? "일시불" : `${months}개월`;
 }

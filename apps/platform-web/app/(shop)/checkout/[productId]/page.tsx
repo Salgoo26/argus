@@ -2,33 +2,38 @@
 
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import {
   ApiError,
   api,
   customerErrorMessage,
   fullAddress,
+  type Order,
+  type PaymentRequest,
   type Product,
   type ShippingAddressList,
   shopLoginPath,
   won,
 } from "@/lib/api";
+import { PG_RESULT_PATH, PG_WINDOW, type PgResult } from "@/lib/pg";
 
-// 주문·결제 (PLT-04·05, 기능 레이어 7-4 ③)
+// 주문·결제 (PLT-04·05, 기능 레이어 7-4 ③, 커머스 확장 F6)
 // - 로그인 필수: 비로그인이면 로그인 화면으로 보내고, 로그인 뒤 이 상품으로 돌아온다
 // - 등록한 배송지 중 하나를 고른다 (없으면 마이페이지 등록 안내). 주문에는 그 시점 값이 복사된다
-// - 결제는 가상 PG 결제창. 카드번호·유효기간은 입력만 받고(검사 없음) **서버로 보내지 않는다**
-//   (실제로도 카드번호는 PG사만 받는다). 서버로 가는 것은 상품·배송지·카드사뿐 — approve() 참고
+// - 결제는 가상 PG(데모페이) 결제창을 **작은 창**으로 띄운다. 카드번호는 그 창(PG)에만 입력하고
+//   쇼핑몰은 받지 않는다. 순서: 주문(결제대기) → PG 창에 주문·구매자 정보 POST → 카드 입력 →
+//   PG가 쇼핑몰 결과 페이지로 돌려보냄 → 결과를 이 창으로 넘김 → 서버가 PG 승인 요청
 export default function CheckoutPage() {
   const { productId } = useParams<{ productId: string }>();
   const router = useRouter();
   const [product, setProduct] = useState<Product | null>(null);
-  const [cards, setCards] = useState<string[]>([]);
   const [addresses, setAddresses] = useState<ShippingAddressList | null>(null);
   const [addressId, setAddressId] = useState<number | null>(null);
-  const [pgOpen, setPgOpen] = useState(false);
+  const [memo, setMemo] = useState("");
+  const [paying, setPaying] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const settled = useRef(false);
 
   useEffect(() => {
     // 배송지 조회가 곧 로그인 확인 — 401이면 로그인 화면으로(돌아올 주소를 붙여서)
@@ -41,11 +46,8 @@ export default function CheckoutPage() {
         if (e instanceof ApiError && e.status === 401) router.replace(shopLoginPath());
         else setError(customerErrorMessage(e));
       });
-    api<{ items: Product[]; card_companies: string[] }>("/shop/products")
-      .then((body) => {
-        setProduct(body.items.find((p) => String(p.id) === productId) ?? null);
-        setCards(body.card_companies);
-      })
+    api<{ items: Product[] }>("/shop/products")
+      .then((body) => setProduct(body.items.find((p) => String(p.id) === productId) ?? null))
       .catch((e) => setError(customerErrorMessage(e)));
   }, [productId, router]);
 
@@ -53,22 +55,71 @@ export default function CheckoutPage() {
     return error ? <div className="alert-error">{error}</div> : <p className="muted">불러오는 중…</p>;
   }
 
-  async function approve(cardCompany: string) {
-    // 카드번호는 인자로도 받지 않는다 — 결제창 컴포넌트 안에만 있고 여기로 넘어오지 않는다
+  async function pay() {
+    setError(null);
+    // 팝업 차단을 피하려고 클릭 순간에 빈 창부터 연다 — 주문을 만든 뒤 그 창으로 결제창을 연다
+    const popup = window.open("", PG_WINDOW, "width=460,height=720");
+    if (!popup) {
+      setError("결제창을 열 수 없습니다. 브라우저의 팝업 차단을 해제해 주세요.");
+      return;
+    }
+    setPaying(true);
+    settled.current = false;
+    let created: { order: Order; payment_request: PaymentRequest };
     try {
-      await api("/shop/orders", {
+      created = await api("/shop/orders", {
         method: "POST",
         body: JSON.stringify({
           product_id: Number(productId),
           shipping_address_id: addressId,
-          card_company: cardCompany,
+          delivery_memo: memo.trim() || null,
         }),
       });
-      router.replace("/orders");
     } catch (e) {
+      popup.close();
+      setPaying(false);
       if (e instanceof ApiError && e.status === 401) router.replace(shopLoginPath());
       else setError(customerErrorMessage(e));
-      setPgOpen(false);
+      return;
+    }
+    const orderId = created.order.id;
+    window.addEventListener("message", onMessage);
+    openPg(created.payment_request, orderId);
+    // 결과 없이 창을 닫으면 결제 미완료 — 주문은 30분 뒤 자동으로 만료된다
+    const watch = window.setInterval(() => {
+      if (popup.closed) {
+        window.clearInterval(watch);
+        window.setTimeout(() => {
+          if (!settled.current) {
+            window.removeEventListener("message", onMessage);
+            setPaying(false);
+            setError("결제창이 닫혀 결제가 완료되지 않았습니다.");
+          }
+        }, 500);
+      }
+    }, 500);
+
+    async function onMessage(event: MessageEvent<PgResult>) {
+      // 같은 출처(쇼핑몰 결과 페이지)에서 온, 이 주문의 결과만 받는다
+      if (event.origin !== window.location.origin || event.data?.type !== "pg-result") return;
+      if (event.data.orderId !== orderId || settled.current) return;
+      settled.current = true;
+      window.removeEventListener("message", onMessage);
+      if (event.data.status === "fail") {
+        setPaying(false);
+        setError(`결제가 완료되지 않았습니다: ${event.data.message}`);
+        return;
+      }
+      try {
+        await api(`/shop/orders/${orderId}/payment`, {
+          method: "POST",
+          body: JSON.stringify({ payment_key: event.data.paymentKey, amount: event.data.amount }),
+        });
+        router.replace("/orders");
+      } catch (e) {
+        setPaying(false);
+        setError(customerErrorMessage(e));
+      }
     }
   }
 
@@ -103,7 +154,7 @@ export default function CheckoutPage() {
                     name="shipping_address"
                     checked={addressId === a.id}
                     onChange={() => setAddressId(a.id)}
-                    disabled={pgOpen}
+                    disabled={paying}
                   />
                   <span>
                     <strong>{a.label}</strong>{" "}
@@ -119,101 +170,44 @@ export default function CheckoutPage() {
           </ul>
         )}
 
-        <button
-          className="btn btn-primary"
-          onClick={() => setPgOpen(true)}
-          disabled={pgOpen || addressId === null}
-        >
-          결제하기
-        </button>
-      </div>
+        <div className="field">
+          <label htmlFor="delivery_memo">배송 메모 (선택)</label>
+          <input
+            id="delivery_memo"
+            value={memo}
+            onChange={(e) => setMemo(e.target.value)}
+            maxLength={50}
+            placeholder="예: 문 앞에 놓아 주세요"
+            disabled={paying}
+          />
+          <span className="hint">택배사에 전달됩니다.</span>
+        </div>
 
-      {pgOpen && (
-        <PgWindow
-          amount={product.price}
-          cards={cards}
-          onApprove={approve}
-          onCancel={() => setPgOpen(false)}
-        />
-      )}
+        <button className="btn btn-primary" onClick={pay} disabled={paying || addressId === null}>
+          {paying ? "결제창에서 결제를 진행해 주세요…" : "결제하기"}
+        </button>
+        <p className="hint">결제는 데모페이(가상 PG) 결제창에서 진행됩니다. 카드번호는 쇼핑몰에 전달되지 않습니다.</p>
+      </div>
     </div>
   );
 }
 
-// ── 가상 PG 결제창 ─────────────────────────────────────────
-
-// 카드번호·유효기간은 결제 흐름을 보여 주기 위한 입력칸일 뿐 검사하지 않는다(2026-10-08 사용자 결정 —
-// 형식 검증이 이 데모의 목적이 아님). 무엇을 입력해도 승인되고, 입력값은 어디로도 보내지 않는다
-function PgWindow({
-  amount,
-  cards,
-  onApprove,
-  onCancel,
-}: {
-  amount: number;
-  cards: string[];
-  onApprove: (cardCompany: string) => Promise<void>;
-  onCancel: () => void;
-}) {
-  const [card, setCard] = useState(cards[0] ?? "");
-  // 카드번호·유효기간은 이 컴포넌트의 상태에만 있다 — <form>·name 속성을 쓰지 않아 어떤 전송에도 실리지 않는다
-  const [number, setNumber] = useState("");
-  const [expiry, setExpiry] = useState("");
-  const [pending, setPending] = useState(false);
-
-  async function submit() {
-    setPending(true);
-    // 승인을 누르면 바로 지운다 — 승인 요청에는 카드사만 실린다
-    setNumber("");
-    setExpiry("");
-    await onApprove(card);
-    setPending(false);
+// PG 결제창에 주문·구매자 정보를 POST한다 — 주소창(URL)에 개인정보가 남지 않게 GET 대신 폼 전송
+function openPg(request: PaymentRequest, orderId: number) {
+  const back = `${window.location.origin}${PG_RESULT_PATH}?order=${orderId}`;
+  const form = document.createElement("form");
+  form.method = "POST";
+  form.action = request.checkout_url;
+  form.target = PG_WINDOW;
+  const fields = { ...request.fields, successUrl: back, failUrl: `${back}&fail=1` };
+  for (const [name, value] of Object.entries(fields)) {
+    const input = document.createElement("input");
+    input.type = "hidden";
+    input.name = name;
+    input.value = value;
+    form.appendChild(input);
   }
-
-  return (
-    <div className="card pg-window" role="dialog" aria-label="결제창">
-      <div className="pg-head">데모페이 결제</div>
-      <div className="pg-warning" role="alert">
-        가상 결제 — 실제 카드번호 입력 금지
-      </div>
-      <div className="field">
-        <label htmlFor="pg_card">카드사</label>
-        <select id="pg_card" value={card} onChange={(e) => setCard(e.target.value)}>
-          {cards.map((c) => (
-            <option key={c}>{c}</option>
-          ))}
-        </select>
-      </div>
-      <div className="field">
-        <label htmlFor="pg_number">카드번호</label>
-        <input
-          id="pg_number"
-          inputMode="numeric"
-          autoComplete="off"
-          value={number}
-          onChange={(e) => setNumber(e.target.value)}
-          maxLength={19}
-        />
-      </div>
-      <div className="field">
-        <label htmlFor="pg_expiry">유효기간 (MM/YY)</label>
-        <input
-          id="pg_expiry"
-          inputMode="numeric"
-          autoComplete="off"
-          value={expiry}
-          onChange={(e) => setExpiry(e.target.value)}
-          maxLength={5}
-        />
-      </div>
-      <div className="toolbar">
-        <button className="btn btn-primary" onClick={submit} disabled={pending}>
-          {pending ? "승인 중…" : `${won(amount)} 결제 승인`}
-        </button>
-        <button className="btn btn-secondary" onClick={onCancel} disabled={pending}>
-          취소
-        </button>
-      </div>
-    </div>
-  );
+  document.body.appendChild(form);
+  form.submit();
+  form.remove();
 }

@@ -7,9 +7,11 @@ import {
   ApiError,
   api,
   CANCEL_REASONS,
+  courierStatus,
   customerErrorMessage,
   formatDate,
   formatDateTime,
+  installment,
   type Order,
   ORDER_STATUS,
   type OrderStatus,
@@ -20,7 +22,8 @@ import {
 
 const STEPS: OrderStatus[] = ["PAID", "PREPARING", "SHIPPING", "DELIVERED"];
 
-// 주문 내역 (커머스 확장) — 배송 상태·예상 도착일·송장번호, 취소(상품준비중까지)·청약철회(배송완료 후 7일)
+// 주문 내역 (커머스 확장) — 배송 상태·예상 도착일·송장번호, 취소(상품준비중까지)·청약철회(배송완료 후 7일).
+// 배송 상태는 가상 택배사가 알려 온 값, 결제 정보는 가상 PG 승인 결과(마스킹 카드번호)다. 결제하지 않은 주문은 없다
 export default function MyOrdersPage() {
   const router = useRouter();
   const [items, setItems] = useState<Order[] | null>(null);
@@ -112,12 +115,28 @@ function OrderCard({
       <dl className="kv">
         <dt>결제</dt>
         <dd>
-          {won(o.amount)} · {o.card_company ?? "-"} <span className="mono">{o.pg_tid ?? ""}</span>
+          {won(o.amount)} · {o.card_company ?? "-"}{" "}
+          {o.card_number_masked && <span className="mono">{o.card_number_masked}</span>}
+          {o.approve_no && ` · ${installment(o.installment_months)} · 승인번호 ${o.approve_no}`}
+          {o.receipt_url && (
+            <>
+              {" · "}
+              <a href={o.receipt_url} target="_blank" rel="noopener noreferrer">
+                영수증
+              </a>
+            </>
+          )}
         </dd>
         <dt>주문 일시</dt>
         <dd>{formatDateTime(o.ordered_at)}</dd>
         <dt>배송지</dt>
         <dd>{o.ship_recipient ? `${o.ship_recipient} · ${orderAddress(o)}` : "-"}</dd>
+        {o.delivery_memo && (
+          <>
+            <dt>배송 메모</dt>
+            <dd>{o.delivery_memo}</dd>
+          </>
+        )}
         {o.status !== "CANCELLED" && (
           <>
             <dt>{o.delivered_at ? "도착" : "예상 도착일"}</dt>
@@ -126,11 +145,12 @@ function OrderCard({
             </dd>
           </>
         )}
-        {o.tracking_no && (
+        {(o.tracking_no || o.courier_status) && (
           <>
             <dt>택배</dt>
             <dd>
-              {o.courier} <span className="mono">{o.tracking_no}</span>
+              {o.courier} <span className="mono">{o.tracking_no ?? ""}</span>
+              {o.courier_status && ` · ${courierStatus(o.courier_status)}`}
             </dd>
           </>
         )}
@@ -164,8 +184,8 @@ function OrderCard({
           <strong>{claim === "cancel" ? "주문 취소" : "청약철회(반품) 신청"}</strong>
           <span className="hint">
             {claim === "cancel"
-              ? "취소하면 카드 승인이 바로 취소됩니다."
-              : "반품 상품이 회수되면 카드 승인이 취소됩니다."}
+              ? "취소하면 카드 승인이 바로 취소됩니다. 택배사가 이미 상품을 가져간 경우에는 취소할 수 없습니다."
+              : "신청하면 택배 기사가 배송지로 회수하러 갑니다. 상품이 도착해 확인되면 카드 승인이 취소됩니다."}
           </span>
           <div className="field">
             <label htmlFor={`reason-${o.id}`}>사유</label>
@@ -211,7 +231,8 @@ function ClaimRow({ claim: c }: { claim: Order["claims"][number] }) {
         {c.reason_detail ? ` — ${c.reason_detail}` : ""} · {formatDateTime(c.requested_at)}
         {c.status === "COMPLETED" && c.refund_amount !== null
           ? ` · ${won(c.refund_amount)} 카드 승인 취소`
-          : " · 처리 중"}
+          : ` · ${courierStatus(c.pickup_status) ?? "처리 중"}`}
+        {c.pickup_tracking_no && <span className="mono"> (회수 송장 {c.pickup_tracking_no})</span>}
       </dd>
     </>
   );
