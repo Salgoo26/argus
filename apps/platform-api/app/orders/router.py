@@ -2,6 +2,7 @@
 
 목록에는 결제수단 정보가 카드사 이름뿐이다(카드번호는 저장하지 않음) → 데이터 유형 ORDER.
 상세에는 배송 정보(주문 시점 스냅샷)가 더해진다 — 역시 주문 조회 ORDER (db-schema 4절 플랫폼 보강).
+커머스 확장(0011): 상세에 배송 진행(가상 택배사·송장번호)·취소/반품 기록·상태 이력이 더해진다.
 처리한 정보주체 = 화면에 표시된 주문의 회원(탈퇴로 끊긴 주문은 정보주체 없음).
 """
 
@@ -16,6 +17,13 @@ from app.admin_search import SearchPage, check_period, kst_period
 from app.agent import access_log, record_subjects
 from app.auth.deps import OrdersOperator
 from app.errors import ApiError
+from app.fulfillment import (
+    STATUSES,
+    claims_of,
+    expected_delivery,
+    history_of,
+    withdrawal_deadline,
+)
 from app.models import SHIP_COLUMNS, member, orders, payment, product
 
 router = APIRouter(prefix="/admin/orders")
@@ -65,7 +73,7 @@ def list_orders(
 class OrderSearch(SearchPage):
     order_id: Annotated[int, Field(ge=1)] | None = None
     member_id: Annotated[int, Field(ge=1)] | None = None
-    status: Literal["PAID"] | None = None  # 지금 주문 상태는 결제 완료뿐 (db-schema 4절)
+    status: Literal[STATUSES] | None = None  # type: ignore[valid-type]  # 0011 배송·취소 상태
     ordered_from: date | None = None  # 한국 날짜, 양 끝 포함
     ordered_to: date | None = None
 
@@ -126,6 +134,11 @@ def get_order(order_id: int, request: Request, _operator: OrdersOperator) -> dic
                     orders.c.status,
                     orders.c.ordered_at,
                     *(orders.c[c] for c in SHIP_COLUMNS),
+                    product.c.ship_days,
+                    orders.c.courier,
+                    orders.c.tracking_no,
+                    orders.c.shipped_at,
+                    orders.c.delivered_at,
                     payment.c.method,
                     payment.c.card_company,
                     payment.c.pg_tid,
@@ -141,8 +154,17 @@ def get_order(order_id: int, request: Request, _operator: OrdersOperator) -> dic
             .mappings()
             .first()
         )
+        if row is not None:
+            claims = claims_of(conn, [order_id]).get(order_id, [])
+            history = history_of(conn, order_id)
     if row is None:
         raise ApiError(404, "NOT_FOUND", "order not found")
     if row["member_id"] is not None:
         record_subjects([row["member_id"]])
-    return dict(row)
+    detail = dict(row)
+    ship_days = detail.pop("ship_days")
+    detail["expected_delivery_at"] = expected_delivery(detail["ordered_at"], ship_days)
+    detail["return_deadline"] = withdrawal_deadline(detail["delivered_at"])
+    detail["claims"] = claims
+    detail["status_history"] = history
+    return detail

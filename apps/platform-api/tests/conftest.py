@@ -114,7 +114,8 @@ def clean_tables(request):
     with eng.begin() as conn:
         conn.execute(
             text(
-                "TRUNCATE operator, member, member_consent, outbox, orders, payment,"
+                "TRUNCATE operator, member, member_consent, outbox, orders, payment, order_claim,"
+                " order_status_history,"
                 " refund_account, shipping_address, inquiry, db_access_token,"
                 " retained_member_record, destruction_history, operator_permission_history"
                 " RESTART IDENTITY"
@@ -168,6 +169,17 @@ def signup(client, email: str = "buyer@example.com", **overrides):
     }
     body.update(overrides)
     return client.post("/shop/auth/signup", json=body)
+
+
+def finish_orders(engine) -> None:
+    """모든 주문을 배송완료로 — 진행 중 주문이 있으면 탈퇴할 수 없다 (커머스 확장 0011)"""
+    with engine.begin() as conn:
+        conn.execute(
+            text(
+                "UPDATE orders SET status = 'DELIVERED', courier = '데모택배(가상)',"
+                " tracking_no = 'DEMO0000000001', shipped_at = now(), delivered_at = now()"
+            )
+        )
 
 
 def shop_login(client, email: str = "buyer@example.com", password: str = CUSTOMER_PASSWORD):
