@@ -101,9 +101,9 @@ def test_admin_grants_an_account_with_a_temporary_password():
         json={
             "login_id": "e2e_cs_new",
             "name": "가상상담",
-            "team": "CS",
+            "team": "COMMERCE_OPS",
             "role": "CS",
-            "reason": "E2E — CS팀 신규 입사",
+            "reason": "E2E — 커머스운영팀 상담 신규 입사",
         },
     )
     assert created.status_code == 201, created.text

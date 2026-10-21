@@ -36,7 +36,8 @@ router = APIRouter(prefix="/admin/accounts")
 
 KST = timezone(timedelta(hours=9))
 _EXEMPT = "권한 이력(operator_permission_history)에 기록 — 회원 개인정보 처리 아님"
-TEAMS = ("OPS", "CS", "MARKETING")
+# 소속 부서 (마이그레이션 0015) — 접근 범위는 역할(role)로만 정한다
+TEAMS = ("COMMERCE_OPS", "MARKETING", "IT")
 
 LoginId = Annotated[
     str, StringConstraints(strip_whitespace=True, pattern=r"^[a-z][a-z0-9_]{2,63}$")

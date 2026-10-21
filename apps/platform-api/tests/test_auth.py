@@ -36,7 +36,7 @@ def test_login_sets_httponly_strict_cookie(client, engine, password_hash):
     assert {k: res.json()[k] for k in ("login_id", "name", "team", "role")} == {
         "login_id": "ops_park",
         "name": "박지훈",
-        "team": "OPS",
+        "team": "COMMERCE_OPS",
         "role": "OPS",
     }
     cookie = _set_cookie_header(res).lower()
@@ -213,6 +213,6 @@ def test_me_returns_current_operator(client, engine, password_hash):
     assert {k: res.json()[k] for k in ("login_id", "name", "team", "role")} == {
         "login_id": "ops_park",
         "name": "박지훈",
-        "team": "OPS",
+        "team": "COMMERCE_OPS",
         "role": "OPS",
     }

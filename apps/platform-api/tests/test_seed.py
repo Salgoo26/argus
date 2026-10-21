@@ -113,7 +113,7 @@ def test_seed_enqueues_handler_created_per_operator(engine):
     assert payload["handler"] == {
         "login_id": "ops_park",
         "name": "박지훈",
-        "team": "OPS",
+        "team": "COMMERCE_OPS",
         "employment_status": "ACTIVE",
     }
     # 마이크로초 정밀도 (api-spec 3-1 #4)

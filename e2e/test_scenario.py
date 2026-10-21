@@ -175,7 +175,7 @@ def test_false_positive_request_is_cancelled(officer, handler_password):
     이 테스트만
     쓰는 운영 계정을 만든다(시드의 운영·관리자 계정은 같은 날 각자 대량 다운로드 탐지건이 있다)
     """
-    password = create_operator("ops_yoon", "윤가상", "OPS", "OPS")
+    password = create_operator("ops_yoon", "윤가상", "COMMERCE_OPS", "OPS")
     download_members("ops_yoon", 60, password)
     officer_browser = argus_login(*officer)
     case = wait_for_detection(officer_browser, "ops_yoon", 60)

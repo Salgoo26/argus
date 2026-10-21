@@ -322,7 +322,7 @@ def add_operator(engine, password_hash: str, **overrides) -> int:
         "login_id": "ops_park",
         "password_hash": password_hash,
         "name": "박지훈",  # 가상 인물
-        "team": "OPS",
+        "team": "COMMERCE_OPS",
         "role": "OPS",
     }
     values.update(overrides)

@@ -17,7 +17,7 @@ from app.auth.deps import PERMISSIONS
 from conftest import TEST_CLIENT_ADDR, add_operator, login, outbox_payloads, signup
 
 ROLES = ("ADMIN", "OPS", "CS", "MARKETING")
-TEAM_OF = {"ADMIN": "OPS", "OPS": "OPS", "CS": "CS", "MARKETING": "MARKETING"}
+TEAM_OF = {"ADMIN": "IT", "OPS": "COMMERCE_OPS", "CS": "COMMERCE_OPS", "MARKETING": "MARKETING"}
 
 # (설명, 메서드, 경로, 본문, 허용 역할)
 ROUTES = [

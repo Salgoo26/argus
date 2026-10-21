@@ -152,7 +152,7 @@ def test_notifications_reach_officer_and_handler(officer, handler_password):
     # 탐지건 목록에 소명 기한이 보인다(제출 대기 건)
     # ops_park의 대량 다운로드 건은 앞 시나리오에서 승인(종결)됐다. 남는 REQUESTED 건은
     # 야간·주말 룰에 걸린 것뿐이라 평일 낮에는 없다 — 이 테스트만 쓰는 계정으로 새로 만든다
-    password = create_operator("ops_seo", "서가상", "OPS", "OPS")
+    password = create_operator("ops_seo", "서가상", "COMMERCE_OPS", "OPS")
     download_members("ops_seo", 60, password)
     wait_for_detection(argus_login(*officer), "ops_seo", 60)
     waiting = argus_login("ops_seo", handler_password("ops_seo"))

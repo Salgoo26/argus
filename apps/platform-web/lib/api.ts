@@ -95,6 +95,11 @@ export function errorMessage(error: unknown): string {
   return "서버에 연결할 수 없습니다.";
 }
 
+// 소속 부서 (플랫폼 0015) — 고를 수 있는 값. 접근 범위는 소속이 아니라 역할로 정한다
+export const TEAMS: Record<string, string> = { COMMERCE_OPS: "커머스운영팀", MARKETING: "마케팅팀", IT: "IT팀" };
+// 표시용 — 권한 이력에는 개편 전 값(OPS·CS)이 그 시점 값으로 남아 있다
+export const TEAM_LABELS: Record<string, string> = { ...TEAMS, OPS: "운영팀(개편 전)", CS: "CS팀(개편 전)" };
+
 export type Operator = {
   login_id: string;
   name: string;
