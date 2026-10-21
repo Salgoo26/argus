@@ -1,6 +1,6 @@
 # DB 스키마 (Argus / 플랫폼)
 
-> 작성 2026-09-23 · 최종 개정 2026-10-21
+> 작성 2026-09-23 · 최종 개정 2026-10-22
 > 관련 문서: [아키텍처_설계서](architecture.md), [API명세서_시스템간](api-spec.md), [정책정의서](policy.md), [액터별_플로우](actor-flows.md), [요구사항정의서](requirements.md)
 > DBMS: PostgreSQL 16 (플랫폼 DB / Argus DB 별도 인스턴스)
 > 표기: **[S]** = Walking Skeleton에 필요한 테이블. 컬럼은 전체를 정의하되 Skeleton에서는 [S] 테이블만 생성한다.
@@ -31,6 +31,7 @@
 | 14 | 정책 보완 제안 | 보고서 export 시 **기본 마스킹**, 언마스킹 export는 사유 필수 | 액터별_플로우 8절 마스킹 정책이 화면만 다루고 **보고서 파일은 다루지 않아 우회 경로가 됨** |
 | 15 | v0.1 보강 | 수행업무 `LOGOUT`(0014) · `notification` 화면 알림 구조로 구현, `explanation.due_at`(0015) · `push_subscription`(0016) · `access_log` DELETE·TRUNCATE 트리거, 보고서 `integrity` 기준점(0017) · `detection_log.attached_at`, EVENT 탐지건 그룹 키에 `data_category`·`action_group`(0018) · 룰 필드 `client_ip`, 측정 `DISTINCT_IP`·`MAX_SUBJECT_REPEAT`, 기본 룰 3개(0019) · `argus_user_history`(0020) · 보호 대상 등록부 4개 테이블(0021) · 시드 룰 설명 정리(0022) · 플랫폼 `operator_permission_history`, `operator.must_change_password`(플랫폼 0009) · DB 직접 기록의 회원번호 추출과 `context.registry_version` | 고시 제5조제1항·제3항(권한 부여·변경·말소 기록), 제8조제2항(점검·사후조치), 제8조제3항(위·변조 방지), 안내서 61~62쪽(권한 부여·말소 내역), FAQ 147(로그아웃), 95쪽(비정상 행위 예시, 위·변조 확인 정보 별도 보관), 129쪽(이상행위 탐지 시 알림) |
 | 16 | 커머스 확장 | 플랫폼 0011(배송·취소/반품 `order_claim`·`order_status_history`) · 0012(`member` 아이디·이메일 인증·본인확인 결과) · 0013(가상 PG·택배 연동 컬럼) · 0014(무통장입금 `bank_deposit`, 환불계좌 여러 개, 이체 환불) · Argus 0023~0025(보호 대상 등록부에 새 컬럼 분류) — 4절 "커머스 확장" | 전자상거래법 제17조(청약철회)·시행령 제6조(계약·청약철회 기록), PIPA 제24조의2(주민번호 처리 제한), 고시 제7조제2항제6호(계좌번호 암호화) |
+| 17 | 관리자 소속 부서 | 플랫폼 0015 — `operator.team`을 `COMMERCE_OPS`·`MARKETING`·`IT`로, 기존 계정 이동 시 권한 이력 `CHANGE`·명부 동기화. Argus `handler.team`은 개편 전 값도 받음 | 처리업무별 주관부서를 정하기 위해 부서 구성을 정리(정책정의서 4-5 "소속 부서") |
 
 ---
 
@@ -140,7 +141,7 @@ CREATE TABLE handler (
     source_system_id   smallint     NOT NULL REFERENCES source_system(id),
     login_id           varchar(64)  NOT NULL,
     name               varchar(50)  NOT NULL,
-    team               varchar(50),
+    team               varchar(50),                -- 플랫폼 소속 부서 코드 (개편 전 OPS·CS가 남을 수 있음)
     employment_status  varchar(16)  NOT NULL CHECK (employment_status IN ('ACTIVE','TERMINATED')),
     terminated_at      timestamptz,                -- 퇴직 시점 (시점 기준 룰 판정용)
     last_event_at      timestamptz  NOT NULL,      -- 순서 역전 방지 + 중복 판정 기준 (API ② 3-1)
@@ -860,7 +861,7 @@ CREATE TABLE operator (
     login_id           varchar(64)  NOT NULL UNIQUE,
     password_hash      varchar(255) NOT NULL,
     name               varchar(50)  NOT NULL,
-    team               varchar(50)  NOT NULL CHECK (team IN ('CS','MARKETING','OPS')),
+    team               varchar(50)  NOT NULL CHECK (team IN ('COMMERCE_OPS','MARKETING','IT')),  -- 소속 부서 (플랫폼 0015)
     role               varchar(16)  NOT NULL CHECK (role IN ('ADMIN','CS','MARKETING','OPS')),  -- PLT-10/14
     employment_status  varchar(16)  NOT NULL DEFAULT 'ACTIVE' CHECK (employment_status IN ('ACTIVE','TERMINATED')),
     terminated_at      timestamptz,
@@ -1057,6 +1058,7 @@ CREATE TABLE destruction_history (
 
 - 관리자 화면 "계정·권한"(ADMIN 전용)에서 부여(`GRANT` — 새 계정, 임시 비밀번호는 응답에 한 번만), 변경(`CHANGE` — 역할·팀), 말소(`REVOKE` — 퇴직 처리)를 하면 같은 트랜잭션에서 이력 1건과 Argus 취급자 동기화 이벤트를 outbox에 넣는다. 사유는 필수이고 본인 계정은 바꿀 수 없다(정책정의서 4-5).
 - 0009가 이미 있던 계정마다 `GRANT` 1건(사유 "초기 계정")을 채웠고, 시드 스크립트도 같은 방식으로 남긴다.
+- 0015가 소속을 부서 3개(`COMMERCE_OPS`·`MARKETING`·`IT`)로 바꾸면서, 값이 바뀐 계정마다 `CHANGE` 1건(처리자 시스템, 사유 "조직 개편")과 취급자 동기화 이벤트를 남겼다. 역할 ADMIN → `IT`, 마케팅은 그대로, 나머지(OPS·CS) → `COMMERCE_OPS`. 옛 이력 행은 그 시점 값(`OPS`·`CS`)으로 남는다.
 - 계정·권한 화면과 본인 비밀번호 변경은 회원 개인정보 처리가 아니라 접속기록(Agent) 대상이 아니다. 이 이력이 증적이다.
 - `TRUNCATE`는 막지 않는다(Argus 원장만 막음). 3년 보관 뒤 파기는 파기 배치(v0.2)와 함께 다룬다.
 
