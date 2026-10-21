@@ -24,6 +24,8 @@ import { PG_RESULT_PATH, PG_WINDOW, type PgResult } from "@/lib/pg";
 // - 결제는 가상 PG(데모페이) 결제창을 **작은 창**으로 띄운다. 카드번호는 그 창(PG)에만 입력하고
 //   쇼핑몰은 받지 않는다. 순서: 주문(결제대기) → PG 창에 주문·구매자 정보 POST → 카드 입력 →
 //   PG가 쇼핑몰 결과 페이지로 돌려보냄 → 결과를 이 창으로 넘김 → 서버가 PG 승인 요청
+// - 무통장입금(F7): 입금자명을 받아 주문(입금대기)만 만들고 주문 내역으로 — 입금 계좌·기한은 거기서 안내.
+//   관리자가 입금을 확인하면 결제완료
 export default function CheckoutPage() {
   const { productId } = useParams<{ productId: string }>();
   const router = useRouter();
@@ -31,6 +33,8 @@ export default function CheckoutPage() {
   const [addresses, setAddresses] = useState<ShippingAddressList | null>(null);
   const [addressId, setAddressId] = useState<number | null>(null);
   const [memo, setMemo] = useState("");
+  const [method, setMethod] = useState<"CARD" | "BANK_TRANSFER">("CARD");
+  const [depositor, setDepositor] = useState("");
   const [paying, setPaying] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const settled = useRef(false);
@@ -46,6 +50,9 @@ export default function CheckoutPage() {
         if (e instanceof ApiError && e.status === 401) router.replace(shopLoginPath());
         else setError(customerErrorMessage(e));
       });
+    api<{ name: string }>("/shop/me")
+      .then((me) => setDepositor((d) => d || me.name))
+      .catch(() => undefined);
     api<{ items: Product[] }>("/shop/products")
       .then((body) => setProduct(body.items.find((p) => String(p.id) === productId) ?? null))
       .catch((e) => setError(customerErrorMessage(e)));
@@ -55,7 +62,30 @@ export default function CheckoutPage() {
     return error ? <div className="alert-error">{error}</div> : <p className="muted">불러오는 중…</p>;
   }
 
+  async function orderByDeposit() {
+    setError(null);
+    setPaying(true);
+    try {
+      await api("/shop/orders", {
+        method: "POST",
+        body: JSON.stringify({
+          product_id: Number(productId),
+          shipping_address_id: addressId,
+          delivery_memo: memo.trim() || null,
+          payment_method: "BANK_TRANSFER",
+          depositor_name: depositor.trim(),
+        }),
+      });
+      router.replace("/orders");
+    } catch (e) {
+      setPaying(false);
+      if (e instanceof ApiError && e.status === 401) router.replace(shopLoginPath());
+      else setError(customerErrorMessage(e));
+    }
+  }
+
   async function pay() {
+    if (method === "BANK_TRANSFER") return orderByDeposit();
     setError(null);
     // 팝업 차단을 피하려고 클릭 순간에 빈 창부터 연다 — 주문을 만든 뒤 그 창으로 결제창을 연다
     const popup = window.open("", PG_WINDOW, "width=460,height=720");
@@ -183,10 +213,64 @@ export default function CheckoutPage() {
           <span className="hint">택배사에 전달됩니다.</span>
         </div>
 
-        <button className="btn btn-primary" onClick={pay} disabled={paying || addressId === null}>
-          {paying ? "결제창에서 결제를 진행해 주세요…" : "결제하기"}
+        <h2 className="card-title">결제 수단</h2>
+        <div className="toolbar">
+          <label className="check">
+            <input
+              type="radio"
+              name="payment_method"
+              checked={method === "CARD"}
+              onChange={() => setMethod("CARD")}
+              disabled={paying}
+            />
+            <span>카드 결제</span>
+          </label>
+          <label className="check">
+            <input
+              type="radio"
+              name="payment_method"
+              checked={method === "BANK_TRANSFER"}
+              onChange={() => setMethod("BANK_TRANSFER")}
+              disabled={paying}
+            />
+            <span>무통장입금</span>
+          </label>
+        </div>
+        {method === "BANK_TRANSFER" && (
+          <div className="field">
+            <label htmlFor="depositor_name">입금자명</label>
+            <input
+              id="depositor_name"
+              value={depositor}
+              onChange={(e) => setDepositor(e.target.value)}
+              maxLength={50}
+              required
+              disabled={paying}
+            />
+            <span className="hint">
+              주문 후 안내되는 계좌로 3일 안에 입금해 주세요. 입금이 확인되면 결제완료로 바뀝니다.
+            </span>
+          </div>
+        )}
+
+        <button
+          className="btn btn-primary"
+          onClick={pay}
+          disabled={
+            paying || addressId === null || (method === "BANK_TRANSFER" && !depositor.trim())
+          }
+        >
+          {method === "BANK_TRANSFER"
+            ? "주문하기"
+            : paying
+              ? "결제창에서 결제를 진행해 주세요…"
+              : "결제하기"}
         </button>
-        <p className="hint">결제는 데모페이(가상 PG) 결제창에서 진행됩니다. 카드번호는 쇼핑몰에 전달되지 않습니다.</p>
+        {method === "CARD" && (
+          <p className="hint">
+            결제는 데모페이(가상 PG) 결제창에서 진행됩니다. 카드번호는 쇼핑몰에 전달되지 않습니다.
+          </p>
+        )}
       </div>
     </div>
   );

@@ -74,6 +74,12 @@ const MESSAGES: Record<string, string> = {
   AMOUNT_MISMATCH: "결제 금액이 주문 금액과 다릅니다. 다시 주문해 주세요.",
   PAYMENT_FAILED: "결제 승인에 실패했습니다. 다시 시도해 주세요.",
   PAYMENT_EXPIRED: "결제 시간(30분)이 지났습니다. 다시 주문해 주세요.",
+  DEPOSITOR_NAME_REQUIRED: "입금자명을 입력해 주세요.",
+  DEPOSIT_EXPIRED: "입금 기한이 지난 주문입니다.",
+  REFUND_ACCOUNT_REQUIRED: "환불받을 계좌를 선택해 주세요.",
+  TOO_MANY_REFUND_ACCOUNTS: "환불계좌는 최대 5개까지 등록할 수 있습니다.",
+  NO_PENDING_REFUND: "이체를 기다리는 환불이 없습니다.",
+  REFUND_IN_PROGRESS: "처리 중인 환불이 있어 탈퇴할 수 없습니다. 환불이 끝난 뒤 다시 시도하세요.",
   PG_UNAVAILABLE: "결제 서비스(PG)에 연결할 수 없습니다. 잠시 후 다시 시도해 주세요.",
   PG_CANCEL_FAILED: "결제 취소에 실패했습니다. 잠시 후 다시 시도해 주세요.",
   COURIER_UNAVAILABLE: "택배 서비스에 연결할 수 없습니다. 잠시 후 다시 시도해 주세요.",
@@ -222,6 +228,8 @@ export function orderAddress(o: OrderShipping): string | null {
 export type OrderStatus =
   | "PENDING_PAYMENT"
   | "PAYMENT_EXPIRED"
+  | "AWAITING_DEPOSIT"
+  | "DEPOSIT_EXPIRED"
   | "PAID"
   | "PREPARING"
   | "SHIPPING"
@@ -230,7 +238,7 @@ export type OrderStatus =
   | "RETURN_REQUESTED"
   | "RETURNED";
 
-// 결제된 주문의 상태 — 배송 화면·고객 주문 내역에 쓰는 범위 (결제대기·결제 미완료 제외)
+// 결제된 주문의 상태 — 배송 화면에 쓰는 범위 (결제대기·입금대기·미완료 제외)
 export const PAID_STATUSES: OrderStatus[] = [
   "PAID",
   "PREPARING",
@@ -244,6 +252,8 @@ export const PAID_STATUSES: OrderStatus[] = [
 export const ORDER_STATUS: Record<OrderStatus, string> = {
   PENDING_PAYMENT: "결제대기",
   PAYMENT_EXPIRED: "결제 미완료",
+  AWAITING_DEPOSIT: "입금대기",
+  DEPOSIT_EXPIRED: "입금기한 만료",
   PAID: "결제완료",
   PREPARING: "상품준비중",
   SHIPPING: "배송중",
@@ -315,9 +325,26 @@ export type OrderClaim = {
   requested_at: string;
   completed_at: string | null;
   refund_amount: number | null;
+  refund_method?: "PG_CANCEL" | "BANK_TRANSFER" | null;
+  refund_status?: "PENDING" | "DONE" | null;
+  refund_bank_name?: string | null;
+  refund_account_last4?: string | null;
+  refunded_at?: string | null;
   pickup_status?: string | null;
   pickup_tracking_no?: string | null;
 };
+
+// 환불 처리 표시 — 카드는 PG 취소(바로 완료), 무통장입금은 관리자 이체 후 완료 (F7)
+export function refundLabel(c: OrderClaim): string | null {
+  if (c.refund_method === "BANK_TRANSFER") {
+    const to = c.refund_bank_name ? ` (${c.refund_bank_name} ****${c.refund_account_last4})` : "";
+    if (c.refund_status === "DONE") return `계좌 이체 완료${to}`;
+    if (c.refund_status === "PENDING") return `계좌 이체 대기${to}`;
+    return `반품 완료 후 계좌 이체${to}`;
+  }
+  if (c.refund_method === "PG_CANCEL") return "카드 결제 취소";
+  return null;
+}
 
 export type OrderDelivery = {
   courier: string | null;
@@ -346,14 +373,28 @@ export type Order = OrderShipping &
     approved_at: string | null;
     return_deadline: string | null;
     claims: OrderClaim[];
-  };
+  } & OrderDeposit;
 
-export type RefundAccountView = {
+// 무통장입금 (F7) — 주문 시점의 쇼핑몰 입금 계좌·입금자명·기한, 관리자 입금 확인
+export type OrderDeposit = {
+  payment_method?: "CARD" | "BANK_TRANSFER" | null;
+  deposit_bank_name?: string | null;
+  deposit_account_number?: string | null;
+  deposit_account_holder?: string | null;
+  depositor_name?: string | null;
+  deposit_due_at?: string | null;
+  deposit_confirmed_at?: string | null;
+};
+
+export type RefundAccount = {
+  id: number;
   bank_name: string;
   account_holder: string;
   account_last4: string;
   updated_at?: string;
-} | null;
+};
+
+export type RefundAccountList = { items: RefundAccount[]; banks: string[]; max: number };
 
 export function won(amount: number): string {
   return `${amount.toLocaleString("ko-KR")}원`;

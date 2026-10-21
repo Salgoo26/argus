@@ -14,7 +14,7 @@ import {
   formatDateTime,
   GENDER,
   type Operator,
-  type RefundAccountView,
+  type RefundAccount,
   won,
 } from "@/lib/api";
 
@@ -33,7 +33,7 @@ type MemberDetail = {
   phone: string | null;
   status: string;
   created_at: string;
-  refund_account: RefundAccountView;
+  refund_accounts: RefundAccount[];
   orders: {
     id: number;
     product_name: string;
@@ -54,7 +54,8 @@ export default function MemberDetailPage() {
   const router = useRouter();
   const [me, setMe] = useState<Operator | null>(null);
   const [member, setMember] = useState<MemberDetail | null>(null);
-  const [revealed, setRevealed] = useState<Revealed | null>(null);
+  // 전체 번호를 연 계좌 (계좌 번호 → 전체 값)
+  const [revealed, setRevealed] = useState<Record<number, Revealed>>({});
   const [error, setError] = useState<string | null>(null);
 
   const handleError = useCallback(
@@ -70,19 +71,20 @@ export default function MemberDetailPage() {
     api<MemberDetail>(`/admin/members/${id}`).then(setMember).catch(handleError);
   }, [id, handleError]);
 
-  async function reveal() {
+  async function reveal(accountId: number) {
     const ok = window.confirm(
       "환불계좌 전체 번호를 조회합니다. 계속할까요?",
     );
     if (!ok) return;
     try {
-      setRevealed(await api<Revealed>(`/admin/members/${id}/refund-account`));
+      const full = await api<Revealed>(`/admin/members/${id}/refund-accounts/${accountId}`);
+      setRevealed((r) => ({ ...r, [accountId]: full }));
     } catch (e) {
       handleError(e);
     }
   }
 
-  const account = member?.refund_account ?? null;
+  const accounts = member?.refund_accounts ?? [];
 
   return (
     <>
@@ -126,25 +128,31 @@ export default function MemberDetailPage() {
 
             <section className="card">
               <h2 className="card-title">환불계좌</h2>
-              {account ? (
-                <div className="stack">
-                  <div className="toolbar">
-                    <span>
-                      {account.bank_name} ****{account.account_last4} · 예금주 {account.account_holder}
-                    </span>
-                    {!revealed && can(me, "REFUND_FULL_VIEW") && (
-                      <button className="btn btn-danger" onClick={reveal}>
-                        전체 보기
-                      </button>
-                    )}
-                  </div>
-                  {revealed && (
-                    <div className="reveal">
-                      {revealed.bank_name} <span className="mono">{revealed.account_number}</span> ·
-                      예금주 {revealed.account_holder}
-                    </div>
-                  )}
-                </div>
+              {accounts.length > 0 ? (
+                <ul className="address-list">
+                  {accounts.map((account) => (
+                    <li key={account.id} className="address-item">
+                      <div className="stack">
+                        <span>
+                          {account.bank_name} ****{account.account_last4} · 예금주{" "}
+                          {account.account_holder}
+                        </span>
+                        {revealed[account.id] && (
+                          <div className="reveal">
+                            {revealed[account.id].bank_name}{" "}
+                            <span className="mono">{revealed[account.id].account_number}</span> ·
+                            예금주 {revealed[account.id].account_holder}
+                          </div>
+                        )}
+                      </div>
+                      {!revealed[account.id] && can(me, "REFUND_FULL_VIEW") && (
+                        <button className="btn btn-danger" onClick={() => reveal(account.id)}>
+                          전체 보기
+                        </button>
+                      )}
+                    </li>
+                  ))}
+                </ul>
               ) : (
                 <p className="muted">등록된 환불계좌가 없습니다.</p>
               )}
