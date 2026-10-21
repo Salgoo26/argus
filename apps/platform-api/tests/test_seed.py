@@ -264,3 +264,53 @@ def test_seed_operators_have_initial_grant_history(engine):
     assert {r.login_id: r.after_role for r in rows} == expected
     assert len(rows) == len(expected)
     assert {(r.change_type, r.reason, r.actor_id) for r in rows} == {("GRANT", "초기 계정", None)}
+
+
+def test_identity_backfill_fills_seed_members_once(engine, client):
+    """시드 회원의 가상 본인확인 결과 (0012) — 화면 가입 회원은 건드리지 않고, 다시 돌려도 그대로"""
+    from app.scripts.seed import backfill_identity
+
+    from conftest import TEST_AUTH_SECRET, signup
+
+    _seed(engine)
+    signup(client, email="real-signup@example.com", name="화면가입")
+    secret = TEST_AUTH_SECRET.encode()
+    with engine.begin() as conn:
+        assert backfill_identity(conn, secret) == MEMBERS
+    with engine.begin() as conn:
+        assert backfill_identity(conn, secret) == 0
+        rows = conn.execute(select(member).order_by(member.c.id)).mappings().all()
+    seeded = [r for r in rows if r["email"].startswith("user")]
+    assert all(r["login_id"] == r["email"].split("@")[0] for r in seeded)
+    assert all(r["ci"] and r["birth_date"] and r["gender"] in "MF" for r in seeded)
+    assert len({r["ci"] for r in rows}) == len(rows)
+
+
+def test_fulfillment_seed_spreads_statuses_with_history(engine):
+    from app.crypto import FieldCipher
+    from app.models import order_claim, order_status_history, orders
+    from app.scripts.seed import seed_commerce, seed_fulfillment
+
+    from conftest import TEST_PAYMENT_KEY
+
+    _seed(engine)
+    with engine.begin() as conn:
+        seed_commerce(conn, FieldCipher(bytes.fromhex(TEST_PAYMENT_KEY)))
+        assert seed_fulfillment(conn) is True
+    with engine.begin() as conn:
+        assert seed_fulfillment(conn) is False  # 이력이 있으면 다시 하지 않는다
+        statuses = dict(
+            conn.execute(select(orders.c.status, func.count()).group_by(orders.c.status)).all()
+        )
+        claims = conn.execute(select(order_claim)).mappings().all()
+        actors = set(conn.execute(select(order_status_history.c.actor_type)).scalars())
+        shipped_without_tracking = conn.execute(
+            select(func.count())
+            .select_from(orders)
+            .where(orders.c.status == "DELIVERED", orders.c.tracking_no.is_(None))
+        ).scalar_one()
+    assert statuses["DELIVERED"] > 0 and statuses["CANCELLED"] == 12
+    assert statuses["RETURNED"] == 8
+    assert {c["claim_type"] for c in claims} == {"CANCEL", "RETURN"}
+    assert actors == {"SYSTEM"}  # 관리자가 한 일로 지어내지 않는다
+    assert shipped_without_tracking == 0

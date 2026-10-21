@@ -22,7 +22,7 @@ router = APIRouter(prefix="/shop/me")
 
 
 class ProfileUpdate(BaseModel):
-    """정정할 수 있는 칸만 — 이메일은 로그인 아이디라 칸 자체가 없다 (보내도 버려진다)"""
+    """정정할 수 있는 칸만 — 아이디·이메일·본인확인 결과는 칸 자체가 없다 (보내도 버려진다)"""
 
     name: Name
     phone: Phone
@@ -91,9 +91,15 @@ def _profile(conn, member_id: int) -> dict:
         conn.execute(
             select(
                 member.c.id,
+                member.c.login_id,
                 member.c.email,
+                member.c.email_verified_at,
                 member.c.name,
                 member.c.phone,
+                member.c.birth_date,
+                member.c.gender,
+                member.c.carrier,
+                member.c.identity_verified_at,
                 member.c.created_at,
             ).where(member.c.id == member_id)
         )

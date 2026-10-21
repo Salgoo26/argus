@@ -134,28 +134,31 @@ def test_invalid_signup_input_is_rejected(client, engine, overrides):
     assert _member_count(engine) == 0
 
 
-def test_signup_without_phone_field_is_rejected(client, engine):
+def test_signup_without_verification_tokens_is_rejected(client, engine):
+    """인증 단계를 건너뛰고 가입 API를 직접 부를 수 없다 (커머스 확장 — shop/verification.py)"""
     body = {
-        "email": "buyer@example.com",
+        "login_id": "buyer",
         "password": CUSTOMER_PASSWORD,
-        "name": "구매자",
+        "email_token": "forged",
+        "identity_token": "forged",
         "consents": REQUIRED_CONSENTS,
     }
-    assert client.post("/shop/auth/signup", json=body).status_code == 400
+    res = client.post("/shop/auth/signup", json=body)
+    assert res.status_code == 400 and res.json()["error"]["code"] == "VERIFICATION_REQUIRED"
     assert _member_count(engine) == 0
 
 
-def test_signup_collects_only_the_required_items(client, engine):
-    """생년월일·성별·주소는 받지 않는다 (policy 4-3 최소수집) — 보내도 저장할 칸이 없다"""
-    res = signup(client, birth_date="1990-01-01", gender="F", address="서울특별시 가상구 가상로 1")
+def test_signup_ignores_address_field(client, engine):
+    """주소는 회원 정보가 아니라 배송지 (0007) — 보내도 저장할 칸이 없고,
+    가입으로 배송지도 안 생긴다"""
+    res = signup(client, address="서울특별시 가상구 가상로 1")
     assert res.status_code == 201
     columns = {c["name"] for c in inspect(engine).get_columns("member")}
-    # 주소는 회원 정보가 아니라 배송지 (0007) — member에 칸이 없고, 가입으로 배송지도 안 생긴다
-    assert not columns & {"birth_date", "birthday", "gender", "sex", "address"}
+    assert "address" not in columns
     with engine.connect() as conn:
         row = conn.execute(select(member)).mappings().one()
         assert conn.execute(select(func.count()).select_from(shipping_address)).scalar_one() == 0
-    assert "1990" not in str(dict(row)) and "가상로" not in str(dict(row))
+    assert "가상로" not in str(dict(row))
 
 
 def test_privacy_consent_lists_phone(client):
@@ -164,6 +167,8 @@ def test_privacy_consent_lists_phone(client):
     privacy = items["PRIVACY_REQUIRED"]
     assert privacy["version"] == "v3"
     assert "휴대전화번호" in privacy["items"].split("/")[0]  # 가입 시 필수 항목 쪽
+    # 본인확인 결과(생년월일·성별 등)는 0012부터 저장하지만 동의 문안은 그대로다 — 문안 개정은
+    # 이번 범위 밖(판단기록 F1), 영향평가에서 다룬다
     assert "생년월일" not in privacy["items"] and "성별" not in privacy["items"]
     # v3 — 처리방침 2절의 주문·문의 항목도 동의받을 때 알린다 (0010)
     assert "주문 정보" in privacy["items"] and "문의 내용" in privacy["items"]
@@ -206,7 +211,7 @@ def test_login_sets_customer_cookie(client):
     res = shop_login(client)
 
     assert res.status_code == 200
-    assert res.json() == {"email": "buyer@example.com", "name": "구매자"}
+    assert res.json() == {"login_id": "buyer", "name": "구매자"}
     raw = res.headers["set-cookie"].lower()
     assert raw.startswith("customer_session=") and "httponly" in raw and "samesite=strict" in raw
 

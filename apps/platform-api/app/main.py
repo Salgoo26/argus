@@ -28,6 +28,7 @@ from app.shop.inquiries import router as shop_inquiries_router
 from app.shop.me import router as shop_me_router
 from app.shop.orders import router as shop_orders_router
 from app.shop.refund import router as shop_refund_router
+from app.shop.verification import router as shop_verification_router
 
 
 def create_app(settings: Settings | None = None) -> FastAPI:
@@ -53,6 +54,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(db_token_router)
     # 고객 화면 API — /admin이 아니라 Agent가 기록하지 않는다 (CLAUDE.md 3절 #4)
     app.include_router(shop_auth_router)
+    app.include_router(shop_verification_router)
     app.include_router(shop_me_router)
     app.include_router(shop_addresses_router)
     app.include_router(shop_orders_router)

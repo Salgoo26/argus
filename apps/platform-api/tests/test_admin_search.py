@@ -20,6 +20,7 @@ KST_0915 = datetime(2026, 9, 15, tzinfo=UTC) - timedelta(hours=9)  # 2026-09-15 
 def _add_members(engine, count: int) -> list[int]:
     rows = [
         {
+            "login_id": f"user{n:04d}",
             "email": f"user{n:04d}@example.com",
             "password_hash": "unusable",
             "name": "김가상" if n % 2 else f"이가상{n}",  # 가상

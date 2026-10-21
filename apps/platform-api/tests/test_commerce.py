@@ -352,7 +352,11 @@ def test_seeded_style_refund_account_is_revealable(shop_with_customer, engine):
     with engine.begin() as conn:
         conn.execute(
             insert(member).values(
-                id=50, email="seed@example.com", password_hash="x", name="시드회원"
+                id=50,
+                login_id="seed",
+                email="seed@example.com",
+                password_hash="x",
+                name="시드회원",
             )
         )
         conn.execute(

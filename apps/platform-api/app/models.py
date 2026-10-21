@@ -9,6 +9,7 @@ from sqlalchemy import (
     BigInteger,
     Boolean,
     Column,
+    Date,
     DateTime,
     ForeignKey,
     Integer,
@@ -53,6 +54,16 @@ member = Table(
     Column("withdrawn_at", DateTime(timezone=True)),
     Column("failed_login_count", Integer, nullable=False),
     Column("locked_until", DateTime(timezone=True)),
+    # 커머스 확장 (0012) — 별도 아이디·이메일 인증·휴대폰 본인확인 결과
+    Column("login_id", String(20), nullable=False),
+    Column("email_verified_at", DateTime(timezone=True)),
+    Column("ci", String(88)),
+    Column("di", String(64)),
+    Column("birth_date", Date),
+    Column("gender", CHAR(1)),
+    Column("is_foreigner", Boolean),
+    Column("carrier", String(16)),
+    Column("identity_verified_at", DateTime(timezone=True)),
 )
 
 outbox = Table(

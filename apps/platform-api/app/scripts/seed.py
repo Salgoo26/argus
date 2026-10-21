@@ -19,16 +19,17 @@
 import logging
 import random
 import sys
-from datetime import timedelta
+from datetime import date, timedelta
 from typing import Any
 
 from faker import Faker
-from sqlalchemy import Connection, create_engine, exists, func, insert, select, text
+from sqlalchemy import Connection, create_engine, exists, func, insert, select, text, update
 
 from app.auth.passwords import hash_password, unusable_password_hash
 from app.commerce import BANKS, CARD_COMPANIES
 from app.config import Settings
 from app.crypto import FieldCipher, refund_account_context
+from app.fulfillment import CANCEL_REASONS, MOCK_COURIER, RETURN_REASONS
 from app.models import (
     consent_item,
     inquiry,
@@ -36,6 +37,8 @@ from app.models import (
     member_consent,
     operator,
     operator_permission_history,
+    order_claim,
+    order_status_history,
     orders,
     payment,
     product,
@@ -44,6 +47,7 @@ from app.models import (
 )
 from app.outbox import enqueue, handler_event
 from app.scripts.baseline import baseline_events
+from app.shop.verification import CARRIERS, mock_ci, mock_di
 
 logger = logging.getLogger("seed")
 
@@ -109,6 +113,7 @@ def seed(conn: Connection, operator_password: str, member_count: int = MEMBER_CO
         insert(member).returning(member.c.id, sort_by_parameter_order=True),
         [
             {
+                "login_id": f"user{n:04d}",
                 "email": f"user{n:04d}@example.com",
                 "password_hash": shared_hash,
                 "name": name,
@@ -345,6 +350,147 @@ def seed_inquiries(conn: Connection) -> bool:
     return True
 
 
+SEED_EMAIL = r"^user[0-9]{4}@example\.com$"  # 시드 회원 — 화면에서 가입한 계정과 구분
+
+
+def backfill_identity(conn: Connection, secret: bytes) -> int:
+    """시드 회원의 본인확인 결과·이메일 인증 (커머스 확장 0012) — 비어 있는 시드 회원만, 매번 실행
+
+    값은 모두 가상: 생년월일·성별·통신사는 고정 시드 난수, CI·DI는 가입과 같은 가상 본인확인기관
+    함수로 만든다(같은 사람이면 화면 가입 때 1인 1계정 검사에 걸리도록). 인증 시각 = 가입 시각.
+    """
+    targets = conn.execute(
+        select(member.c.id, member.c.name, member.c.created_at)
+        .where(member.c.ci.is_(None), member.c.email.regexp_match(SEED_EMAIL))
+        .order_by(member.c.id)
+    ).all()
+    rng = random.Random(SEED + 4)  # noqa: S311 — 가짜 생년월일 분포용, 보안 용도 아님
+    for member_id, name, created_at in targets:
+        birth = date(1960, 1, 1) + timedelta(days=rng.randint(0, 45 * 365))
+        gender = rng.choice("MF")
+        ci = mock_ci(secret, name, birth, gender)
+        conn.execute(
+            update(member)
+            .where(member.c.id == member_id)
+            .values(
+                email_verified_at=created_at,
+                ci=ci,
+                di=mock_di(secret, ci),
+                birth_date=birth,
+                gender=gender,
+                is_foreigner=False,
+                carrier=rng.choice(CARRIERS[:3]),
+                identity_verified_at=created_at,
+            )
+        )
+    return len(targets)
+
+
+CANCELLED_COUNT = 12
+RETURNED_COUNT = 8
+
+
+def seed_fulfillment(conn: Connection) -> bool:
+    """시드 주문의 배송 진행·취소·반품 (커머스 확장 0011) — 상태 이력이 하나도 없을 때만
+
+    주문 시각에서 지난 시간으로 단계를 정한다: 1일 미만 결제완료, 3일 미만 상품준비중,
+    상품 소요 일수 전이면 배송중, 그 뒤 배송완료. 그중 일부는 취소(발송 전)·반품완료로.
+    시드가 바꾼 상태는 처리자 SYSTEM으로 이력에 남긴다(관리자가 한 일로 지어내지 않는다).
+    """
+    if conn.execute(select(func.count()).select_from(order_status_history)).scalar_one():
+        return False
+    rows = conn.execute(
+        select(orders.c.id, orders.c.ordered_at, orders.c.amount, product.c.ship_days)
+        .select_from(
+            orders.join(product, product.c.id == orders.c.product_id).join(
+                payment, payment.c.order_id == orders.c.id
+            )
+        )
+        .where(payment.c.pg_tid.like("MOCKPG-SEED%"))
+        .order_by(orders.c.id)
+    ).all()
+    if not rows:
+        return False
+    rng = random.Random(SEED + 5)  # noqa: S311 — 가짜 배송 분포용, 보안 용도 아님
+    now = conn.execute(select(func.now())).scalar_one()
+    old = [r for r in rows if now - r.ordered_at > timedelta(days=14)]
+    cancelled = {r.id for r in rng.sample(old, min(CANCELLED_COUNT, len(old)))}
+    returned = (
+        {r.id for r in rng.sample([r for r in old if r.id not in cancelled], RETURNED_COUNT)}
+        if len(old) > CANCELLED_COUNT + RETURNED_COUNT
+        else set()
+    )
+
+    history = []
+    for r in rows:
+        steps = [("PAID", r.ordered_at)]
+        values: dict = {}
+        age = now - r.ordered_at
+        if r.id in cancelled:
+            at = r.ordered_at + timedelta(hours=2)
+            steps.append(("CANCELLED", at))
+            conn.execute(
+                insert(order_claim).values(
+                    order_id=r.id,
+                    claim_type="CANCEL",
+                    reason_code=rng.choice(CANCEL_REASONS),
+                    status="COMPLETED",
+                    requested_at=at,
+                    completed_at=at,
+                    refund_amount=r.amount,
+                    refund_pg_tid=f"MOCKPG-CANCEL-SEED{r.id:06d}",
+                )
+            )
+        else:
+            if age >= timedelta(days=1):
+                steps.append(("PREPARING", r.ordered_at + timedelta(hours=12)))
+            if age >= timedelta(days=3):
+                shipped = r.ordered_at + timedelta(days=1)
+                steps.append(("SHIPPING", shipped))
+                values |= {
+                    "courier": MOCK_COURIER,
+                    "tracking_no": f"DEMO{r.id:010d}",
+                    "shipped_at": shipped,
+                }
+                delivered = r.ordered_at + timedelta(days=r.ship_days + 1)
+                if delivered < now:
+                    steps.append(("DELIVERED", delivered))
+                    values["delivered_at"] = delivered
+            if r.id in returned and "delivered_at" in values:
+                requested = values["delivered_at"] + timedelta(days=rng.randint(1, 6))
+                completed = requested + timedelta(days=2)
+                steps += [("RETURN_REQUESTED", requested), ("RETURNED", completed)]
+                conn.execute(
+                    insert(order_claim).values(
+                        order_id=r.id,
+                        claim_type="RETURN",
+                        reason_code=rng.choice(RETURN_REASONS),
+                        status="COMPLETED",
+                        requested_at=requested,
+                        completed_at=completed,
+                        refund_amount=r.amount,
+                        refund_pg_tid=f"MOCKPG-CANCEL-SEED{r.id:06d}",
+                    )
+                )
+        conn.execute(
+            update(orders).where(orders.c.id == r.id).values(status=steps[-1][0], **values)
+        )
+        previous = None
+        for status, at in steps:
+            history.append(
+                {
+                    "order_id": r.id,
+                    "from_status": previous,
+                    "to_status": status,
+                    "actor_type": "SYSTEM",
+                    "changed_at": at,
+                }
+            )
+            previous = status
+    conn.execute(insert(order_status_history), history)
+    return True
+
+
 # 정보보호 담당자의 플랫폼 계정 — Argus 담당자와 **같은 아이디** (2026-10-02 사용자 결정:
 # 플랫폼 백오피스 아이디 = Argus 아이디). 소명의 관련 티켓 링크로 플랫폼 문의를 열어 볼 때 쓴다.
 # 이 계정의 플랫폼 열람도 접속기록으로 Argus에 남는다 — 감시자도 감시된다.
@@ -393,6 +539,8 @@ def main() -> int:
             backfilled = backfill_consents(conn)
             commerce = seed_commerce(conn, FieldCipher(settings.require_payment_key()))
             inquiries = seed_inquiries(conn)
+            identities = backfill_identity(conn, settings.require_auth_secret())
+            fulfillment = seed_fulfillment(conn)
             officer = ensure_officer_operator(conn, password)
     finally:
         engine.dispose()
@@ -407,6 +555,10 @@ def main() -> int:
         logger.info("seeded %d orders, %d refund accounts", ORDER_COUNT, REFUND_ACCOUNT_COUNT)
     if inquiries:
         logger.info("seeded %d inquiries", INQUIRY_COUNT)
+    if identities:
+        logger.info("backfilled identity verification for %d seed members", identities)
+    if fulfillment:
+        logger.info("seeded delivery progress, cancellations and returns")
     if officer:
         logger.info("created privacy officer operator: %s", OFFICER_OPERATOR[0])
     return 0

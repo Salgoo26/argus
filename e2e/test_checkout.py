@@ -13,8 +13,9 @@ import secrets
 
 import psycopg
 
-from conftest import PLATFORM_URL, Browser, platform_login, wait_until
+from conftest import PLATFORM_URL, Browser, platform_login, shop_signup, wait_until
 
+REQUIRED = {"TOS": True, "PRIVACY_REQUIRED": True, "AGE_OVER_14": True}
 PASSWORD = "e2e-buyer-pass-4"  # noqa: S105 — 테스트 전용 더미 값, 매번 새 가상 계정
 # 가상 카드번호 (실존하지 않는 번호). scripts/e2e.sh의 로그 검사와 같은 값
 CARD = "1234567890123452"
@@ -44,16 +45,7 @@ def test_checkout_requires_login_and_address_and_never_takes_card_number():
     )
 
     email = f"e2e-{secrets.token_hex(4)}@example.com"
-    joined = shop.post(
-        "/api/shop/auth/signup",
-        json={
-            "email": email,
-            "password": PASSWORD,
-            "name": "가상결제자",
-            "phone": "010-0000-0004",
-            "consents": {"TOS": True, "PRIVACY_REQUIRED": True, "AGE_OVER_14": True},
-        },
-    )
+    joined, _ = shop_signup(shop, email, PASSWORD, "가상결제자", "010-0000-0004", REQUIRED)
     assert joined.status_code == 201, joined.text
     member_id = shop.get("/api/shop/me").json()["id"]
 

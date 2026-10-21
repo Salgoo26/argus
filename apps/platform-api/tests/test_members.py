@@ -17,6 +17,7 @@ KST_MIDNIGHT_0915 = datetime(2026, 9, 15, tzinfo=UTC) - timedelta(hours=9)  # 20
 def _add_members(engine, count: int, **overrides) -> None:
     rows = [
         {
+            "login_id": f"user{n:04d}",
             "email": f"user{n:04d}@example.com",
             "password_hash": "unusable",
             "name": f"회원{n}",  # 가상
@@ -107,6 +108,7 @@ def test_export_excludes_withdrawn_members(logged_in, engine):
     with engine.begin() as conn:
         conn.execute(
             insert(member).values(
+                login_id="gone",
                 email="gone@example.com",
                 password_hash="unusable",
                 name="탈퇴회원",
@@ -123,6 +125,7 @@ def test_export_neutralizes_formula_cells(logged_in, engine):
     with engine.begin() as conn:
         conn.execute(
             insert(member).values(
+                login_id="evil",
                 email="evil@example.com",
                 password_hash="unusable",
                 name='=HYPERLINK("http://attacker.example","click")',

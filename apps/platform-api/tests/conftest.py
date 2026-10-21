@@ -6,6 +6,8 @@ DATABASE_URL(관리자 권한: CI는 서비스 컨테이너의 ci, 로컬은 pla
 
 import os
 import secrets
+import zlib
+from datetime import date, timedelta
 from pathlib import Path
 
 import psycopg
@@ -159,12 +161,53 @@ CUSTOMER_PASSWORD = "customer-pass-1234"  # 테스트 전용 더미 값
 REQUIRED_CONSENTS = {"TOS": True, "PRIVACY_REQUIRED": True, "AGE_OVER_14": True}
 
 
-def signup(client, email: str = "buyer@example.com", **overrides):
+IDENTITY_FIELDS = ("name", "phone", "birth_date", "gender", "is_foreigner", "carrier", "agreed")
+
+
+def login_id_for(email: str) -> str:
+    """테스트 회원의 아이디 — 이메일 앞부분에서 (buyer@example.com → buyer)"""
+    local = "".join(c for c in email.strip().lower().split("@")[0] if c.isascii() and c.isalnum())
+    if not local or not local[0].isalpha():
+        local = "u" + local
+    return local.ljust(4, "0")[:20]
+
+
+def _birth_for(email: str) -> str:
+    """이메일마다 다른 생년월일 — 같은 사람(CI)으로 겹쳐 1인 1계정에 걸리지 않게"""
+    offset = zlib.crc32(email.strip().lower().encode()) % 9000
+    return (date(1970, 1, 1) + timedelta(days=offset)).isoformat()
+
+
+def verify_identity(client, **overrides):
     body = {
-        "email": email,
-        "password": CUSTOMER_PASSWORD,
+        "carrier": "SKT",
         "name": "구매자",  # 가상
-        "phone": "010-0000-1234",  # 가상 (가입 필수 — 2026-10-07)
+        "birth_date": "1990-01-01",
+        "gender": "F",
+        "is_foreigner": False,
+        "phone": "010-0000-1234",  # 가상
+        "agreed": True,
+    }
+    body.update(overrides)
+    return client.post("/shop/verifications/identity", json=body)
+
+
+def signup(client, email: str = "buyer@example.com", **overrides):
+    """이메일 인증 → 휴대폰 본인확인(가상) → 가입. 인증 단계가 실패하면 그 응답을 돌려준다"""
+    res = client.post("/shop/verifications/email", json={"email": email})
+    if res.status_code != 200:
+        return res
+    email_token = res.json()["token"]
+    identity = {k: overrides.pop(k) for k in IDENTITY_FIELDS if k in overrides}
+    identity.setdefault("birth_date", _birth_for(email))
+    res = verify_identity(client, **identity)
+    if res.status_code != 200:
+        return res
+    body = {
+        "login_id": login_id_for(email),
+        "password": CUSTOMER_PASSWORD,
+        "email_token": email_token,
+        "identity_token": res.json()["token"],
         "consents": {**REQUIRED_CONSENTS, "MARKETING": False},
     }
     body.update(overrides)
@@ -183,4 +226,7 @@ def finish_orders(engine) -> None:
 
 
 def shop_login(client, email: str = "buyer@example.com", password: str = CUSTOMER_PASSWORD):
-    return client.post("/shop/auth/login", json={"email": email, "password": password})
+    """테스트 회원은 이메일로 부른다 — 아이디는 login_id_for(email)"""
+    return client.post(
+        "/shop/auth/login", json={"login_id": login_id_for(email), "password": password}
+    )
