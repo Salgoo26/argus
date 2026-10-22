@@ -1,6 +1,6 @@
 # API 명세서 — 시스템 간 (플랫폼 ↔ Argus)
 
-> 작성 2026-09-23 · 최종 개정 2026-10-21 (문서 버전 v0.7)
+> 작성 2026-09-23 · 최종 개정 2026-10-22 (문서 버전 v0.8)
 > 관련 문서: [아키텍처_설계서](architecture.md), [DB스키마](db-schema.md), [요구사항정의서](requirements.md), [정책정의서](policy.md), [액터별_플로우](actor-flows.md)
 > 범위: 두 시스템의 **경계 계약**을 다룬다. 화면용 내부 API(argus-web ↔ argus-api 등)의 세부 형식은 코드로 정의하고 FastAPI OpenAPI(Swagger)로 자동 문서화한다. 다만 접속기록을 어떻게 남기는지, 누가 쓸 수 있는지, 어떤 오류 코드로 거부하는지가 점검 근거가 되는 화면 API는 7절에 요약한다.
 
@@ -63,6 +63,13 @@
 | 6 | **DB 접속 토큰 발급 미기록** (2-4절) | 개인정보 처리가 아님 — 발급 추적은 `db_access_token` + `LOGIN`의 `token_id` |
 | 7 | **달러 인용 거부** (2-2절) | `sql_normalized`에 `$$…$$`·`$tag$…$tag$`가 있으면 원문 유입으로 보고 거부 |
 | 8 | **기록 제외 범위** (2-2절) | 사용자 테이블을 참조하지 않는 문장은 미전송(원문 저장소엔 남김), 단 사용자 함수·`DO`·`CALL`은 전송 |
+
+### v0.8 개정 내역 (관리자 소속 부서, 2026-10-22)
+
+| # | 수정 | 사유 |
+|---|---|---|
+| 1 | `handler.team` 값 변경 (3-1절) — `COMMERCE_OPS`(커머스운영팀)·`MARKETING`(마케팅팀)·`IT`(IT팀). 개편 전 값 `OPS`·`CS`도 계속 받는다 | 플랫폼 소속을 부서 3개로 정리(플랫폼 마이그레이션 0015). 옛 값을 거부하면 개편 전에 쌓인 미전송 이벤트가 `rejected`로 버려진다 |
+| 2 | 플랫폼 계정 API의 `team` 값 (7-2절) | 같음. 접근 범위는 여전히 역할(`role`)로만 정한다 |
 
 ### v0.7 개정 내역 (커머스 확장, 2026-10-21)
 
@@ -452,7 +459,7 @@ POST /ingest/v1/handler-events
       "handler": {
         "login_id": "cs_kim",
         "name": "김민지",
-        "team": "CS",
+        "team": "COMMERCE_OPS",
         "employment_status": "TERMINATED",
         "terminated_at": "2026-09-20T18:00:00+09:00"
       }
@@ -468,7 +475,7 @@ POST /ingest/v1/handler-events
 | `occurred_at` | datetime | ✅ | 플랫폼에서 변경이 일어난 시각 |
 | `handler.login_id` | string | ✅ | 취급자 계정 (접속기록 `actor.login_id`와 매칭 키) |
 | `handler.name` | string | ✅ | 보고서·소명 화면 표시용 |
-| `handler.team` | enum | - | `CS` / `MARKETING` / `OPS` |
+| `handler.team` | enum | - | 소속 부서 `COMMERCE_OPS`(커머스운영팀) / `MARKETING`(마케팅팀) / `IT`(IT팀). 개편 전 값 `OPS`·`CS`도 받는다(이미 쌓인 미전송 이벤트, v0.8) |
 | `handler.employment_status` | enum | ✅ | `ACTIVE` / `TERMINATED` |
 | `handler.terminated_at` | datetime | 조건부 | **`employment_status=TERMINATED`면 필수.** 퇴직자 룰을 행위 시점 기준으로 판정하기 위함 (v0.2 신설) |
 
@@ -645,7 +652,7 @@ GET  /ingest/v1/protection-registry    Argus → 게이트웨이: 판정 표 (�
 | `POST /admin/orders/{id}/deposit-confirm` (v0.7) | 무통장입금 입금 확인 → 결제완료 | `UPDATE` `ORDER` | `403`, `404`, `409 DEPOSIT_EXPIRED` 등 |
 | `GET /admin/orders/{id}/refund-account`, `POST /admin/orders/{id}/refund-complete` (v0.7) | 이체 환불 대기 건의 계좌 전체 번호 / 이체 완료 처리 | `READ` `PAYMENT` / `UPDATE` `ORDER` | `403`, `404`(환불 대기 아님), `409 NO_PENDING_REFUND` |
 | `POST /admin/inquiries/search` | 본문 `status`·`member_id`·`created_from`·`created_to`·`title`(부분 일치)·`page`·`size` | `READ` `INQUIRY`, 같음 | 같음 |
-| `GET /admin/accounts`, `POST /admin/accounts`, `POST /admin/accounts/{id}/change`, `POST /admin/accounts/{id}/terminate`, `POST /admin/accounts/history/search` | 계정 목록, 부여(본문 `login_id`·`name`·`team`·`role`·`reason` — 응답에 `temporary_password`를 이 한 번만), 변경(`role`·`team`·`reason`), 말소(`reason`), 권한 이력 검색(대상 아이디는 본문) | 제외(권한 이력 `operator_permission_history`, DB스키마 4절) | `403 FORBIDDEN`(ADMIN 외), `403 SELF_CHANGE_FORBIDDEN`, `404 NOT_FOUND`, `409 LOGIN_ID_TAKEN`·`ACCOUNT_TERMINATED`·`NO_CHANGE` |
+| `GET /admin/accounts`, `POST /admin/accounts`, `POST /admin/accounts/{id}/change`, `POST /admin/accounts/{id}/terminate`, `POST /admin/accounts/history/search` | 계정 목록, 부여(본문 `login_id`·`name`·`team`(소속 `COMMERCE_OPS`·`MARKETING`·`IT`)·`role`·`reason` — 응답에 `temporary_password`를 이 한 번만), 변경(`role`·`team`·`reason`), 말소(`reason`), 권한 이력 검색(대상 아이디는 본문) | 제외(권한 이력 `operator_permission_history`, DB스키마 4절) | `403 FORBIDDEN`(ADMIN 외), `403 SELF_CHANGE_FORBIDDEN`, `404 NOT_FOUND`, `409 LOGIN_ID_TAKEN`·`ACCOUNT_TERMINATED`·`NO_CHANGE` |
 
 - 검색어 값은 본문으로만 받고 원장·서버 로그에 남기지 않는다. `%`·`_`는 글자 그대로 비교한다. 기존 GET 목록(페이지 번호만 받음)은 그대로 둔다.
 - 임시 비밀번호로 로그인한 계정은 비밀번호를 바꾸기 전까지 `GET /admin/auth/me`·`POST /admin/auth/password`·로그아웃 외의 관리자 API에서 `403 PASSWORD_CHANGE_REQUIRED`를 받는다.
