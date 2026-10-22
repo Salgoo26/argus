@@ -101,9 +101,9 @@ def test_admin_grants_an_account_with_a_temporary_password():
         json={
             "login_id": "e2e_cs_new",
             "name": "가상상담",
-            "team": "CS",
+            "team": "COMMERCE_OPS",
             "role": "CS",
-            "reason": "E2E — CS팀 신규 입사",
+            "reason": "E2E — 커머스운영팀 상담 신규 입사",
         },
     )
     assert created.status_code == 201, created.text
@@ -125,7 +125,7 @@ def test_admin_grants_an_account_with_a_temporary_password():
         "/api/admin/accounts/history/search", json={"login_id": "e2e_cs_new"}
     ).json()["items"]
     assert [(h["change_type"], h["reason"], h["actor_login_id"]) for h in history] == [
-        ("GRANT", "E2E — CS팀 신규 입사", "admin_han")
+        ("GRANT", "E2E — 커머스운영팀 상담 신규 입사", "admin_han")
     ]
     assert temp not in str(history)
 

@@ -22,7 +22,9 @@ def cs_client(client, engine, password_hash):
     _ask(client)
     _ask(client, "환불 요청", "환불해 주세요.")
     client.cookies.clear()
-    add_operator(engine, password_hash, login_id="cs_kim", name="김민지", team="CS", role="CS")
+    add_operator(
+        engine, password_hash, login_id="cs_kim", name="김민지", team="COMMERCE_OPS", role="CS"
+    )
     assert login(client, "cs_kim").status_code == 200
     return client
 

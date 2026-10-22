@@ -4,9 +4,7 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect } from "react";
 
-import { api, can, type Operator, type Permission } from "@/lib/api";
-
-const TEAMS: Record<string, string> = { CS: "CS팀", MARKETING: "마케팅팀", OPS: "운영팀" };
+import { api, can, type Operator, type Permission, TEAM_LABELS } from "@/lib/api";
 
 // 역할에 없는 메뉴는 숨긴다 (v0.1 보강 L-1) — 서버도 403으로 막는다
 const MENU: { href: string; label: string; permission: Permission }[] = [
@@ -61,7 +59,7 @@ export function AppHeader({ me }: { me: Operator | null }) {
             <Link href={PASSWORD_PAGE}>
               {me.name} ({me.login_id})
             </Link>{" "}
-            · {TEAMS[me.team] ?? me.team}
+            · {TEAM_LABELS[me.team] ?? me.team}
           </span>
           <button className="btn btn-secondary" onClick={logout}>
             로그아웃

@@ -19,7 +19,9 @@ from app.ingest.validation import (
 )
 
 EVENT_TYPES = frozenset({"HANDLER_CREATED", "HANDLER_UPDATED", "HANDLER_TERMINATED"})
-TEAMS = frozenset({"CS", "MARKETING", "OPS"})
+# 플랫폼 소속 부서(플랫폼 0015). OPS·CS는 개편 전 값 — 이미 쌓인 미전송 이벤트가 rejected로
+# 버려지지 않게 계속 받는다(접속기록·명부를 스스로 버리지 않는다)
+TEAMS = frozenset({"COMMERCE_OPS", "MARKETING", "IT", "OPS", "CS"})
 EMPLOYMENT_STATUSES = frozenset({"ACTIVE", "TERMINATED"})
 
 _NAME = re.compile(r"^[^\x00-\x1f\x7f]{1,50}$")  # 제어문자 없는 1~50자 (handler.name varchar(50))

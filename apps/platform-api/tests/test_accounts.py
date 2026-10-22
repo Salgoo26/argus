@@ -15,14 +15,16 @@ NEW_PASSWORD = "changed-pass-2026!"  # 테스트 전용 더미 값
 
 @pytest.fixture
 def admin(client, engine, password_hash):
-    add_operator(engine, password_hash, login_id="admin_han", name="한도윤", role="ADMIN")
+    add_operator(
+        engine, password_hash, login_id="admin_han", name="한도윤", team="IT", role="ADMIN"
+    )
     assert login(client, "admin_han").status_code == 200
     return client
 
 
 @pytest.fixture
 def ops_id(engine, password_hash) -> int:
-    return add_operator(engine, password_hash)  # ops_park (OPS)
+    return add_operator(engine, password_hash)  # ops_park (커머스운영팀, OPS)
 
 
 def history(engine) -> list[dict]:
@@ -39,9 +41,9 @@ def create(admin, **overrides):
     body = {
         "login_id": "cs_new",
         "name": "신입상담",  # 가상 인물
-        "team": "CS",
+        "team": "COMMERCE_OPS",
         "role": "CS",
-        "reason": "CS팀 신규 입사 — 결재 2026-10-10-01",
+        "reason": "커머스운영팀 상담 신규 입사 — 결재 2026-10-10-01",
     }
     return admin.post(ACCOUNTS, json=body | overrides)
 
@@ -60,10 +62,10 @@ def test_create_shows_temporary_password_once_and_records_grant(admin, engine):
     assert grant["change_type"] == "GRANT"
     assert (grant["after_role"], grant["after_team"], grant["after_status"]) == (
         "CS",
-        "CS",
+        "COMMERCE_OPS",
         "ACTIVE",
     )
-    assert grant["reason"] == "CS팀 신규 입사 — 결재 2026-10-10-01"
+    assert grant["reason"] == "커머스운영팀 상담 신규 입사 — 결재 2026-10-10-01"
     assert grant["before_role"] is None and grant["actor_id"] is not None
 
     # 다시 보여 주지 않는다 — 목록에도, DB에도 평문이 없다
@@ -83,7 +85,7 @@ def test_new_account_is_synced_to_argus_without_role(admin, engine):
     assert event["handler"] == {
         "login_id": "cs_new",
         "name": "신입상담",
-        "team": "CS",
+        "team": "COMMERCE_OPS",
         "employment_status": "ACTIVE",
     }
 
@@ -122,7 +124,7 @@ def test_duplicate_login_id_is_409(admin, ops_id):
 @pytest.mark.parametrize("reason", [None, "", "   "], ids=["missing", "empty", "blank"])
 def test_every_change_needs_a_reason(admin, ops_id, engine, reason):
     body = {} if reason is None else {"reason": reason}
-    new = {"login_id": "x_new", "name": "가상", "team": "CS", "role": "CS"}
+    new = {"login_id": "x_new", "name": "가상", "team": "COMMERCE_OPS", "role": "CS"}
     assert admin.post(ACCOUNTS, json=new | body).status_code == 400
     assert admin.post(f"{ACCOUNTS}/{ops_id}/change", json={"role": "CS"} | body).status_code == 400
     assert admin.post(f"{ACCOUNTS}/{ops_id}/terminate", json=body).status_code == 400
@@ -134,16 +136,18 @@ def test_every_change_needs_a_reason(admin, ops_id, engine, reason):
 
 def test_change_role_records_before_and_after(admin, ops_id, engine):
     res = admin.post(
-        f"{ACCOUNTS}/{ops_id}/change", json={"role": "CS", "team": "CS", "reason": "CS팀 이동"}
+        f"{ACCOUNTS}/{ops_id}/change",
+        json={"role": "MARKETING", "team": "MARKETING", "reason": "마케팅팀 이동"},
     )
-    assert res.status_code == 200 and (res.json()["role"], res.json()["team"]) == ("CS", "CS")
+    assert res.status_code == 200
+    assert (res.json()["role"], res.json()["team"]) == ("MARKETING", "MARKETING")
     [change] = history(engine)
     assert change["change_type"] == "CHANGE"
-    assert (change["before_role"], change["after_role"]) == ("OPS", "CS")
-    assert (change["before_team"], change["after_team"]) == ("OPS", "CS")
+    assert (change["before_role"], change["after_role"]) == ("OPS", "MARKETING")
+    assert (change["before_team"], change["after_team"]) == ("COMMERCE_OPS", "MARKETING")
     [event] = outbox_payloads(engine, "HANDLER")
     assert event["type"] == "HANDLER_UPDATED" and "role" not in event["handler"]
-    assert event["handler"]["team"] == "CS"
+    assert event["handler"]["team"] == "MARKETING"
 
 
 def test_change_without_difference_is_409(admin, ops_id):
@@ -243,3 +247,9 @@ def test_account_screens_are_not_access_logged(admin, ops_id, engine):
     admin.post(f"{ACCOUNTS}/history/search", json={})
     paths = [e["request"]["path"] for e in outbox_payloads(engine)]
     assert not [p for p in paths if p.startswith(ACCOUNTS)]
+
+
+def test_team_is_one_of_three_departments(admin):
+    # 0015 — 개편 전 소속(OPS·CS)으로는 계정을 만들 수 없다
+    assert create(admin, team="CS").status_code == 400
+    assert create(admin, team="IT", role="ADMIN").status_code == 201

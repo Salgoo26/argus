@@ -11,6 +11,8 @@ import {
   errorMessage,
   formatDateTime,
   type Operator,
+  TEAM_LABELS,
+  TEAMS,
 } from "@/lib/api";
 
 // 계정·권한 관리 (v0.1 보강 L-2 — 고시 §5①③) — 관리자(ADMIN) 전용. 서버도 403으로 막는다
@@ -45,7 +47,6 @@ type HistoryItem = {
 };
 
 const ROLES: Record<string, string> = { ADMIN: "관리자", OPS: "운영", CS: "상담", MARKETING: "마케팅" };
-const TEAMS: Record<string, string> = { OPS: "운영팀", CS: "CS팀", MARKETING: "마케팅팀" };
 const STATUSES: Record<string, string> = { ACTIVE: "재직", TERMINATED: "퇴직" };
 const CHANGE_TYPES: Record<string, string> = { GRANT: "부여", CHANGE: "변경", REVOKE: "말소" };
 
@@ -99,8 +100,8 @@ function NewAccount({ onCreated, onError }: { onCreated: () => void; onError: (e
           <input id="n_name" name="name" required maxLength={50} />
         </div>
         <div className="field">
-          <label htmlFor="n_team">팀</label>
-          <select id="n_team" name="team" defaultValue="OPS">
+          <label htmlFor="n_team">소속</label>
+          <select id="n_team" name="team" defaultValue="COMMERCE_OPS">
             {Object.entries(TEAMS).map(([v, l]) => (
               <option key={v} value={v}>
                 {l}
@@ -110,7 +111,7 @@ function NewAccount({ onCreated, onError }: { onCreated: () => void; onError: (e
         </div>
         <div className="field">
           <label htmlFor="n_role">역할</label>
-          <select id="n_role" name="role" defaultValue="OPS">
+          <select id="n_role" name="role" defaultValue="COMMERCE_OPS">
             {Object.entries(ROLES).map(([v, l]) => (
               <option key={v} value={v}>
                 {l}
@@ -175,7 +176,7 @@ function AccountRow({
             ))}
           </select>
         ) : (
-          (TEAMS[account.team] ?? account.team)
+          (TEAM_LABELS[account.team] ?? account.team)
         )}
       </td>
       <td>
@@ -282,7 +283,7 @@ function HistoryTab({ onError }: { onError: (e: unknown) => void }) {
               <th>대상</th>
               <th>구분</th>
               <th>역할</th>
-              <th>팀</th>
+              <th>소속</th>
               <th>재직</th>
               <th>사유</th>
               <th>처리자</th>
@@ -297,7 +298,7 @@ function HistoryTab({ onError }: { onError: (e: unknown) => void }) {
                 </td>
                 <td>{CHANGE_TYPES[h.change_type]}</td>
                 <td>{transition(h.before_role, h.after_role, ROLES)}</td>
-                <td>{transition(h.before_team, h.after_team, TEAMS)}</td>
+                <td>{transition(h.before_team, h.after_team, TEAM_LABELS)}</td>
                 <td>{transition(h.before_status, h.after_status, STATUSES)}</td>
                 <td>{h.reason}</td>
                 <td>{h.actor_login_id ?? "시스템"}</td>
@@ -373,7 +374,7 @@ export default function AccountsPage() {
                     <tr>
                       <th>아이디</th>
                       <th>이름</th>
-                      <th>팀</th>
+                      <th>소속</th>
                       <th>역할</th>
                       <th>재직</th>
                       <th>최근 변경</th>

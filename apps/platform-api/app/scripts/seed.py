@@ -58,11 +58,11 @@ MIN_PASSWORD_LENGTH = 12
 
 # (login_id, 이름, 소속, 권한) — 가상 인물. ops_park이 시나리오의 대량 다운로드 주인공
 SEED_OPERATORS = (
-    ("ops_park", "박지훈", "OPS", "OPS"),
+    ("ops_park", "박지훈", "COMMERCE_OPS", "OPS"),
     ("mkt_lee", "이수민", "MARKETING", "MARKETING"),
-    ("cs_kim", "김민지", "CS", "CS"),
-    ("cs_choi", "최유나", "CS", "CS"),
-    ("admin_han", "한도윤", "OPS", "ADMIN"),
+    ("cs_kim", "김민지", "COMMERCE_OPS", "CS"),
+    ("cs_choi", "최유나", "COMMERCE_OPS", "CS"),
+    ("admin_han", "한도윤", "IT", "ADMIN"),
 )
 
 
@@ -322,7 +322,7 @@ def seed_inquiries(conn: Connection) -> bool:
         .all()
     )
     cs = (
-        conn.execute(select(operator.c.id).where(operator.c.team == "CS").order_by(operator.c.id))
+        conn.execute(select(operator.c.id).where(operator.c.role == "CS").order_by(operator.c.id))
         .scalars()
         .all()
     )
@@ -495,7 +495,7 @@ def seed_fulfillment(conn: Connection) -> bool:
 # 플랫폼 백오피스 아이디 = Argus 아이디). 소명의 관련 티켓 링크로 플랫폼 문의를 열어 볼 때 쓴다.
 # 이 계정의 플랫폼 열람도 접속기록으로 Argus에 남는다 — 감시자도 감시된다.
 # 기준선 시드(평소 조회 패턴)에는 넣지 않는다 — 담당자는 일상적으로 회원을 조회하지 않는다
-OFFICER_OPERATOR = ("officer", "윤서진", "OPS", "ADMIN")
+OFFICER_OPERATOR = ("officer", "윤서진", "IT", "ADMIN")
 
 
 def ensure_officer_operator(conn: Connection, operator_password: str) -> bool:

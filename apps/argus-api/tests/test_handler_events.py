@@ -117,6 +117,19 @@ def test_resent_event_is_duplicate_and_changes_nothing(client, app_engine):
     assert len(accounts(app_engine)) == 1
 
 
+def test_department_reorganization_is_applied_and_legacy_teams_still_accepted(client, app_engine):
+    # 플랫폼 0015 — 소속이 부서 3개로 바뀐다. 개편 전 값(OPS·CS)이 실린 미전송 이벤트도
+    # rejected로 버리지 않고 받는다 — 시각 비교로 최신 상태가 남는다
+    legacy = make_handler_event(0, team="CS")
+    reorganized = make_handler_event(10, type_="HANDLER_UPDATED", team="COMMERCE_OPS")
+    it = make_handler_event(0, login_id="admin_han", name="한관리", team="IT")
+    res = post(client, [legacy, reorganized, it])
+
+    assert res.json() == {"accepted": 3, "duplicates": 0, "rejected": []}
+    teams = {r["login_id"]: r["team"] for r in handlers(app_engine)}
+    assert teams == {"ops_park": "COMMERCE_OPS", "admin_han": "IT"}
+
+
 def test_newer_event_overwrites_state(client, app_engine):
     post(client, [make_handler_event(0)])
     res = post(client, [make_handler_event(10, type_="HANDLER_UPDATED", team="MARKETING")])
