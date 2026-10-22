@@ -291,7 +291,10 @@ erDiagram
     handler {
         bigint id PK
         varchar login_id "플랫폼 계정"
+        varchar name
+        varchar team "소속 부서"
         varchar employment_status "재직 / 퇴직"
+        timestamptz terminated_at
     }
     source_system {
         smallint id PK
@@ -308,30 +311,41 @@ erDiagram
 erDiagram
     member ||--o{ member_consent : "동의 이력"
     consent_item ||--o{ member_consent : "동의 항목·버전"
-    member ||--o{ orders : ""
-    orders ||--o| payment : ""
-    orders ||--o{ order_claim : "취소·반품"
+    member ||--o{ shipping_address : "배송지"
+    member ||--o{ refund_account : "환불계좌"
+    member ||--o{ orders : "주문"
+    member ||--o{ inquiry : "1:1 문의"
+    product ||--o{ orders : ""
+    orders ||--o| payment : "결제"
     orders ||--o| bank_deposit : "무통장입금"
+    orders ||--o{ order_claim : "취소·반품"
     orders ||--o{ order_status_history : "상태 이력"
-    member ||--o{ refund_account : ""
-    member ||--o{ shipping_address : ""
-    member ||--o{ inquiry : ""
     operator ||--o{ inquiry : "답변"
     operator ||--o{ operator_permission_history : "권한 부여·변경·말소"
     operator ||--o{ db_access_token : "DB 접속 토큰"
 
     member {
         bigint id PK "접속기록에는 이 값만 전송"
-        varchar login_id
-        varchar email
-        varchar name
-        varchar phone
+        varchar login_id UK "로그인 아이디"
+        varchar email UK
+        timestamptz email_verified_at "이메일 인증"
+        varchar password_hash "argon2id"
+        varchar name "본인확인 결과"
+        varchar phone "본인확인 결과"
+        date birth_date "본인확인 결과"
+        char gender "본인확인 결과"
+        boolean is_foreigner "본인확인 결과"
+        varchar carrier "본인확인 결과(통신사)"
+        varchar ci UK "연계정보, 1인 1계정"
+        varchar di "중복가입확인정보"
+        timestamptz identity_verified_at
         varchar status "ACTIVE / WITHDRAWN"
     }
     consent_item {
         varchar code PK
         boolean required "필수 / 선택"
         varchar version
+        text items "수집 항목 고지"
     }
     member_consent {
         bigint id PK
@@ -339,65 +353,113 @@ erDiagram
         varchar item_code FK
         varchar item_version "동의 당시 버전"
         boolean agreed
+        inet client_ip
+    }
+    shipping_address {
+        bigint id PK
+        bigint member_id FK
+        varchar recipient "받는 사람"
+        varchar phone
+        varchar zip_code
+        varchar address
+        varchar address_detail
+        boolean is_default
     }
     refund_account {
         bigint id PK
-        bigint member_id FK
+        bigint member_id FK "회원당 최대 5개"
+        varchar bank_name
+        varchar account_holder "예금주"
         bytea account_number_enc "AES-256-GCM"
+        char account_last4 "기본 표시용"
+    }
+    product {
+        bigint id PK
+        varchar name
+        int price
+        smallint ship_days "배송 소요 일수"
+    }
+    orders {
+        bigint id PK
+        bigint member_id FK
+        bigint product_id FK
+        varchar status "결제대기·입금대기·결제완료·배송중·취소·반품 등"
+        varchar ship_recipient "배송 정보 스냅샷"
+        varchar ship_phone "배송 정보 스냅샷"
+        varchar ship_address "배송 정보 스냅샷(우편번호·상세 포함)"
+        varchar delivery_memo
+        varchar courier
+        varchar tracking_no "송장번호"
+        varchar courier_shipment_id UK "택배 접수번호"
+    }
+    payment {
+        bigint id PK
+        bigint order_id FK
+        varchar method "CARD / BANK_TRANSFER"
+        varchar card_company
+        varchar card_number_masked "PG가 돌려준 마스킹 번호"
+        varchar pg_tid UK "PG 거래번호"
+        varchar approve_no
+        int amount
+    }
+    bank_deposit {
+        bigint order_id PK,FK
+        varchar account_number "쇼핑몰 입금 계좌 사본"
+        varchar depositor_name "입금자명"
+        timestamptz due_at "주문 후 3일"
+        bigint confirmed_by FK "입금 확인 관리자"
+    }
+    order_claim {
+        bigint id PK
+        bigint order_id FK
+        varchar claim_type "CANCEL / RETURN"
+        varchar reason_detail
+        varchar refund_method "PG_CANCEL / BANK_TRANSFER"
+        varchar refund_status "이체 환불 대기·완료"
+        varchar refund_account_holder "이체 환불 계좌 사본"
+        bytea refund_account_enc "AES-256-GCM"
+        varchar pickup_tracking_no "반품 회수 송장"
+    }
+    order_status_history {
+        bigint id PK
+        bigint order_id FK
+        varchar from_status
+        varchar to_status
+        varchar actor_type "CUSTOMER / OPERATOR / SYSTEM"
+    }
+    inquiry {
+        bigint id PK
+        bigint member_id FK
+        varchar title
+        text body
+        text answer
+        bigint answered_by FK
     }
     operator {
         bigint id PK
-        varchar login_id
-        varchar role "ADMIN / CS / MARKETING / OPS"
+        varchar login_id UK
+        varchar name
+        varchar team "COMMERCE_OPS / MARKETING / IT"
+        varchar role "ADMIN / OPS / CS / MARKETING"
         varchar employment_status
     }
     operator_permission_history {
         bigint id PK
         bigint operator_id FK
         varchar change_type "GRANT / CHANGE / REVOKE"
+        varchar after_role
+        varchar after_team
         varchar reason "사유 필수"
     }
     db_access_token {
         uuid token_id PK
         bigint operator_id FK
+        inet issued_ip
         timestamptz expires_at "발급 후 1시간"
-    }
-    orders {
-        bigint id PK
-        bigint member_id FK
-        varchar status "결제대기·입금대기·결제완료·배송중·취소·반품 등"
-        varchar tracking_no "송장번호"
-    }
-    payment {
-        bigint id PK
-        bigint order_id FK
-        varchar method "CARD / BANK_TRANSFER"
-        varchar card_number_masked "PG가 돌려준 마스킹 번호"
-    }
-    order_claim {
-        bigint id PK
-        bigint order_id FK
-        varchar claim_type "CANCEL / RETURN"
-        varchar refund_status "이체 환불 대기·완료"
-        bytea refund_account_enc "AES-256-GCM"
-    }
-    bank_deposit {
-        bigint order_id PK
-        varchar depositor_name
-        timestamptz due_at "주문 후 3일"
-    }
-    shipping_address {
-        bigint id PK
-        bigint member_id FK
-    }
-    inquiry {
-        bigint id PK
-        bigint member_id FK
-        bigint answered_by FK
     }
 ```
 
-이 밖에 상품, 주문 상태 이력, 전송 대기 기록(outbox), 탈퇴 회원 파기·분리보관 테이블이 있습니다.
+개인정보가 담긴 컬럼과 주요 키 위주로 표시했습니다(전체 DDL은 [DB 스키마](docs/db-schema.md) 4절). 이 밖에 전송 대기 기록(outbox), 탈퇴 회원 분리보관(`retained_member_record`)·파기 이력 테이블이 있습니다.
 
 </details>
 

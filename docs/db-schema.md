@@ -32,6 +32,7 @@
 | 15 | v0.1 보강 | 수행업무 `LOGOUT`(0014) · `notification` 화면 알림 구조로 구현, `explanation.due_at`(0015) · `push_subscription`(0016) · `access_log` DELETE·TRUNCATE 트리거, 보고서 `integrity` 기준점(0017) · `detection_log.attached_at`, EVENT 탐지건 그룹 키에 `data_category`·`action_group`(0018) · 룰 필드 `client_ip`, 측정 `DISTINCT_IP`·`MAX_SUBJECT_REPEAT`, 기본 룰 3개(0019) · `argus_user_history`(0020) · 보호 대상 등록부 4개 테이블(0021) · 시드 룰 설명 정리(0022) · 플랫폼 `operator_permission_history`, `operator.must_change_password`(플랫폼 0009) · DB 직접 기록의 회원번호 추출과 `context.registry_version` | 고시 제5조제1항·제3항(권한 부여·변경·말소 기록), 제8조제2항(점검·사후조치), 제8조제3항(위·변조 방지), 안내서 61~62쪽(권한 부여·말소 내역), FAQ 147(로그아웃), 95쪽(비정상 행위 예시, 위·변조 확인 정보 별도 보관), 129쪽(이상행위 탐지 시 알림) |
 | 16 | 커머스 확장 | 플랫폼 0011(배송·취소/반품 `order_claim`·`order_status_history`) · 0012(`member` 아이디·이메일 인증·본인확인 결과) · 0013(가상 PG·택배 연동 컬럼) · 0014(무통장입금 `bank_deposit`, 환불계좌 여러 개, 이체 환불) · Argus 0023~0025(보호 대상 등록부에 새 컬럼 분류) — 4절 "커머스 확장" | 전자상거래법 제17조(청약철회)·시행령 제6조(계약·청약철회 기록), PIPA 제24조의2(주민번호 처리 제한), 고시 제7조제2항제6호(계좌번호 암호화) |
 | 17 | 관리자 소속 부서 | 플랫폼 0015 — `operator.team`을 `COMMERCE_OPS`·`MARKETING`·`IT`로, 기존 계정 이동 시 권한 이력 `CHANGE`·명부 동기화. Argus `handler.team`은 개편 전 값도 받음 | 처리업무별 주관부서를 정하기 위해 부서 구성을 정리(정책정의서 4-5 "소속 부서") |
+| 18 | 문서 정비 | 4절 플랫폼 DDL을 현행 스키마(0015) 기준으로 갱신 — `member` 본인확인 결과 컬럼, `orders` 배송 정보·배송 컬럼, `refund_account` 예금주·여러 개, `payment`·`bank_deposit`·`order_claim`·`order_status_history`·`shipping_address` DDL 추가 | 그동안 표로만 적어 DDL이 옛 형태였음. 컬럼 구성은 마이그레이션 적용 DB에서 추출해 대조 |
 
 ---
 
@@ -885,6 +886,17 @@ CREATE TABLE member (
     locked_until   timestamptz,
     created_at     timestamptz  NOT NULL DEFAULT now(),
     withdrawn_at   timestamptz,
+    -- 가입 아이디·이메일 인증·휴대폰 본인확인 결과 (플랫폼 0012). 이름·휴대폰은 위 name·phone에 본인확인 결과로 들어간다.
+    -- 주민등록번호(앞 7자리 포함) 칸은 없다 — 본인확인 창 안에서만 입력되고 서버로 오지 않는다 (PIPA 제24조의2)
+    login_id             varchar(20)  NOT NULL UNIQUE,   -- 로그인 아이디(이메일과 별개)
+    email_verified_at    timestamptz,
+    ci                   varchar(88)  UNIQUE,            -- 연계정보 — 1인 1계정
+    di                   varchar(64),                    -- 중복가입확인정보
+    birth_date           date,                           -- 만 14세 확인에도 쓴다
+    gender               char(1)      CHECK (gender IN ('M','F')),
+    is_foreigner         boolean,
+    carrier              varchar(16),                    -- 통신사
+    identity_verified_at timestamptz,
     CHECK (status <> 'WITHDRAWN' OR withdrawn_at IS NOT NULL)
 );
 
@@ -928,18 +940,21 @@ CREATE TABLE outbox (
 );
 CREATE INDEX ix_outbox_pending ON outbox (status, next_retry_at) WHERE status = 'PENDING';
 
--- 결제수단: 실제 구현은 아래 설계안이 아니라 `payment` + `refund_account` 두 테이블(아래 표 참고)
+-- 결제수단: 옛 설계안(payment_method 한 테이블) 대신 `payment`(주문 DDL 아래) + `refund_account` 두 테이블(아래 표 참고)
 -- ① 카드: PG 목업. 플랫폼은 카드번호를 받지도 저장하지도 않음(끝 4자리도 미저장 — 카드 등록·간편결제 기능이 없어 쓸 목적이 없음, 최소수집)
 --    → 주문의 결제 정보로 PG 거래 정보만 저장: 결제수단 종류, 카드사, PG 거래번호, 승인 시각, 금액
 -- ② 계좌: 고객이 마이페이지에서 등록하는 환불계좌만 직접 수집 — 제7조제2항제6호(계좌번호) 앱 레벨 암호화
-CREATE TABLE refund_account (                -- (설계안) 기존 payment_method의 계좌 부분
+CREATE TABLE refund_account (                -- 회원당 여러 개(앱에서 최대 5개, 0014) — 환불할 때 목록에서 고른다
     id                  bigserial   PRIMARY KEY,
     member_id           bigint      NOT NULL REFERENCES member(id),
     bank_name           varchar(50) NOT NULL,
+    account_holder      varchar(50) NOT NULL,   -- 예금주
     account_number_enc  bytea       NOT NULL,   -- AES-GCM 앱 레벨 암호화 (키 PAYMENT_ENCRYPTION_KEY, .env — DB와 분리, 절대 규칙 #11)
     account_last4       char(4)     NOT NULL,   -- 관리자 화면 기본 표시용
-    created_at          timestamptz NOT NULL DEFAULT now()
+    created_at          timestamptz NOT NULL DEFAULT now(),
+    updated_at          timestamptz NOT NULL DEFAULT now()
 );
+CREATE INDEX ix_refund_account_member ON refund_account (member_id, id);
 -- 관리자 화면은 끝 4자리만 기본 표시, "전체 보기"는 별도 동작 → 데이터 유형 PAYMENT로 접속기록 → 결제수단 조회 룰(HIGH)로 항상 탐지
 -- 기각: 기존 설계(카드번호 직접 저장·암호화) — 실무 커머스는 PCI DSS·여신전문금융업법 때문에 카드번호를 PG에 맡김. 보안성 검토에서 수집 최소화 위반으로 지적받을 구조
 ```
@@ -971,19 +986,125 @@ CREATE TABLE refund_account (                -- (설계안) 기존 payment_metho
 ```sql
 
 CREATE TABLE product (
-    id     bigserial    PRIMARY KEY,
-    name   varchar(100) NOT NULL,
-    price  int          NOT NULL
+    id         bigserial    PRIMARY KEY,
+    name       varchar(100) NOT NULL,
+    price      int          NOT NULL CHECK (price > 0),
+    ship_days  smallint     NOT NULL DEFAULT 2 CHECK (ship_days BETWEEN 1 AND 30)  -- 배송 소요 일수 — 예상 도착일 (0011)
 );
 
 CREATE TABLE orders (
-    id          bigserial   PRIMARY KEY,
-    member_id   bigint      REFERENCES member(id) ON DELETE SET NULL,
-    product_id  bigint      NOT NULL REFERENCES product(id),
-    amount      int         NOT NULL,
-    status      varchar(16) NOT NULL,
-    ordered_at  timestamptz NOT NULL DEFAULT now()
+    id                   bigserial    PRIMARY KEY,
+    member_id            bigint       REFERENCES member(id) ON DELETE SET NULL,
+    product_id           bigint       NOT NULL REFERENCES product(id),
+    amount               int          NOT NULL CHECK (amount > 0),
+    status               varchar(16)  NOT NULL CHECK (status IN (
+                             'PENDING_PAYMENT','PAYMENT_EXPIRED','AWAITING_DEPOSIT','DEPOSIT_EXPIRED',
+                             'PAID','PREPARING','SHIPPING','DELIVERED',
+                             'CANCELLED','RETURN_REQUESTED','RETURNED')),       -- 0011·0013·0014
+    ordered_at           timestamptz  NOT NULL DEFAULT now(),
+    -- 배송 정보 스냅샷 (0008) — 주문 시점 배송지를 복사. FK 아님(배송지를 고치거나 지워도 주문 기록 유지)
+    ship_recipient       varchar(50),
+    ship_phone           varchar(20),
+    ship_zip_code        varchar(5),
+    ship_address         varchar(255),
+    ship_address_detail  varchar(100),
+    delivery_memo        varchar(50),                     -- 배송 메모 (0013)
+    -- 배송 (0011·0013) — 가상 택배 접수·상태 통지
+    courier              varchar(30),
+    tracking_no          varchar(30),                     -- 송장번호
+    shipped_at           timestamptz,
+    delivered_at         timestamptz,
+    courier_shipment_id  varchar(32)  UNIQUE,             -- 택배 접수번호
+    courier_status       varchar(20),
+    courier_synced_at    timestamptz
 );
+CREATE INDEX ix_orders_member ON orders (member_id, ordered_at DESC);
+CREATE INDEX ix_orders_status ON orders (status, ordered_at DESC);
+
+-- 결제 (0003·0013·0014) — 카드번호 칸은 없다(카드번호는 PG 결제창에만 입력, 플랫폼 서버로 오지 않음)
+CREATE TABLE payment (
+    id                  bigserial    PRIMARY KEY,
+    order_id            bigint       NOT NULL UNIQUE REFERENCES orders(id),
+    method              varchar(16)  NOT NULL CHECK (method IN ('CARD','BANK_TRANSFER')),
+    card_company        varchar(30),
+    pg_tid              varchar(64)  UNIQUE,              -- PG 거래번호
+    amount              int          NOT NULL CHECK (amount > 0),
+    approved_at         timestamptz  NOT NULL,            -- 무통장입금은 입금 확인 시각
+    card_number_masked  varchar(20),                      -- PG가 돌려준 마스킹 번호(앞 6·뒤 4자리)
+    approve_no          varchar(12),
+    installment_months  smallint,
+    receipt_url         varchar(255),
+    CONSTRAINT payment_card_fields CHECK (method <> 'CARD' OR (card_company IS NOT NULL AND pg_tid IS NOT NULL))
+);
+
+-- 무통장입금 (0014) — 주문 1건당 1행. 은행 연동 없이 관리자가 입금을 확인하면 주문이 PAID가 된다
+CREATE TABLE bank_deposit (
+    order_id        bigint       PRIMARY KEY REFERENCES orders(id),
+    bank_name       varchar(50)  NOT NULL,   -- 쇼핑몰 입금 계좌 (주문 시점 사본)
+    account_number  varchar(30)  NOT NULL,
+    account_holder  varchar(50)  NOT NULL,
+    depositor_name  varchar(50)  NOT NULL,   -- 고객이 입력한 입금자명 — 입금 확인 대조용
+    due_at          timestamptz  NOT NULL,   -- 주문 후 3일
+    confirmed_at    timestamptz,
+    confirmed_by    bigint       REFERENCES operator(id)
+);
+
+-- 취소·반품(청약철회) (0011·0013·0014)
+CREATE TABLE order_claim (
+    id                     bigserial    PRIMARY KEY,
+    order_id               bigint       NOT NULL REFERENCES orders(id),
+    claim_type             varchar(16)  NOT NULL CHECK (claim_type IN ('CANCEL','RETURN')),
+    reason_code            varchar(32)  NOT NULL,
+    reason_detail          varchar(500),
+    status                 varchar(16)  NOT NULL CHECK (status IN ('REQUESTED','COMPLETED')),
+    requested_at           timestamptz  NOT NULL DEFAULT now(),
+    completed_at           timestamptz,
+    completed_by           bigint       REFERENCES operator(id),
+    refund_amount          int,
+    refund_pg_tid          varchar(64),                   -- PG 취소 거래번호
+    pickup_shipment_id     varchar(32)  UNIQUE,           -- 반품 회수 접수번호 (0013)
+    pickup_status          varchar(20),
+    pickup_tracking_no     varchar(30),
+    refund_method          varchar(16)  CHECK (refund_method IN ('PG_CANCEL','BANK_TRANSFER')),  -- 0014
+    refund_status          varchar(16)  CHECK (refund_status IN ('PENDING','DONE')),
+    -- 이체 환불 계좌 사본 — 고른 시점 값. 계좌번호는 AAD order_refund:{주문번호}로 다시 암호화
+    refund_bank_name       varchar(50),
+    refund_account_holder  varchar(50),
+    refund_account_enc     bytea,
+    refund_account_last4   char(4),
+    refunded_at            timestamptz,
+    refunded_by            bigint       REFERENCES operator(id)
+);
+CREATE INDEX ix_order_claim_order ON order_claim (order_id, id);
+
+-- 주문 상태 이력 (0011) — 계약·청약철회 기록 (전자상거래법 제6조)
+CREATE TABLE order_status_history (
+    id           bigserial    PRIMARY KEY,
+    order_id     bigint       NOT NULL REFERENCES orders(id),
+    from_status  varchar(16),
+    to_status    varchar(16)  NOT NULL,
+    actor_type   varchar(16)  NOT NULL CHECK (actor_type IN ('CUSTOMER','OPERATOR','SYSTEM')),
+    operator_id  bigint       REFERENCES operator(id),
+    changed_at   timestamptz  NOT NULL DEFAULT now()
+);
+CREATE INDEX ix_order_status_history_order ON order_status_history (order_id, id);
+
+-- 배송지 (0007) — 회원당 최대 10개, 기본 배송지 1개
+CREATE TABLE shipping_address (
+    id              bigserial    PRIMARY KEY,
+    member_id       bigint       NOT NULL REFERENCES member(id),
+    label           varchar(30)  NOT NULL,   -- 배송지 이름
+    recipient       varchar(50)  NOT NULL,
+    phone           varchar(20),             -- API 필수, DB NULL 허용(옮겨 온 기존 주소)
+    zip_code        varchar(5),
+    address         varchar(255) NOT NULL,
+    address_detail  varchar(100),
+    is_default      boolean      NOT NULL DEFAULT false,
+    created_at      timestamptz  NOT NULL DEFAULT now(),
+    updated_at      timestamptz  NOT NULL DEFAULT now()
+);
+CREATE INDEX ix_shipping_address_member ON shipping_address (member_id, id);
+CREATE UNIQUE INDEX ux_shipping_address_default ON shipping_address (member_id) WHERE is_default;
 
 CREATE TABLE inquiry (
     id           bigserial    PRIMARY KEY,
