@@ -6,7 +6,7 @@ export const SCOPE_LABELS: Record<ReportScope, string> = {
   DB: "DB 직접접근만",
 };
 
-// 기본 기간 = 지난달 1일 ~ 말일 (한국 날짜) — 월 1회 이상 점검(§8②)
+// 기본 기간 = 지난달 1일 ~ 말일 (한국 날짜) — 점검 주기는 내부 관리계획(§8②), 기본값 월 1회
 export function lastMonth(): { from: string; to: string } {
   const today = new Date(new Date().toLocaleString("en-US", { timeZone: "Asia/Seoul" }));
   const first = new Date(today.getFullYear(), today.getMonth() - 1, 1);
