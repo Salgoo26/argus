@@ -4,19 +4,19 @@ version = "0.0.0"
 description = "가상 택배 서비스 — 접수·조회·접수취소·반품 회수 API, 시간 기반 상태 진행·쇼핑몰 통지, 자체 DB"
 requires-python = ">=3.12,<3.13"
 dependencies = [
-    "fastapi==0.143.5",
+    "fastapi==0.161.1",
     "uvicorn==0.54.0",
-    "sqlalchemy==2.1.5",
+    "sqlalchemy==2.1.6",
     "pydantic==2.14.1",
-    "pydantic-settings==2.16.0",
+    "pydantic-settings==2.16.1",
     "psycopg[binary]==3.3.6",
 ]
 
 [project.optional-dependencies]
 dev = [
     "pytest==9.1.1",
-    "ruff==0.17.1",
-    "httpx2==2.13.1",  # FastAPI TestClient
+    "ruff==0.17.2",
+    "httpx2==2.16.0",  # FastAPI TestClient
 ]
 
 [build-system]

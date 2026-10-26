@@ -5,18 +5,18 @@ description = "DB 접근 게이트웨이(2티어) — DB 툴 ↔ 플랫폼 DB �
 requires-python = ">=3.12,<3.13"
 dependencies = [
     "pydantic==2.14.1",
-    "pydantic-settings==2.16.0",
+    "pydantic-settings==2.16.1",
     "psycopg[binary]==3.3.6",  # 계정 상태 확인용 게이트웨이 자체 연결 (operator 조회)
     "pyjwt==2.15.1",  # DB 접속 토큰 검증
-    "scramp==1.4.17",  # 플랫폼 DB 쪽 SCRAM-SHA-256 로그인 (중계 연결은 프로토콜을 직접 다룬다)
+    "scramp==1.4.18",  # 플랫폼 DB 쪽 SCRAM-SHA-256 로그인 (중계 연결은 프로토콜을 직접 다룬다)
     "cryptography==50.0.2",  # 로컬 자체 서명 TLS 인증서 생성
-    "pglast==8.6",  # SQL 파싱·정규화 — PostgreSQL 자체 파서(libpg_query, PG18 — PG16 문법 포함)
+    "pglast==8.7",  # SQL 파싱·정규화 — PostgreSQL 자체 파서(libpg_query, PG18 — PG16 문법 포함)
 ]
 
 [project.optional-dependencies]
 dev = [
     "pytest==9.1.1",
-    "ruff==0.17.1",
+    "ruff==0.17.2",
 ]
 
 [build-system]

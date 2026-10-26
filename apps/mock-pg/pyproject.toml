@@ -4,19 +4,19 @@ version = "0.0.0"
 description = "가상 PG(결제대행) 서비스 — 결제창·승인·조회·취소 API, 자체 DB. 플랫폼 밖 외부 수탁자 역할"
 requires-python = ">=3.12,<3.13"
 dependencies = [
-    "fastapi==0.143.5",
+    "fastapi==0.161.1",
     "uvicorn==0.54.0",
-    "sqlalchemy==2.1.5",
+    "sqlalchemy==2.1.6",
     "pydantic==2.14.1",
-    "pydantic-settings==2.16.0",
+    "pydantic-settings==2.16.1",
     "psycopg[binary]==3.3.6",
 ]
 
 [project.optional-dependencies]
 dev = [
     "pytest==9.1.1",
-    "ruff==0.17.1",
-    "httpx2==2.13.1",  # FastAPI TestClient
+    "ruff==0.17.2",
+    "httpx2==2.16.0",  # FastAPI TestClient
 ]
 
 [build-system]
