@@ -4,12 +4,12 @@ version = "0.0.0"
 description = "Argus — 접속기록 수집·탐지·소명·보고 API + worker"
 requires-python = ">=3.12,<3.13"
 dependencies = [
-    "fastapi==0.143.5",
+    "fastapi==0.161.1",
     "uvicorn==0.54.0",
-    "sqlalchemy==2.1.5",
-    "alembic==1.20.0",
+    "sqlalchemy==2.1.6",
+    "alembic==1.20.1",
     "pydantic==2.14.1",
-    "pydantic-settings==2.16.0",
+    "pydantic-settings==2.16.1",
     "psycopg[binary]==3.3.6",
     "argon2-cffi==25.1.0",
     "pyjwt==2.15.1",
@@ -20,12 +20,12 @@ dependencies = [
 [project.optional-dependencies]
 dev = [
     "pytest==9.1.1",
-    "ruff==0.17.1",
-    "httpx2==2.13.1",  # FastAPI TestClient (starlette 권장 클라이언트)
+    "ruff==0.17.2",
+    "httpx2==2.16.0",  # FastAPI TestClient (starlette 권장 클라이언트)
 ]
 
 [build-system]
-requires = ["setuptools>=84.0.0"]
+requires = ["setuptools>=84.2.1"]
 build-backend = "setuptools.build_meta"
 
 [tool.setuptools.packages.find]
