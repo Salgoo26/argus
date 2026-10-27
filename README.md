@@ -555,6 +555,7 @@ ARGUS의 주요 기능 목록입니다. 실제 시연 화면은 아래 [구현 �
 | 고시 제8조제1항 | 1년 이상 보관, 5만 명 이상·고유식별·민감정보 처리 등은 2년 | 기록 원본은 삭제할 수 없게 막는다. 등록부에 고유식별·민감정보가 있으면 2년 보관 대상으로 판정 | [test_append_only.py](apps/argus-api/tests/test_append_only.py), [test_protection.py](apps/argus-api/tests/test_protection.py) |
 | 고시 제8조제2항 | 접속기록·다운로드 점검의 주기·방법·사후조치를 내부 관리계획으로 정하고 이행 | 5분 주기 자동 탐지, 소명·승인/반려, 점검 보고서 | [test_scenario.py](e2e/test_scenario.py), [test_report.py](e2e/test_report.py) |
 | 고시 제8조제3항 | 위·변조·도난·분실 방지 | 기록 원본 변경 불가(UPDATE·DELETE·TRUNCATE 거부), 해시체인, 보고서에 기준점 저장 후 다음 보고서에서 대조 | [test_hashchain.py](apps/argus-api/tests/test_hashchain.py), [test_reports_api.py](apps/argus-api/tests/test_reports_api.py) |
+| 고시 제7조제1항·제2항 | 비밀번호 일방향 암호화, 인증정보 송수신 암호화, 계좌번호 암호화 저장 | 비밀번호 argon2id(플랫폼·ARGUS), DB 게이트웨이 TLS 필수, 환불계좌 AES-256-GCM | [test_shop_auth.py](apps/platform-api/tests/test_shop_auth.py), [test_gateway.py](apps/db-gateway/tests/test_gateway.py), [test_commerce.py](apps/platform-api/tests/test_commerce.py) |
 | 고시 제5조제3항 | 권한 부여·변경·말소 내역 3년 보관 | 플랫폼·ARGUS 계정 생성 및 권한 변경 이력 보관 | [test_accounts.py](apps/platform-api/tests/test_accounts.py), [test_users_api.py](apps/argus-api/tests/test_users_api.py) |
 | 고시 제5조제1항, 제6조제1항 | 업무에 필요한 최소 권한, 비정상 접근 탐지 | 역할별 접근 범위 설정 기능, 접속지 기반 룰 | [test_roles.py](apps/platform-api/tests/test_roles.py), [test_ip_subject_rules.py](apps/argus-api/tests/test_ip_subject_rules.py) |
 | 안내서 FAQ 147 | 로그인·로그아웃·로그인 실패 기록 보관 | 인증 관련 세 가지 내용 모두 기록 | [test_v01_reinforcement.py](e2e/test_v01_reinforcement.py) |
