@@ -4,24 +4,24 @@ version = "0.0.0"
 description = "플랫폼(감시 대상 커머스) — 업무 API + 접속기록 Agent + outbox relay"
 requires-python = ">=3.12,<3.13"
 dependencies = [
-    "fastapi==0.143.5",
+    "fastapi==0.162.0",
     "uvicorn==0.54.0",
-    "sqlalchemy==2.1.5",
-    "alembic==1.20.0",
-    "pydantic==2.14.1",
-    "pydantic-settings==2.16.0",
+    "sqlalchemy==2.1.6",
+    "alembic==1.20.1",
+    "pydantic==2.14.2",
+    "pydantic-settings==2.16.2",
     "psycopg[binary]==3.3.6",
     "argon2-cffi==25.1.0",
     "pyjwt==2.15.1",
-    "faker==40.43.0",  # 시드 데이터 — 100% 가상 (CLAUDE.md 3절 #2)
+    "faker==40.44.0",  # 시드 데이터 — 100% 가상 (CLAUDE.md 3절 #2)
     "cryptography==50.0.2",  # 환불계좌 AES-256-GCM 암호화 (CLAUDE.md 3절 #11)
 ]
 
 [project.optional-dependencies]
 dev = [
-    "pytest==9.1.1",
-    "ruff==0.17.1",
-    "httpx2==2.13.1",  # FastAPI TestClient (starlette 권장 클라이언트)
+    "pytest==9.2.0",
+    "ruff==0.17.3",
+    "httpx2==2.16.0",  # FastAPI TestClient (starlette 권장 클라이언트)
 ]
 
 [build-system]
