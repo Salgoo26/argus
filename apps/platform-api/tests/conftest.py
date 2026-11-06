@@ -11,7 +11,7 @@ import os
 import secrets
 import time
 import zlib
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 
 import psycopg
@@ -116,6 +116,11 @@ def engine(db_url: URL):
     eng.dispose()
 
 
+def _now_kst() -> str:
+    """가짜 PG·택배 응답 시각 — 실행 시점 기준(고정 날짜면 반품 7일 기한이 지나 테스트가 깨짐)"""
+    return datetime.now(timezone(timedelta(hours=9))).isoformat(timespec="seconds")
+
+
 class FakePg:
     """가상 PG 대역 — 결제창(브라우저 단계)은 approve()로 흉내,
     승인·조회·취소는 실제 API와 같은 모양의 응답"""
@@ -160,7 +165,7 @@ class FakePg:
         if p["orderId"] != order_id or p["totalAmount"] != amount:
             raise PgError(400, "INVALID_REQUEST", "")
         p["status"] = "DONE"
-        p["approvedAt"] = "2026-10-21T10:00:00+09:00"
+        p["approvedAt"] = _now_kst()
         p["receipt"] = {"url": f"http://pg.test/receipt/{payment_key}"}
         return dict(p)
 
@@ -231,9 +236,9 @@ class FakeCourier:
         shipment["status"] = status
         if status not in ("RECEIVED", "RETURN_RECEIVED", "CANCELED"):
             shipment["trackingNo"] = shipment["trackingNo"] or "6" + secrets.token_hex(5)
-            shipment["pickedUpAt"] = shipment["pickedUpAt"] or "2026-10-21T10:00:00+09:00"
+            shipment["pickedUpAt"] = shipment["pickedUpAt"] or _now_kst()
         if status in ("DELIVERED", "RETURN_DELIVERED"):
-            shipment["deliveredAt"] = "2026-10-21T12:00:00+09:00"
+            shipment["deliveredAt"] = _now_kst()
         return dict(shipment)
 
 
