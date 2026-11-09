@@ -4,28 +4,28 @@ version = "0.0.0"
 description = "Argus — 접속기록 수집·탐지·소명·보고 API + worker"
 requires-python = ">=3.12,<3.13"
 dependencies = [
-    "fastapi==0.143.5",
+    "fastapi==0.162.0",
     "uvicorn==0.54.0",
-    "sqlalchemy==2.1.5",
-    "alembic==1.20.0",
-    "pydantic==2.14.1",
-    "pydantic-settings==2.16.0",
-    "psycopg[binary]==3.3.6",
+    "sqlalchemy==2.1.8",
+    "alembic==1.20.1",
+    "pydantic==2.14.3",
+    "pydantic-settings==2.16.2",
+    "psycopg[binary]==3.3.8",
     "argon2-cffi==25.1.0",
     "pyjwt==2.15.1",
-    "python-multipart==0.0.32",  # 소명 첨부 업로드(multipart/form-data) — FastAPI File()
+    "python-multipart==0.0.33",  # 소명 첨부 업로드(multipart/form-data) — FastAPI File()
     "cryptography==50.0.2",  # 웹 푸시 VAPID(ES256)·내용 암호화(RFC 8291) — platform-api와 같은 버전
 ]
 
 [project.optional-dependencies]
 dev = [
-    "pytest==9.1.1",
-    "ruff==0.17.1",
-    "httpx2==2.13.1",  # FastAPI TestClient (starlette 권장 클라이언트)
+    "pytest==9.2.0",
+    "ruff==0.17.4",
+    "httpx2==2.16.0",  # FastAPI TestClient (starlette 권장 클라이언트)
 ]
 
 [build-system]
-requires = ["setuptools>=84.0.0"]
+requires = ["setuptools>=84.2.1"]
 build-backend = "setuptools.build_meta"
 
 [tool.setuptools.packages.find]
