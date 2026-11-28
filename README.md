@@ -11,7 +11,7 @@
 <br>
 
 [▶ 실제 구현 화면](#구현-화면)<br>
-[▶ 개인정보 영향평가(PIA) 진행 현황](docs/pia/README.md)
+[▶ 개인정보 영향평가(PIA)](https://github.com/Salgoo26/privacy-impact-assessment)
 <br>
 ## 요약
 
@@ -23,7 +23,7 @@
 | 구성 | 커머스 플랫폼(쇼핑몰·관리자 화면, 감시 대상) + DB 게이트웨이 + ARGUS(접속기록 점검 시스템) — 2절 |
 | 기술 | Python 3.12 · FastAPI · PostgreSQL 16 · Next.js · Docker Compose · GitHub Actions |
 | 진행 방식 | 문제 정의 → 요구사항·정책 → 아키텍처·API·DB 설계 → 구현 → 자체 점검 → 보완 조치<br>결정과 기각한 대안은 설계 문서에 남기고, 모든 변경은 PR과 CI를 거쳐 반영 |
-| 점검 활동 | 플랫폼 대상 [개인정보 영향평가(PIA)](docs/pia/README.md) 수행 (2026-10-19 ~ 2026-11-28, 6단계 완료) |
+| 점검 활동 | 플랫폼 대상 [개인정보 영향평가(PIA)](https://github.com/Salgoo26/privacy-impact-assessment) 수행 (2026-10-19 ~ 2026-11-28, 6단계 완료) |
 
 > 시스템 내 회원·직원·접속기록 데이터는 모두 가상으로 생성한 값입니다. 실제 개인정보는 없습니다.
 
@@ -727,4 +727,4 @@ ARGUS 비밀번호는 명령 실행 후 입력창에 입력합니다(12자 이�
 | 설계 | [DB 스키마](docs/db-schema.md) | 두 DB의 테이블, 룰 조건식, 탐지 배치 흐름 |
 | 개인정보 문서 | [개인정보 처리방침](apps/platform-web/app/%28shop%29/privacy/page.tsx) | 감시 대상 쇼핑몰의 처리방침(v3) |
 | 점검 | [자체 점검 결과](docs/inspection.md) | 고시·안내서 기준 37개 항목의 첫 판정, 보완 내용, 재측정 결과 |
-| 점검 | [개인정보 영향평가](docs/pia/README.md) | 플랫폼 대상 개인정보 영향평가(PIA) 수행 (2026-10-19 ~ 2026-11-28, 6단계 완료) |
+| 점검 | [개인정보 영향평가](https://github.com/Salgoo26/privacy-impact-assessment) | 플랫폼 대상 개인정보 영향평가(PIA) 수행 (2026-10-19 ~ 2026-11-28, 6단계 완료) |
